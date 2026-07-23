@@ -1,0 +1,29 @@
+[project]
+name = "structural-graph-lab"
+status_checked_at = "2026-07-23"
+
+[runtime]
+workers = 12
+master_reserved_threads = 2
+checkpoint_seconds = 60
+state_update_seconds = 2
+worker_recycle_candidates = 500000
+queue_capacity = 256
+
+[limits]
+wall_seconds = 86400
+memory_high_bytes = 161061273600
+memory_max_bytes = 182536110080
+min_free_disk_bytes = 10737418240
+max_log_bytes = 1073741824
+
+[storage]
+workspace = "./workspace"
+archive_top_k = 200
+sqlite_wal = true
+store_rejected_candidates = false
+
+[web]
+host = "127.0.0.1"
+port = 8080
+poll_seconds = 2

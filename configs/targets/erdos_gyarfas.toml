@@ -1,0 +1,27 @@
+[target]
+id = "erdos_gyarfas"
+name = "Erdos-Gyarfas conjecture"
+kind = "structural_graph_counterexample"
+status = "open_as_of_2026_07_23"
+
+[graph]
+order = 32
+simple = true
+undirected = true
+connected = true
+minimum_degree = 3
+
+[search]
+mode = "cubic_first"
+algorithm = "simulated_annealing"
+seeds = [1, 2, 3, 4]
+forbidden_cycle_witness_cap = 64
+canonicalize_archive_only = true
+
+[verification]
+power_of_two_cycle_min = 4
+require_two_independent_verifiers = true
+reference_verifier_max_order = 24
+
+[notes]
+text = "Orders <=31 are validation territory according to a recent public SAT repository; heuristic novelty begins at 32."
