@@ -155,6 +155,10 @@ def hardware_metadata(path: Path) -> dict[str, Any]:
             "memory_max": cgroup_value("memory.max"),
             "cpu_max": cgroup_value("cpu.max"),
         },
+        "cgroup_usage": {
+            "memory_current": cgroup_value("memory.current"),
+            "memory_peak": cgroup_value("memory.peak"),
+        },
         "filesystem_type": filesystem_type,
         "filesystem_free_bytes": disk_free_bytes(path),
         "git_commit": (
@@ -387,6 +391,9 @@ def calibrate(
         cases = pool.map(_calibration_case, tasks)
     rates = [case["candidates_per_second"] for case in cases]
     rate_stats = quantiles(rates)
+    frontier_rate_stats = quantiles(
+        case["candidates_per_second"] for case in cases if case["order"] == 32
+    )
     by_order = {
         n: median(case["candidates_per_second"] for case in cases if case["order"] == n)
         for n in orders
@@ -396,18 +403,19 @@ def calibrate(
         for left, right in zip(orders, orders[1:])
     }
     workers = recommended_workers()
-    daily = rate_stats["p50"] * 86400 * workers
+    daily = frontier_rate_stats["p50"] * 86400 * workers
     forecast = {
+        "basis": "n=32 frontier throughput only",
         "recommended_workers": workers,
         "24_hour_candidates": {
-            "pessimistic": rate_stats["p50"] * 86400,
+            "pessimistic": frontier_rate_stats["p50"] * 86400,
             "central": daily,
-            "optimistic": rate_stats["p90"] * 86400 * workers,
+            "optimistic": frontier_rate_stats["p90"] * 86400 * workers,
         },
         "7_day_candidates": {
-            "pessimistic": rate_stats["p50"] * 7 * 86400,
+            "pessimistic": frontier_rate_stats["p50"] * 7 * 86400,
             "central": daily * 7,
-            "optimistic": rate_stats["p90"] * 7 * 86400 * workers,
+            "optimistic": frontier_rate_stats["p90"] * 7 * 86400 * workers,
         },
         "warning": (
             "Throughput forecasts describe heuristic evaluations only; "
@@ -423,6 +431,7 @@ def calibrate(
         "parallel_processes": process_count,
         "cases": cases,
         "throughput_quantiles": rate_stats,
+        "frontier_n32_throughput_quantiles": frontier_rate_stats,
         "growth_factors": growth_factors,
         "forecast": forecast,
         "peak_rss_bytes": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024,

@@ -16,6 +16,8 @@ class BenchmarkTests(unittest.TestCase):
         report = calibrate(0.002, seeds=1, jobs=2)
         self.assertEqual({case["order"] for case in report["cases"]}, {20, 24, 28, 32})
         self.assertIn("24_hour_candidates", report["forecast"])
+        self.assertEqual(report["forecast"]["basis"], "n=32 frontier throughput only")
+        self.assertIn("frontier_n32_throughput_quantiles", report)
         with tempfile.TemporaryDirectory() as directory:
             paths = write_report(report, Path(directory))
             self.assertTrue(all(path.is_file() for path in paths))
