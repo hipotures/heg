@@ -11,9 +11,15 @@ import platform
 import tempfile
 import time
 
+from .benchmark import calibrate, hardware_metadata, microbenchmark, soak, write_report
 from .model import BitGraph
+from .certification import certify, verify_cpp
+from .config import load_config
 from .db import connect
-from .state import append_event, atomic_write_json, utc_now
+from .external import TOOLS
+from .search import ALGORITHMS, MODES, SearchConfig, config_from_run, run_search
+from .sat import run_pysat_cegar
+from .state import append_event, atomic_write_json, read_json, utc_now
 from .targets.erdos_gyarfas import verify_reference
 from .web import serve
 
@@ -23,13 +29,15 @@ def _workspace(path: str) -> Path:
 
 
 def cmd_doctor(_: Namespace) -> int:
-    tools = ["geng", "labelg", "cadical", "sms", "glasgow_subgraph_solver"]
+    external = {tool.name: tool.version() for tool in TOOLS}
+    external["cadical"] = {"path": which("cadical"), "version": None}
     report = {
         "python": platform.python_version(),
         "python_supported": tuple(map(int, platform.python_version_tuple()[:2])) >= (3, 12),
         "platform": platform.platform(),
         "cgroup_v2": Path("/sys/fs/cgroup/cgroup.controllers").exists(),
-        "tools": {tool: which(tool) for tool in tools},
+        "tools": external,
+        "cyclecheck": str(Path(__file__).resolve().parents[2] / "_build" / "sglab-cyclecheck"),
     }
     print(json.dumps(report, indent=2, sort_keys=True))
     return 0 if report["python_supported"] else 1
@@ -74,10 +82,24 @@ def cmd_serve(args: Namespace) -> int:
 
 
 def cmd_verify(args: Namespace) -> int:
-    payload = json.loads(Path(args.graph_json).read_text(encoding="utf-8"))
-    graph = BitGraph.from_edges(int(payload["n"]), [tuple(edge) for edge in payload["edges"]])
+    if args.graph_json:
+        payload = json.loads(Path(args.graph_json).read_text(encoding="utf-8"))
+        graph = BitGraph.from_edges(
+            int(payload["n"]), [tuple(edge) for edge in payload["edges"]]
+        )
+    else:
+        graph = BitGraph.from_graph6(Path(args.graph6).read_text(encoding="ascii"))
+    if args.artifact_dir:
+        report = certify(
+            graph,
+            Path(args.artifact_dir).resolve(),
+            binary=Path(args.cpp_binary) if args.cpp_binary else None,
+            timeout_seconds=args.timeout,
+        )
+        print(json.dumps(report, indent=2, sort_keys=True))
+        return 0 if report["status"] in {"COUNTEREXAMPLE_VERIFIED", "INVALID_CANDIDATE"} else 2
     result = verify_reference(graph)
-    print(json.dumps({
+    reference_payload = {
         "status": result.status,
         "complete": result.complete,
         "message": result.message,
@@ -85,8 +107,31 @@ def cmd_verify(args: Namespace) -> int:
             {"kind": witness.kind, "vertices": witness.vertices}
             for witness in result.witnesses
         ],
-    }, indent=2))
-    return 0 if result.status == "VERIFIED" else 1
+        "implementation": result.implementation,
+        "elapsed_seconds": result.elapsed_seconds,
+    }
+    if args.reference_only:
+        report: dict[str, object] = reference_payload
+    else:
+        independent = verify_cpp(
+            graph,
+            Path(args.cpp_binary) if args.cpp_binary else None,
+            args.timeout,
+        )
+        agrees = (
+            (result.status == "VERIFIED" and independent["status"] == "ABSENT")
+            or (result.status == "REJECTED" and independent["status"] == "FOUND")
+            or result.status == independent["status"] == "INVALID"
+        )
+        report = {
+            "agreement": agrees,
+            "reference": reference_payload,
+            "independent": independent,
+        }
+    print(json.dumps(report, indent=2, sort_keys=True))
+    if args.reference_only:
+        return 0 if result.status == "VERIFIED" else 1
+    return 0 if bool(report.get("agreement")) else 2
 
 
 def cmd_dashboard_smoke(_: Namespace) -> int:
@@ -103,12 +148,123 @@ def cmd_dashboard_smoke(_: Namespace) -> int:
 
 
 def cmd_benchmark_smoke(_: Namespace) -> int:
-    graph = BitGraph.from_edges(4, [(0, 1), (1, 2), (2, 3), (3, 0), (0, 2), (1, 3)])
-    start = time.perf_counter()
-    for _ in range(100):
-        verify_reference(graph)
-    elapsed = time.perf_counter() - start
-    print(json.dumps({"iterations": 100, "elapsed_seconds": elapsed}, indent=2))
+    report = microbenchmark(iterations=2, orders=(20, 24, 28, 32))
+    report["hardware"] = hardware_metadata(Path.cwd())
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0
+
+
+def _duration(value: str) -> float:
+    units = {"s": 1, "m": 60, "h": 3600}
+    try:
+        if value[-1].lower() in units:
+            return float(value[:-1]) * units[value[-1].lower()]
+        return float(value)
+    except (ValueError, IndexError) as error:
+        raise ValueError(f"invalid duration: {value}") from error
+
+
+def cmd_run(args: Namespace) -> int:
+    root = Path(__file__).resolve().parents[2]
+    loaded = load_config(
+        root / "configs" / "default.toml",
+        root / "configs" / "targets" / "erdos_gyarfas.toml",
+        args.config,
+    )
+    runtime = loaded["runtime"]
+    limits = loaded["limits"]
+    storage = loaded["storage"]
+    graph = loaded["graph"]
+    search = loaded["search"]
+    config = SearchConfig(
+        workspace=_workspace(args.workspace),
+        order=args.order if args.order is not None else int(graph["order"]),
+        mode=args.mode or str(search["mode"]),
+        algorithm=args.algorithm or str(search["algorithm"]),
+        workers=args.workers if args.workers is not None else int(runtime["workers"]),
+        seed=args.seed if args.seed is not None else int(search["seeds"][0]),
+        wall_seconds=(
+            _duration(args.time_limit)
+            if args.time_limit is not None
+            else float(limits["wall_seconds"])
+        ),
+        max_candidates=args.max_candidates,
+        witness_cap=(
+            args.witness_cap
+            if args.witness_cap is not None
+            else int(search["forbidden_cycle_witness_cap"])
+        ),
+        queue_capacity=int(runtime["queue_capacity"]),
+        archive_top_k=int(storage["archive_top_k"]),
+        state_seconds=float(runtime["state_update_seconds"]),
+        checkpoint_seconds=float(runtime["checkpoint_seconds"]),
+        worker_recycle_candidates=int(runtime["worker_recycle_candidates"]),
+        memory_limit_bytes=(
+            args.memory_limit
+            if args.memory_limit is not None
+            else int(limits["memory_max_bytes"])
+        ),
+        min_free_disk_bytes=int(limits["min_free_disk_bytes"]),
+        notes=args.notes or str(loaded.get("notes", {}).get("text", "")),
+        exact_timeout_seconds=args.exact_timeout,
+    )
+    run_dir = run_search(config)
+    print(run_dir)
+    return 0
+
+
+def cmd_resume(args: Namespace) -> int:
+    run_dir = _workspace(args.run)
+    config = config_from_run(
+        run_dir, _duration(args.time_limit) if args.time_limit else None
+    )
+    print(run_search(config, resume_run=run_dir))
+    return 0
+
+
+def cmd_control(args: Namespace) -> int:
+    workspace = _workspace(args.workspace)
+    current = read_json(workspace / "control.json", default={"version": 0})
+    request = {
+        "version": int(current.get("version", 0)) + 1,
+        "requested_at": utc_now(),
+        "action": args.action,
+    }
+    atomic_write_json(workspace / "control.json", request)
+    print(json.dumps(request, sort_keys=True))
+    return 0
+
+
+def cmd_sat(args: Namespace) -> int:
+    report = run_pysat_cegar(
+        args.order,
+        _workspace(args.output),
+        timeout_seconds=_duration(args.time_limit),
+        seed=args.seed,
+        solver_name=args.solver,
+    )
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0 if report["status"] != "TOOL_FAILURE" else 2
+
+
+def cmd_benchmark(args: Namespace) -> int:
+    if args.benchmark_command == "calibrate":
+        report = calibrate(args.minutes)
+    elif args.benchmark_command == "soak":
+        report = soak(
+            _workspace(args.workspace),
+            hours=args.hours,
+            order=args.order,
+            workers=args.workers,
+        )
+    else:
+        report = microbenchmark(iterations=args.iterations)
+    output = _workspace(args.output)
+    output.mkdir(parents=True, exist_ok=True)
+    report["target"] = "erdos_gyarfas"
+    report["hardware"] = hardware_metadata(output)
+    paths = write_report(report, output)
+    print(json.dumps({"json": str(paths[0]), "markdown": str(paths[1])}, indent=2))
     return 0
 
 
@@ -130,7 +286,13 @@ def build_parser() -> ArgumentParser:
     web.set_defaults(func=cmd_serve)
 
     verify = subparsers.add_parser("verify")
-    verify.add_argument("--graph-json", required=True)
+    graph_input = verify.add_mutually_exclusive_group(required=True)
+    graph_input.add_argument("--graph-json")
+    graph_input.add_argument("--graph6")
+    verify.add_argument("--artifact-dir")
+    verify.add_argument("--cpp-binary")
+    verify.add_argument("--timeout", type=float, default=0)
+    verify.add_argument("--reference-only", action="store_true")
     verify.set_defaults(func=cmd_verify)
 
     dashboard_smoke = subparsers.add_parser("dashboard-smoke")
@@ -138,6 +300,60 @@ def build_parser() -> ArgumentParser:
 
     benchmark_smoke = subparsers.add_parser("benchmark-smoke")
     benchmark_smoke.set_defaults(func=cmd_benchmark_smoke)
+
+    run = subparsers.add_parser("run")
+    run.add_argument("--target", choices=["erdos_gyarfas"], default="erdos_gyarfas")
+    run.add_argument("--config")
+    run.add_argument("--order", type=int)
+    run.add_argument("--mode", choices=sorted(MODES))
+    run.add_argument("--algorithm", choices=sorted(ALGORITHMS))
+    run.add_argument("--workers", type=int)
+    run.add_argument("--seed", type=int)
+    run.add_argument("--time-limit")
+    run.add_argument("--max-candidates", type=int, default=0)
+    run.add_argument("--witness-cap", type=int)
+    run.add_argument("--memory-limit", type=int)
+    run.add_argument("--notes")
+    run.add_argument("--exact-timeout", type=float, default=30)
+    run.add_argument("--workspace", required=True)
+    run.set_defaults(func=cmd_run)
+
+    resume = subparsers.add_parser("resume")
+    resume.add_argument("--run", required=True)
+    resume.add_argument("--time-limit")
+    resume.set_defaults(func=cmd_resume)
+
+    control = subparsers.add_parser("control")
+    control.add_argument("--workspace", required=True)
+    control.add_argument("--action", choices=["PAUSE", "RESUME", "STOP"], required=True)
+    control.set_defaults(func=cmd_control)
+
+    sat = subparsers.add_parser("sat")
+    sat.add_argument("--order", type=int, required=True)
+    sat.add_argument("--output", required=True)
+    sat.add_argument("--time-limit", default="60s")
+    sat.add_argument("--seed", type=int, default=1)
+    sat.add_argument("--solver", default="cadical195")
+    sat.set_defaults(func=cmd_sat)
+
+    benchmark = subparsers.add_parser("benchmark")
+    benchmark_commands = benchmark.add_subparsers(dest="benchmark_command", required=True)
+    calibration = benchmark_commands.add_parser("calibrate")
+    calibration.add_argument("--minutes", type=float, default=15)
+    calibration.add_argument("--target", choices=["erdos_gyarfas"], default="erdos_gyarfas")
+    calibration.add_argument("--output", required=True)
+    calibration.set_defaults(func=cmd_benchmark)
+    micro = benchmark_commands.add_parser("micro")
+    micro.add_argument("--iterations", type=int, default=10)
+    micro.add_argument("--output", required=True)
+    micro.set_defaults(func=cmd_benchmark)
+    soak_parser = benchmark_commands.add_parser("soak")
+    soak_parser.add_argument("--hours", type=float, default=2)
+    soak_parser.add_argument("--order", type=int, default=32)
+    soak_parser.add_argument("--workers", type=int, default=1)
+    soak_parser.add_argument("--workspace", required=True)
+    soak_parser.add_argument("--output", required=True)
+    soak_parser.set_defaults(func=cmd_benchmark)
 
     return parser
 

@@ -3,7 +3,7 @@
   "created_at": "2026-07-23",
   "language": "English",
   "default_target": "Erdos-Gyarfas conjecture",
-  "status": "specification_and_starter_scaffold",
+  "status": "implemented_vertical_slice",
   "files": [
     "AGENTS.md",
     "CODEX_PROMPT.md",

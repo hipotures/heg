@@ -115,3 +115,21 @@ Mitigation:
 - preserved artifacts;
 - external verification;
 - separate engineering completion from mathematical result.
+
+## Current implementation limitations
+
+- The fallback archive key is a stable graph6 hash, not an isomorphism
+  certificate. Authoritative canonical deduplication requires installed nauty.
+- The C++ subprocess is slower than Python on the recorded easy,
+  early-witness smoke cases because startup dominates. It remains valuable as
+  an independent verifier; hot-loop activation requires a harder-case profile.
+- PySAT/CaDiCaL, nauty, SMS, and Glasgow were unavailable on the audited
+  machine. Adapters fail closed and the lock file leaves their commits unset.
+- The built-in DPLL solver is deliberately restricted to tiny ground-truth
+  tests and must not be used for frontier claims.
+- An unchecked SAT-solver UNSAT is preserved but reported as
+  `NO_RESULT_WITHIN_BUDGET`, never `UNSAT_CERTIFIED`.
+- The browser drawing uses a deterministic circle layout and is only an
+  inspection aid.
+- Heuristic reproducibility fixes RNG seeds and checkpoints, but wall-time
+  scheduling can change how many candidates multiple workers evaluate.

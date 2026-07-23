@@ -36,11 +36,19 @@ class ScoreResult:
     witness_counts: tuple[tuple[int, int], ...]
     weighted_penalty: int
     complete: bool
+    novelty: float = 0.0
+    simplicity: int = 0
 
     @property
-    def ordering_key(self) -> tuple[int, int, int]:
+    def ordering_key(self) -> tuple[int, int, int, int, int]:
         total = sum(count for _, count in self.witness_counts)
-        return (0 if self.valid else 1, total, self.weighted_penalty)
+        return (
+            0 if self.valid else 1,
+            total,
+            self.weighted_penalty,
+            -round(self.novelty * 1_000_000),
+            self.simplicity,
+        )
 
 
 class TargetPlugin(Protocol):

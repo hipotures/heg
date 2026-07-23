@@ -1,0 +1,21 @@
+{
+  "generated_at": "2026-07-23",
+  "policy": "Optional tools remain disabled until installed commits are explicitly pinned and overlap-tested.",
+  "tools": {
+    "glasgow_subgraph_solver": {
+      "commit": null,
+      "installed": false,
+      "source": "https://github.com/ciaranm/glasgow-subgraph-solver"
+    },
+    "nauty": {
+      "commit": null,
+      "installed": false,
+      "source": "https://pallini.di.uniroma1.it/"
+    },
+    "sat_modulo_symmetries": {
+      "commit": null,
+      "installed": false,
+      "source": "https://github.com/markirch/sat-modulo-symmetries"
+    }
+  }
+}

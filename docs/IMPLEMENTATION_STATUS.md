@@ -24,14 +24,76 @@ Evidence: focused unit tests plus `make doctor`, `make test`, `make check`, and
   random graphs;
 - Erdős–Gyárfás structural validation and witness-returning exact result.
 
-## Remaining
+## M2 — implemented
 
-- M2 search coordinator and algorithms;
-- M3 profiled fast verifier path;
-- M4 optional CEGAR-SAT;
-- M5 complete dashboard;
-- M6 benchmark and forecast reports;
-- M7 optional external-tool adapters.
+- bounded multiprocessing coordinator with master-only SQLite writes;
+- simulated annealing and iterated local search with deterministic seeds;
+- cubic swaps, minimal-structure mixed-degree seeds, and unrestricted
+  add/remove/swap moves;
+- lexicographic structural, witness, weighted, novelty, and simplicity score;
+- bounded top archive, improvement-only persistence, worker telemetry and
+  recycling;
+- hashed checkpoints, same-run resume, and file-based pause/resume/stop;
+- finalist submission to both exact verifier paths.
+
+A short automated soak exercised pause/resume and recycling. The production
+two-hour evidence gate is tracked separately from this software-completion
+statement.
+
+## M3 — implemented and benchmark-gated
+
+- one C++17 integer-bitset helper with `FOUND`, `ABSENT`, `TIMEOUT`, and
+  `ERROR` JSON results and cycle witnesses;
+- subprocess process-group, output, and wall limits;
+- deterministic cross-checks against the Python oracle;
+- standalone two-verifier certificate manifest.
+
+The smoke profile shows process startup dominates easy early-witness cases.
+The C++ helper is therefore used for independent finalist verification, not
+silently inserted into the heuristic loop.
+
+## M4 — implemented as an optional path
+
+- edge-variable CNF and minimum-degree cardinality clauses;
+- lazy connectedness cuts and witness-backed forbidden-cycle clauses;
+- preserved final CNF, learned JSONL, metadata, hashes, and optional proof;
+- tiny deterministic DPLL/CEGAR ground truth at `n=4`;
+- optional nauty overlap adapter;
+- conservative timeout and unchecked-UNSAT semantics.
+
+PySAT/CaDiCaL and nauty are not installed on the audited machine, so their
+larger overlap experiments remain explicit external-tool gates.
+
+## M5 — complete
+
+- standard-library threaded HTTP server and static HTML/JavaScript;
+- overview, candidates, experiments, bounded logs, graph downloads, and
+  deterministic SVGs;
+- validated start form and POST pause/resume/stop;
+- local binding by default and optional bearer protection;
+- path traversal, request size, response size, action, and numeric guards.
+
+## M6 — implemented
+
+- raw-sample microbenchmarks with p50/p90/p95/max and peak RSS;
+- deterministic calibration at `n=20,24,28,32` for both baseline algorithms;
+- adjacent-order factors, candidates/day ranges, 24-hour and 7-day forecasts;
+- hardware metadata and explicit heavy-tail SAT warning;
+- configurable soak runner that exercises pause/resume, recycling, RSS plateau,
+  database growth, and bounded queues.
+
+Short smoke reports do not substitute for a requested 15-minute calibration or
+two-hour production soak; the report metadata always records actual duration.
+
+## M7 — optional adapters complete
+
+- bounded adapters and availability/version reporting for nauty/Traces, SAT
+  Modulo Symmetries, and Glasgow;
+- nauty canonical-label path with a clearly marked non-authoritative fallback;
+- `tools.lock.json` refuses to pretend absent tools have pinned commits.
+
+Installed external tools must receive exact commits and overlap tests before
+their lock entries are enabled.
 
 Engineering completion is not a mathematical result. No counterexample or
 exhaustive nonexistence claim has been made.

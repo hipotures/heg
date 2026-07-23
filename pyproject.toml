@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "structural-graph-lab"
-version = "0.1.0"
-description = "A compact research scaffold for structural graph conjecture search"
+version = "0.2.0"
+description = "A compact reproducible structural graph conjecture laboratory"
 requires-python = ">=3.12"
 dependencies = []
 

@@ -5,49 +5,126 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Structural Graph Lab</title>
   <style>
-    body { font-family: system-ui, sans-serif; margin: 2rem; background: #111; color: #eee; }
-    h1 { margin-bottom: .25rem; }
-    .muted { color: #aaa; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
-    .card { background: #1c1c1c; border: 1px solid #333; border-radius: 8px; padding: 1rem; }
-    pre { white-space: pre-wrap; word-break: break-word; }
-    button { margin-right: .5rem; padding: .5rem .75rem; }
+    :root { color-scheme: dark; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+    body { margin: 0; background: #081018; color: #dce8f3; }
+    header { padding: 1.5rem 2rem; border-bottom: 1px solid #233343; background: #0d1722; }
+    h1, h2 { margin: 0 0 .8rem; }
+    h1 { font-size: 1.45rem; letter-spacing: .04em; }
+    main { display: grid; grid-template-columns: repeat(12, 1fr); gap: 1rem; padding: 1rem 2rem 3rem; }
+    section { grid-column: span 6; min-width: 0; padding: 1rem; background: #0d1722; border: 1px solid #233343; border-radius: 6px; }
+    .wide { grid-column: 1 / -1; }
+    .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .7rem; }
+    .metric { padding: .75rem; background: #111f2d; border-left: 3px solid #38bdf8; }
+    .metric span { display: block; color: #7f96aa; font-size: .75rem; }
+    .metric strong { display: block; margin-top: .35rem; font-size: 1.05rem; }
+    form { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .7rem; }
+    label { display: grid; gap: .25rem; color: #9cb0c2; font-size: .8rem; }
+    input, select, button { font: inherit; border: 1px solid #334a5f; border-radius: 4px; background: #09131d; color: #e7f1fa; padding: .55rem; }
+    button { cursor: pointer; background: #12314a; }
+    button:hover { border-color: #38bdf8; }
+    .controls { margin-top: .8rem; display: flex; gap: .5rem; flex-wrap: wrap; }
+    pre { max-height: 22rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .78rem; color: #a9c0d3; }
+    table { width: 100%; border-collapse: collapse; font-size: .8rem; }
+    th, td { text-align: left; border-bottom: 1px solid #233343; padding: .5rem; }
+    a { color: #38bdf8; }
+    .notice { min-height: 1.2rem; color: #fbbf24; }
+    @media (max-width: 850px) { section { grid-column: 1 / -1; } main { padding-inline: 1rem; } }
   </style>
 </head>
 <body>
-  <h1>Structural Graph Lab</h1>
-  <p class="muted">Minimal live dashboard. Polling every two seconds.</p>
-  <div class="grid">
-    <section class="card"><h2>Status</h2><pre id="status">Loading…</pre></section>
-    <section class="card">
-      <h2>Controls</h2>
-      <button data-action="START">Start</button>
-      <button data-action="PAUSE">Pause</button>
-      <button data-action="RESUME">Resume</button>
-      <button data-action="STOP">Stop</button>
-      <pre id="control"></pre>
+  <header>
+    <h1>STRUCTURAL GRAPH LAB</h1>
+    <div>Engineering telemetry — not a mathematical claim.</div>
+  </header>
+  <main>
+    <section class="wide">
+      <h2>Live run</h2>
+      <div id="metrics" class="metrics"></div>
     </section>
-    <section class="card"><h2>Recent events</h2><pre id="logs">Loading…</pre></section>
-  </div>
+    <section>
+      <h2>Start a bounded run</h2>
+      <form id="run-form">
+        <label>Target<select name="target"><option>erdos_gyarfas</option></select></label>
+        <label>Order<input name="order" type="number" min="4" max="128" value="32"></label>
+        <label>Mode<select name="mode"><option>cubic_first</option><option>minimal_structure_mixed_degree</option><option>unrestricted_min_degree_3</option></select></label>
+        <label>Algorithm<select name="algorithm"><option>simulated_annealing</option><option>iterated_local_search</option></select></label>
+        <label>Workers<input name="workers" type="number" min="1" max="256" value="1"></label>
+        <label>Seed<input name="seed" type="number" min="0" value="1"></label>
+        <label>Time (seconds)<input name="wall_seconds" type="number" min="1" max="604800" value="60"></label>
+        <label>Memory bytes<input name="memory_limit_bytes" type="number" min="0" value="0"></label>
+        <label>Notes<input name="notes" maxlength="500"></label>
+      </form>
+      <div class="controls">
+        <button id="start">Start</button><button data-action="PAUSE">Pause</button>
+        <button data-action="RESUME">Resume</button><button data-action="STOP">Stop</button>
+      </div>
+      <p id="notice" class="notice"></p>
+    </section>
+    <section><h2>Recent events</h2><pre id="logs">Loading…</pre></section>
+    <section class="wide"><h2>Best candidates</h2><div id="candidates"></div></section>
+    <section class="wide"><h2>Experiments</h2><div id="runs"></div></section>
+  </main>
 <script>
+const token = new URLSearchParams(location.search).get('token');
+const headers = {'Content-Type': 'application/json', ...(token ? {'Authorization': `Bearer ${token}`} : {})};
+const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function api(path, options = {}) {
+  const response = await fetch(path, {...options, headers: {...headers, ...(options.headers || {})}, cache: 'no-store'});
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
+  return body;
+}
+function table(rows, columns) {
+  if (!rows.length) return '<p>No records yet.</p>';
+  return `<table><thead><tr>${columns.map(c => `<th>${esc(c[0])}</th>`).join('')}</tr></thead><tbody>${rows.map(row => `<tr>${columns.map(c => `<td>${c[1](row)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+}
 async function refresh() {
-  const status = await fetch('/api/status', {cache: 'no-store'}).then(r => r.json());
-  document.getElementById('status').textContent = JSON.stringify(status, null, 2);
-  const logs = await fetch('/api/logs?limit=50', {cache: 'no-store'}).then(r => r.json());
-  document.getElementById('logs').textContent = (logs.lines || []).join('\n');
+  try {
+    const [state, logs, candidates, runs] = await Promise.all([
+      api('/api/status'), api('/api/logs?limit=50'), api('/api/candidates?limit=50'), api('/api/runs')
+    ]);
+    const values = [
+      ['Status', state.status], ['Run', state.run_id || '—'], ['Elapsed', `${Number(state.elapsed_seconds || 0).toFixed(1)} s`],
+      ['Candidates/s', Number(state.throughput?.candidates_per_second || 0).toFixed(1)],
+      ['Candidates', state.throughput?.candidates || 0], ['Workers', state.workers?.alive ?? 0],
+      ['RSS', `${((state.resources?.worker_rss_bytes || 0) / 1048576).toFixed(1)} MiB`],
+      ['DB size', `${((state.resources?.database_bytes || 0) / 1048576).toFixed(2)} MiB`]
+    ];
+    document.getElementById('metrics').innerHTML = values.map(([label, value]) => `<div class="metric"><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join('');
+    document.getElementById('logs').textContent = (logs.lines || []).join('\n');
+    document.getElementById('candidates').innerHTML = table(candidates.candidates || [], [
+      ['ID', r => esc(r.candidate_id)], ['n / m', r => `${esc(r.order)} / ${esc(r.size)}`],
+      ['Score', r => esc(JSON.stringify(r.score?.ordering_key || []))],
+      ['Verifier', r => esc(r.verification_status)],
+      ['Files', r => ['graph6','json','svg'].map(kind => `<button data-artifact="${esc(r.artifacts[kind])}">${kind}</button>`).join(' ')]
+    ]);
+    document.getElementById('runs').innerHTML = table(runs.runs || [], [
+      ['Run ID', r => esc(r.run_id)], ['Created', r => esc(r.created_at)], ['Target', r => esc(r.target)], ['Status', r => esc(r.live_status)]
+    ]);
+  } catch (error) { document.getElementById('notice').textContent = error.message; }
 }
-for (const button of document.querySelectorAll('button[data-action]')) {
-  button.addEventListener('click', async () => {
-    const response = await fetch('/api/control', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({action: button.dataset.action})
-    });
-    document.getElementById('control').textContent = await response.text();
-  });
-}
-refresh();
-setInterval(refresh, 2000);
+document.getElementById('start').addEventListener('click', async () => {
+  const data = Object.fromEntries(new FormData(document.getElementById('run-form')));
+  for (const key of ['order','workers','seed','wall_seconds','memory_limit_bytes']) data[key] = Number(data[key]);
+  try { const result = await api('/api/runs', {method: 'POST', body: JSON.stringify(data)}); document.getElementById('notice').textContent = `Started PID ${result.pid}`; }
+  catch (error) { document.getElementById('notice').textContent = error.message; }
+});
+for (const button of document.querySelectorAll('button[data-action]')) button.addEventListener('click', async () => {
+  try { const result = await api('/api/control', {method: 'POST', body: JSON.stringify({action: button.dataset.action})}); document.getElementById('notice').textContent = `${result.action} request ${result.version} accepted`; }
+  catch (error) { document.getElementById('notice').textContent = error.message; }
+});
+document.addEventListener('click', async event => {
+  const button = event.target.closest('button[data-artifact]');
+  if (!button) return;
+  try {
+    const response = await fetch(`/api/artifact/${encodeURIComponent(button.dataset.artifact)}`, {headers: token ? {'Authorization': `Bearer ${token}`} : {}});
+    if (!response.ok) throw new Error(`Download failed: HTTP ${response.status}`);
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement('a'); link.href = url; link.download = button.dataset.artifact; link.click();
+    URL.revokeObjectURL(url);
+  } catch (error) { document.getElementById('notice').textContent = error.message; }
+});
+refresh(); setInterval(refresh, 2000);
 </script>
 </body>
 </html>

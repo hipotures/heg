@@ -24,7 +24,8 @@ sglab run \
   --workspace ./workspace
 ```
 
-This command is a required final interface; the starter scaffold does not implement it yet.
+The command runs in the foreground and writes all live and immutable artifacts
+under `workspace/runs/<run-id>/`.
 
 ## Monitoring
 
