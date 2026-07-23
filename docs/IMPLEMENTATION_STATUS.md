@@ -1,30 +1,37 @@
 # Implementation Status
 
-## Bundle state
+Last implementation audit: **2026-07-23**.
 
-This repository currently contains a specification and a minimal runnable scaffold.
+## M0 — complete
 
-### Implemented in scaffold
+- installable standard `src/` package and CLI entry point;
+- layered TOML configuration;
+- `doctor`, `init`, `serve`, `verify`, and smoke commands;
+- versioned SQLite schema in WAL mode, without an ORM;
+- atomic, directory-synced state snapshots and bounded JSONL event rotation;
+- required workspace artifact directories.
 
-- configuration parser;
-- immutable bitset graph representation;
-- slow reference exact-cycle witness search;
-- atomic state JSON;
-- standard-library HTTP dashboard;
-- basic doctor/init/serve/verify/smoke commands;
-- small unit tests.
+Evidence: focused unit tests plus `make doctor`, `make test`, `make check`, and
+`make dashboard-smoke`.
 
-### Not yet implemented
+## M1 — complete
 
-- production search coordinator;
-- simulated annealing and iterated local search;
-- multiprocessing workers;
-- SQLite schema and run archive;
-- C++ cycle checker;
-- CEGAR-SAT;
-- nauty/SMS/Glasgow adapters;
-- checkpoint/resume search state;
-- production benchmarks and forecasts;
-- full dashboard controls.
+- immutable integer-bitset graph representation through at least 128 vertices;
+- invariant checks, edge iteration, degrees, connectivity, graph6 round trip,
+  and stable non-canonical hash;
+- exact DFS cycle witness detector;
+- independent subset-DP detector with agreement tests on deterministic small
+  random graphs;
+- Erdős–Gyárfás structural validation and witness-returning exact result.
 
-Codex must update this file after every milestone.
+## Remaining
+
+- M2 search coordinator and algorithms;
+- M3 profiled fast verifier path;
+- M4 optional CEGAR-SAT;
+- M5 complete dashboard;
+- M6 benchmark and forecast reports;
+- M7 optional external-tool adapters.
+
+Engineering completion is not a mathematical result. No counterexample or
+exhaustive nonexistence claim has been made.

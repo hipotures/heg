@@ -12,7 +12,8 @@ import tempfile
 import time
 
 from .model import BitGraph
-from .state import atomic_write_json
+from .db import connect
+from .state import append_event, atomic_write_json, utc_now
 from .targets.erdos_gyarfas import verify_reference
 from .web import serve
 
@@ -25,25 +26,41 @@ def cmd_doctor(_: Namespace) -> int:
     tools = ["geng", "labelg", "cadical", "sms", "glasgow_subgraph_solver"]
     report = {
         "python": platform.python_version(),
+        "python_supported": tuple(map(int, platform.python_version_tuple()[:2])) >= (3, 12),
         "platform": platform.platform(),
         "cgroup_v2": Path("/sys/fs/cgroup/cgroup.controllers").exists(),
         "tools": {tool: which(tool) for tool in tools},
     }
     print(json.dumps(report, indent=2, sort_keys=True))
-    return 0
+    return 0 if report["python_supported"] else 1
 
 
 def cmd_init(args: Namespace) -> int:
     workspace = _workspace(args.workspace)
     workspace.mkdir(parents=True, exist_ok=True)
-    (workspace / "best").mkdir(exist_ok=True)
-    (workspace / "logs").mkdir(exist_ok=True)
+    for directory in (
+        "runs",
+        "best",
+        "logs",
+        "checkpoints",
+        "certificates",
+        "benchmarks",
+    ):
+        (workspace / directory).mkdir(exist_ok=True)
+    database = connect(workspace / "results.sqlite3")
+    database.close()
     atomic_write_json(
         workspace / "state.json",
-        {"status": "IDLE", "workspace": str(workspace), "updated_at_epoch": time.time()},
+        {
+            "status": "IDLE",
+            "workspace": str(workspace),
+            "updated_at": utc_now(),
+            "status_checked_at": "2026-07-23",
+        },
     )
     if not (workspace / "events.jsonl").exists():
         (workspace / "events.jsonl").write_text("", encoding="utf-8")
+    append_event(workspace / "events.jsonl", "workspace_initialized")
     print(workspace)
     return 0
 

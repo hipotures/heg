@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from collections import deque
 from typing import Iterable, Iterator
+import hashlib
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +55,9 @@ class BitGraph:
     def degree(self, u: int) -> int:
         return self.rows[u].bit_count()
 
+    def degree_sequence(self) -> tuple[int, ...]:
+        return tuple(row.bit_count() for row in self.rows)
+
     def minimum_degree(self) -> int:
         return min((row.bit_count() for row in self.rows), default=0)
 
@@ -91,6 +95,86 @@ class BitGraph:
                 queue.append(v)
                 unseen ^= lsb
         return seen.bit_count() == self.n
+
+    def with_edges(
+        self,
+        *,
+        add: Iterable[tuple[int, int]] = (),
+        remove: Iterable[tuple[int, int]] = (),
+    ) -> "BitGraph":
+        rows = list(self.rows)
+        for u, v in remove:
+            if not self.has_edge(u, v):
+                raise ValueError("cannot remove a missing edge")
+            rows[u] &= ~(1 << v)
+            rows[v] &= ~(1 << u)
+        for u, v in add:
+            if u == v or not (0 <= u < self.n and 0 <= v < self.n):
+                raise ValueError("invalid edge")
+            if rows[u] & (1 << v):
+                raise ValueError("cannot add an existing edge")
+            rows[u] |= 1 << v
+            rows[v] |= 1 << u
+        return BitGraph(self.n, tuple(rows))
+
+    def to_graph6(self) -> str:
+        if self.n <= 62:
+            prefix = bytes((self.n + 63,))
+        elif self.n <= 258047:
+            prefix = bytes(
+                (
+                    126,
+                    ((self.n >> 12) & 63) + 63,
+                    ((self.n >> 6) & 63) + 63,
+                    (self.n & 63) + 63,
+                )
+            )
+        else:
+            raise ValueError("graph6 export supports at most 258047 vertices")
+        bits = [int(self.has_edge(u, v)) for v in range(1, self.n) for u in range(v)]
+        bits.extend([0] * ((-len(bits)) % 6))
+        data = bytes(
+            sum(bits[offset + bit] << (5 - bit) for bit in range(6)) + 63
+            for offset in range(0, len(bits), 6)
+        )
+        return (prefix + data).decode("ascii")
+
+    @classmethod
+    def from_graph6(cls, value: str | bytes) -> "BitGraph":
+        raw = value.encode("ascii") if isinstance(value, str) else value
+        raw = raw.strip()
+        if raw.startswith(b">>graph6<<"):
+            raw = raw[10:]
+        if not raw:
+            raise ValueError("empty graph6 input")
+        if raw[0] != 126:
+            n, offset = raw[0] - 63, 1
+        elif len(raw) >= 4 and raw[1] != 126:
+            n = ((raw[1] - 63) << 12) | ((raw[2] - 63) << 6) | (raw[3] - 63)
+            offset = 4
+        else:
+            raise ValueError("large graph6 order encoding is unsupported")
+        if n < 0:
+            raise ValueError("invalid graph6 order")
+        encoded = raw[offset:]
+        if any(byte < 63 or byte > 126 for byte in encoded):
+            raise ValueError("invalid graph6 byte")
+        available = len(encoded) * 6
+        required = n * (n - 1) // 2
+        if available < required:
+            raise ValueError("truncated graph6 input")
+        edges: list[tuple[int, int]] = []
+        position = 0
+        for v in range(1, n):
+            for u in range(v):
+                byte = encoded[position // 6] - 63
+                if byte & (1 << (5 - position % 6)):
+                    edges.append((u, v))
+                position += 1
+        return cls.from_edges(n, edges)
+
+    def stable_hash(self) -> str:
+        return hashlib.sha256(self.to_graph6().encode("ascii")).hexdigest()
 
 
 def find_cycle_of_length(graph: BitGraph, length: int) -> tuple[int, ...] | None:
@@ -131,3 +215,37 @@ def find_cycle_of_length(graph: BitGraph, length: int) -> tuple[int, ...] | None
         if result is not None:
             return result
     return None
+
+
+def find_cycles_of_length(
+    graph: BitGraph, length: int, limit: int
+) -> tuple[tuple[int, ...], ...]:
+    """Enumerate at most ``limit`` cycles, without rotations or reversals."""
+
+    if limit <= 0 or length < 3 or length > graph.n:
+        return ()
+    found: list[tuple[int, ...]] = []
+    for start in range(graph.n):
+        path = [start]
+        visited = 1 << start
+
+        def dfs(last: int, seen: int) -> None:
+            if len(found) >= limit:
+                return
+            if len(path) == length:
+                if graph.has_edge(last, start) and path[1] < path[-1]:
+                    found.append(tuple(path))
+                return
+            bits = graph.rows[last] & ~seen
+            bits &= ~((1 << (start + 1)) - 1)
+            while bits and len(found) < limit:
+                bit = bits & -bits
+                path.append(bit.bit_length() - 1)
+                dfs(path[-1], seen | bit)
+                path.pop()
+                bits ^= bit
+
+        dfs(start, visited)
+        if len(found) >= limit:
+            break
+    return tuple(found)
