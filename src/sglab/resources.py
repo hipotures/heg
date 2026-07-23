@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from subprocess import PIPE, Popen, TimeoutExpired
+from subprocess import Popen, TimeoutExpired
 from typing import Sequence
 import os
+import math
 import resource
 import shutil
 import signal
+import tempfile
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +47,19 @@ def disk_free_bytes(path: str | Path) -> int:
     return shutil.disk_usage(Path(path)).free
 
 
+def sqlite_size_bytes(path: str | Path) -> int:
+    database = Path(path)
+    return sum(
+        candidate.stat().st_size
+        for candidate in (
+            database,
+            Path(f"{database}-wal"),
+            Path(f"{database}-shm"),
+        )
+        if candidate.is_file()
+    )
+
+
 def run_bounded(
     command: Sequence[str],
     *,
@@ -55,29 +70,56 @@ def run_bounded(
 ) -> ProcessResult:
     """Run an external tool in its own process group with hard output bounds."""
 
+    if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+        raise ValueError("timeout_seconds must be positive")
+    if output_limit_bytes < 1:
+        raise ValueError("output_limit_bytes must be positive")
+    if memory_limit_bytes is not None and memory_limit_bytes < 0:
+        raise ValueError("memory_limit_bytes cannot be negative")
+
     def child_setup() -> None:
         set_address_space_limit(memory_limit_bytes)
+        file_limit = output_limit_bytes + 1
+        resource.setrlimit(resource.RLIMIT_FSIZE, (file_limit, file_limit))
 
-    process = Popen(
-        list(command),
-        cwd=cwd,
-        stdout=PIPE,
-        stderr=PIPE,
-        start_new_session=True,
-        preexec_fn=child_setup,
-    )
-    try:
-        stdout, stderr = process.communicate(timeout=timeout_seconds)
-        status = "OK" if process.returncode == 0 else "ERROR"
-    except TimeoutExpired:
-        os.killpg(process.pid, signal.SIGKILL)
-        stdout, stderr = process.communicate()
-        status = "UNKNOWN_TIMEOUT"
-    if len(stdout) > output_limit_bytes or len(stderr) > output_limit_bytes:
-        return ProcessResult(
-            "ERROR_OUTPUT_LIMIT",
-            process.returncode,
-            stdout[:output_limit_bytes],
-            stderr[:output_limit_bytes],
-        )
-    return ProcessResult(status, process.returncode, stdout, stderr)
+    with (
+        tempfile.TemporaryFile() as stdout_file,
+        tempfile.TemporaryFile() as stderr_file,
+    ):
+        try:
+            process = Popen(
+                list(command),
+                cwd=cwd,
+                stdout=stdout_file,
+                stderr=stderr_file,
+                start_new_session=True,
+                preexec_fn=child_setup,
+            )
+        except OSError as error:
+            stderr = f"{type(error).__name__}: {error}".encode("utf-8")
+            return ProcessResult(
+                "TOOL_FAILURE",
+                None,
+                b"",
+                stderr[:output_limit_bytes],
+            )
+        try:
+            process.communicate(timeout=timeout_seconds)
+            status = "OK" if process.returncode == 0 else "ERROR"
+        except TimeoutExpired:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.communicate()
+            status = "UNKNOWN_TIMEOUT"
+
+        stdout_size = os.fstat(stdout_file.fileno()).st_size
+        stderr_size = os.fstat(stderr_file.fileno()).st_size
+        stdout_file.seek(0)
+        stdout = stdout_file.read(output_limit_bytes)
+        stderr_file.seek(0)
+        stderr = stderr_file.read(max(0, output_limit_bytes - len(stdout)))
+        if (
+            status != "UNKNOWN_TIMEOUT"
+            and stdout_size + stderr_size > output_limit_bytes
+        ):
+            status = "ERROR_OUTPUT_LIMIT"
+        return ProcessResult(status, process.returncode, stdout, stderr)

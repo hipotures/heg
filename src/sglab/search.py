@@ -7,6 +7,7 @@ from queue import Empty, Full
 from random import Random
 from typing import Any
 import ast
+import fcntl
 import hashlib
 import json
 import math
@@ -14,13 +15,17 @@ import os
 import platform
 import time
 
-from .artifacts import write_candidate
+from . import __version__
+from .artifacts import hash_file, write_candidate
 from .certification import certify
 from .db import checkpoint as database_checkpoint
-from .db import connect, insert_metrics, insert_run, set_run_status
+from .db import connect, insert_metrics, insert_run, prune_metrics, set_run_status
+from .external import TOOLS
+from .locations import cyclecheck_path, source_root
 from .model import BitGraph
 from .resources import current_rss_bytes, disk_free_bytes, recommended_workers
 from .resources import run_bounded, set_address_space_limit
+from .resources import sqlite_size_bytes
 from .state import append_event, atomic_write_json, read_json, utc_now
 from .targets import TARGETS
 from .targets.base import ScoreResult
@@ -54,6 +59,7 @@ def _read_checkpoint(path: Path) -> dict[str, Any] | None:
 @dataclass(frozen=True, slots=True)
 class SearchConfig:
     workspace: Path
+    target: str = "erdos_gyarfas"
     order: int = 32
     mode: str = "cubic_first"
     algorithm: str = "simulated_annealing"
@@ -67,12 +73,16 @@ class SearchConfig:
     state_seconds: float = 1.0
     checkpoint_seconds: float = 5.0
     worker_recycle_candidates: int = 500_000
+    memory_high_bytes: int = 0
     memory_limit_bytes: int = 0
     min_free_disk_bytes: int = 64 * 1024 * 1024
+    max_log_bytes: int = 16 * 1024 * 1024
     notes: str = ""
     exact_timeout_seconds: float = 30.0
 
     def validate(self) -> None:
+        if self.target not in TARGETS:
+            raise ValueError(f"unsupported target: {self.target}")
         if self.order < 4 or self.order > 128:
             raise ValueError("order must be between 4 and 128")
         if self.mode not in MODES:
@@ -81,20 +91,65 @@ class SearchConfig:
             raise ValueError(f"unsupported algorithm: {self.algorithm}")
         if self.mode == "cubic_first" and self.order % 2:
             raise ValueError("cubic_first requires an even order")
+        if self.mode == "minimal_structure_mixed_degree" and self.order < 5:
+            raise ValueError("minimal_structure_mixed_degree requires order at least 5")
         if not 1 <= self.workers <= 256:
             raise ValueError("workers must be between 1 and 256")
-        if self.wall_seconds <= 0:
-            raise ValueError("wall_seconds must be positive")
-        if self.queue_capacity < 4 or self.archive_top_k < 1:
-            raise ValueError("queue_capacity and archive_top_k are too small")
-        if self.exact_timeout_seconds < 0:
-            raise ValueError("exact_timeout_seconds cannot be negative")
+        if not math.isfinite(self.wall_seconds) or not (
+            0 < self.wall_seconds <= 365 * 86400
+        ):
+            raise ValueError("wall_seconds must be between 0 and 31536000")
+        if self.max_candidates < 0:
+            raise ValueError("max_candidates cannot be negative")
+        if not 1 <= self.witness_cap <= 10_000:
+            raise ValueError("witness_cap must be between 1 and 10000")
+        if not 4 <= self.queue_capacity <= 65_536:
+            raise ValueError("queue_capacity must be between 4 and 65536")
+        if not 1 <= self.archive_top_k <= 10_000:
+            raise ValueError("archive_top_k must be between 1 and 10000")
+        if (
+            not math.isfinite(self.state_seconds)
+            or not math.isfinite(self.checkpoint_seconds)
+            or self.state_seconds <= 0
+            or self.checkpoint_seconds <= 0
+        ):
+            raise ValueError(
+                "state and checkpoint intervals must be finite and positive"
+            )
+        if not 1 <= self.worker_recycle_candidates <= 1_000_000_000:
+            raise ValueError(
+                "worker_recycle_candidates must be between 1 and 1000000000"
+            )
+        if not 0 <= self.memory_high_bytes <= 2**63 - 1 or not (
+            0 <= self.memory_limit_bytes <= 2**63 - 1
+        ):
+            raise ValueError("memory limits must fit a nonnegative signed 64-bit value")
+        if not 0 <= self.min_free_disk_bytes <= 2**63 - 1:
+            raise ValueError(
+                "min_free_disk_bytes must fit a nonnegative signed 64-bit value"
+            )
+        if not 1024 <= self.max_log_bytes <= 1024 * 1024 * 1024:
+            raise ValueError("max_log_bytes must be between 1 KiB and 1 GiB")
+        if len(self.notes) > 500:
+            raise ValueError("notes exceed 500 characters")
+        if not math.isfinite(self.exact_timeout_seconds) or not (
+            0 <= self.exact_timeout_seconds <= 7 * 86400
+        ):
+            raise ValueError("exact_timeout_seconds must be between 0 and 604800")
+        if (
+            self.memory_high_bytes
+            and self.memory_limit_bytes
+            and self.memory_high_bytes > self.memory_limit_bytes
+        ):
+            raise ValueError("memory_high_bytes cannot exceed memory_limit_bytes")
 
 
 def _score_payload(score: ScoreResult) -> dict[str, Any]:
     return {
         "valid": score.valid,
-        "witness_counts": {str(length): count for length, count in score.witness_counts},
+        "witness_counts": {
+            str(length): count for length, count in score.witness_counts
+        },
         "weighted_penalty": score.weighted_penalty,
         "complete": score.complete,
         "novelty": score.novelty,
@@ -103,21 +158,41 @@ def _score_payload(score: ScoreResult) -> dict[str, Any]:
     }
 
 
+def _score_from_payload(payload: dict[str, Any]) -> ScoreResult:
+    return ScoreResult(
+        valid=bool(payload["valid"]),
+        witness_counts=tuple(
+            sorted(
+                (
+                    (int(length), int(count))
+                    for length, count in payload["witness_counts"].items()
+                ),
+                key=lambda item: item[0],
+            )
+        ),
+        weighted_penalty=int(payload["weighted_penalty"]),
+        complete=bool(payload["complete"]),
+        novelty=float(payload.get("novelty", 0)),
+        simplicity=int(payload.get("simplicity", 0)),
+    )
+
+
 def _scalar(score: ScoreResult) -> float:
     invalid, total, weighted, novelty, simplicity = score.ordering_key
     return (
-        invalid * 1_000_000_000
-        + total * 1000
-        + weighted
-        + novelty / 10_000_000
-        + simplicity / 1_000_000
+        invalid * 2_000_000
+        + total
+        + weighted / 2_000_000
+        + novelty / 4_000_000_000_000
+        + simplicity / 80_000_000_000_000_000
     )
 
 
 def _novelty(graph: BitGraph, elite: BitGraph) -> float:
-    differing = sum(
-        (left ^ right).bit_count() for left, right in zip(graph.rows, elite.rows)
-    ) // 2
+    differing = (
+        sum((left ^ right).bit_count() for left, right in zip(graph.rows, elite.rows))
+        // 2
+    )
     possible = max(1, graph.n * (graph.n - 1) // 2)
     return differing / possible
 
@@ -129,6 +204,35 @@ def _put(queue: Queue, message: dict[str, Any], important: bool = False) -> None
         return
 
 
+def _worker_candidate_budget(config: SearchConfig, worker_id: int) -> int | None:
+    if config.max_candidates <= 0:
+        return None
+    worker_count = recommended_workers(config.workers)
+    base, remainder = divmod(config.max_candidates, worker_count)
+    return base + int(worker_id < remainder)
+
+
+def _queue_size(queue: Queue) -> int | None:
+    try:
+        return queue.qsize()
+    except (NotImplementedError, OSError):
+        return None
+
+
+def _checkpoint_candidate_id(checkpoint: dict[str, Any]) -> str | None:
+    graph6 = checkpoint.get("graph6")
+    if not isinstance(graph6, str):
+        return None
+    return hashlib.sha256(graph6.encode("ascii")).hexdigest()[:20]
+
+
+def _verification_completed(record: dict[str, Any]) -> bool:
+    return record.get("verification_status") in {
+        "COUNTEREXAMPLE_VERIFIED",
+        "INVALID_CANDIDATE",
+    }
+
+
 def _worker(
     worker_id: int,
     config: SearchConfig,
@@ -138,34 +242,62 @@ def _worker(
     resume_checkpoint: dict[str, Any] | None = None,
 ) -> None:
     set_address_space_limit(config.memory_limit_bytes or None)
-    plugin = TARGETS["erdos_gyarfas"]
+    plugin = TARGETS[config.target]
     rng = Random(config.seed + worker_id * 1_000_003)
     if resume_checkpoint:
         graph = BitGraph.from_graph6(str(resume_checkpoint["graph6"]))
         rng.setstate(ast.literal_eval(str(resume_checkpoint["rng_state"])))
-    else:
-        graph = plugin.generate_seed(
-            rng, {"order": config.order, "mode": config.mode}
+        score = _score_from_payload(resume_checkpoint["score"])
+        best_graph = BitGraph.from_graph6(
+            str(resume_checkpoint.get("best_graph6", graph.to_graph6()))
         )
-    score = replace(
-        plugin.cheap_score(graph, config.witness_cap),
-        novelty=1.0,
-    )
-    best_graph, best_score = graph, score
+        best_score = _score_from_payload(
+            resume_checkpoint.get("best_score", resume_checkpoint["score"])
+        )
+        stagnation = int(resume_checkpoint.get("stagnation", 0))
+        tabu = [
+            str(value) for value in resume_checkpoint.get("tabu", [graph.stable_hash()])
+        ][-128:]
+        algorithm_evaluated = int(resume_checkpoint.get("algorithm_evaluated", 0))
+        next_restart = int(resume_checkpoint.get("next_restart", 50_000))
+    else:
+        graph = plugin.generate_seed(rng, {"order": config.order, "mode": config.mode})
+        score = replace(
+            plugin.cheap_score(graph, config.witness_cap),
+            novelty=1.0,
+        )
+        best_graph, best_score = graph, score
+        stagnation = 0
+        tabu = [graph.stable_hash()]
+        algorithm_evaluated = 0
+        next_restart = 50_000
     evaluated = accepted = improvements = legal = 0
-    stagnation = 0
-    tabu: list[str] = [graph.stable_hash()]
+    lifetime_evaluated = (
+        int(resume_checkpoint.get("lifetime_evaluated", 0)) if resume_checkpoint else 0
+    )
+    candidate_budget = _worker_candidate_budget(config, worker_id)
     last_report = time.monotonic()
-    _put(
-        queue,
-        {
+
+    def checkpoint_payload() -> dict[str, Any]:
+        return {
             "kind": "checkpoint",
             "worker": worker_id,
             "graph6": graph.to_graph6(),
             "score": _score_payload(score),
+            "best_graph6": best_graph.to_graph6(),
+            "best_score": _score_payload(best_score),
             "rng_state": repr(rng.getstate()),
             "evaluated": evaluated,
-        },
+            "lifetime_evaluated": lifetime_evaluated + evaluated,
+            "algorithm_evaluated": algorithm_evaluated,
+            "stagnation": stagnation,
+            "tabu": tabu,
+            "next_restart": next_restart,
+        }
+
+    _put(
+        queue,
+        checkpoint_payload(),
         important=True,
     )
     _put(
@@ -173,18 +305,40 @@ def _worker(
         {
             "kind": "improvement",
             "worker": worker_id,
-            "graph6": graph.to_graph6(),
-            "score": _score_payload(score),
+            "graph6": best_graph.to_graph6(),
+            "score": _score_payload(best_score),
         },
         important=True,
     )
 
-    while not stop.is_set() and evaluated < config.worker_recycle_candidates:
+    while (
+        not stop.is_set()
+        and evaluated < config.worker_recycle_candidates
+        and (
+            candidate_budget is None
+            or lifetime_evaluated + evaluated < candidate_budget
+        )
+    ):
         if pause.is_set():
             time.sleep(0.05)
             continue
+        if (
+            config.algorithm == "simulated_annealing"
+            and algorithm_evaluated >= next_restart
+        ):
+            graph = plugin.generate_seed(
+                rng, {"order": config.order, "mode": config.mode}
+            )
+            score = replace(
+                plugin.cheap_score(graph, config.witness_cap),
+                novelty=_novelty(graph, best_graph),
+            )
+            tabu = [graph.stable_hash()]
+            stagnation = 0
+            next_restart += 50_000
         candidate = plugin.mutate(graph, rng, {"mode": config.mode})
         evaluated += 1
+        algorithm_evaluated += 1
         if candidate == graph:
             continue
         legal += 1
@@ -194,17 +348,22 @@ def _worker(
         )
         accept = False
         if config.algorithm == "simulated_annealing":
-            temperature = max(0.05, 8.0 * (0.9995 ** (evaluated % 20_000)))
+            temperature = max(
+                0.05,
+                8.0 * (0.9995 ** (algorithm_evaluated % 20_000)),
+            )
             if stagnation > 2_000:
                 temperature = 8.0
                 stagnation = 0
             delta = _scalar(candidate_score) - _scalar(score)
-            accept = delta <= 0 or rng.random() < math.exp(-min(delta, 700) / temperature)
+            accept = delta <= 0 or rng.random() < math.exp(
+                -min(delta, 700) / temperature
+            )
         else:
             key = candidate.stable_hash()
             if key not in tabu and candidate_score.ordering_key <= score.ordering_key:
                 accept = True
-            elif evaluated % 64 == 0:
+            elif algorithm_evaluated % 64 == 0:
                 accept = True
             if accept:
                 tabu.append(key)
@@ -245,26 +404,12 @@ def _worker(
             )
             _put(
                 queue,
-                {
-                    "kind": "checkpoint",
-                    "worker": worker_id,
-                    "graph6": graph.to_graph6(),
-                    "score": _score_payload(score),
-                    "rng_state": repr(rng.getstate()),
-                    "evaluated": evaluated,
-                },
+                checkpoint_payload(),
             )
             last_report = now
     _put(
         queue,
-        {
-            "kind": "checkpoint",
-            "worker": worker_id,
-            "graph6": graph.to_graph6(),
-            "score": _score_payload(score),
-            "rng_state": repr(rng.getstate()),
-            "evaluated": evaluated,
-        },
+        checkpoint_payload(),
         important=True,
     )
     _put(
@@ -272,7 +417,14 @@ def _worker(
         {
             "kind": "exit",
             "worker": worker_id,
-            "reason": "stopped" if stop.is_set() else "recycle",
+            "reason": (
+                "stopped"
+                if stop.is_set()
+                else "budget"
+                if candidate_budget is not None
+                and lifetime_evaluated + evaluated >= candidate_budget
+                else "recycle"
+            ),
             "evaluated": evaluated,
             "accepted": accepted,
             "legal": legal,
@@ -282,15 +434,71 @@ def _worker(
     )
 
 
+def _worker_entry(
+    worker_id: int,
+    config: SearchConfig,
+    queue: Queue,
+    stop: Event,
+    pause: Event,
+    resume_checkpoint: dict[str, Any] | None = None,
+) -> None:
+    try:
+        _worker(
+            worker_id,
+            config,
+            queue,
+            stop,
+            pause,
+            resume_checkpoint,
+        )
+    except MemoryError as error:
+        _put(
+            queue,
+            {
+                "kind": "exit",
+                "worker": worker_id,
+                "reason": "memory",
+                "error": f"{type(error).__name__}: {error}",
+            },
+            important=True,
+        )
+    except BaseException as error:
+        _put(
+            queue,
+            {
+                "kind": "exit",
+                "worker": worker_id,
+                "reason": "failure",
+                "error": f"{type(error).__name__}: {error}",
+            },
+            important=True,
+        )
+        raise
+
+
 def _environment() -> dict[str, Any]:
-    repository = Path(__file__).resolve().parents[2]
-    git = run_bounded(
-        ["git", "rev-parse", "HEAD"],
-        timeout_seconds=5,
-        output_limit_bytes=1024,
-        cwd=repository,
+    repository = source_root()
+    git = (
+        run_bounded(
+            ["git", "rev-parse", "HEAD"],
+            timeout_seconds=5,
+            output_limit_bytes=1024,
+            cwd=repository,
+        )
+        if repository is not None
+        else None
     )
-    cyclecheck = repository / "_build" / "sglab-cyclecheck"
+    git_status = (
+        run_bounded(
+            ["git", "status", "--porcelain"],
+            timeout_seconds=5,
+            output_limit_bytes=1024 * 1024,
+            cwd=repository,
+        )
+        if repository is not None
+        else None
+    )
+    cyclecheck = cyclecheck_path()
     cycle_version = (
         run_bounded(
             [str(cyclecheck), "--version"],
@@ -300,17 +508,30 @@ def _environment() -> dict[str, Any]:
         if cyclecheck.is_file()
         else None
     )
+    external_tools = {tool.name: tool.version() for tool in TOOLS}
     return {
         "python": platform.python_version(),
+        "sglab_version": __version__,
         "platform": platform.platform(),
         "cpu_count": os.cpu_count(),
         "pid": os.getpid(),
-        "git_commit": git.stdout.decode("ascii", errors="replace").strip() or None,
+        "git_commit": (
+            git.stdout.decode("ascii", errors="replace").strip()
+            if git is not None
+            else None
+        )
+        or None,
+        "git_dirty": (
+            bool(git_status.stdout.strip())
+            if git_status is not None and git_status.status == "OK"
+            else None
+        ),
         "cyclecheck_version": (
             cycle_version.stdout.decode("utf-8", errors="replace").strip()
             if cycle_version is not None
             else None
         ),
+        "external_tools": external_tools,
         "cgroup_v2": Path("/sys/fs/cgroup/cgroup.controllers").exists(),
     }
 
@@ -318,10 +539,26 @@ def _environment() -> dict[str, Any]:
 def _run_id(config: SearchConfig) -> str:
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     algorithm = "sa" if config.algorithm == "simulated_annealing" else "ils"
-    return f"{stamp}-eg-n{config.order}-{algorithm}-s{config.seed}"
+    target = "".join(part[0] for part in config.target.split("_"))
+    return f"{stamp}-{target}-n{config.order}-{algorithm}-s{config.seed}"
 
 
 def run_search(config: SearchConfig, resume_run: Path | None = None) -> Path:
+    config.validate()
+    workspace = config.workspace.resolve()
+    workspace.mkdir(parents=True, exist_ok=True)
+    with (workspace / ".run.lock").open("a", encoding="ascii") as lock:
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise RuntimeError("another run already owns this workspace") from error
+        try:
+            return _run_search_locked(config, resume_run)
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+def _run_search_locked(config: SearchConfig, resume_run: Path | None = None) -> Path:
     config.validate()
     workspace = config.workspace.resolve()
     workspace.mkdir(parents=True, exist_ok=True)
@@ -341,37 +578,72 @@ def run_search(config: SearchConfig, resume_run: Path | None = None) -> Path:
         run_record = {
             "run_id": run_id,
             "created_at": utc_now(),
-            "target": "erdos_gyarfas",
+            "target": config.target,
             "status_checked_at": "2026-07-23",
             "parameters": parameters,
             "environment": environment,
             "git_commit": environment["git_commit"],
-            "tool_versions": {"cyclecheck": environment["cyclecheck_version"]},
+            "tool_versions": {
+                "cyclecheck": environment["cyclecheck_version"],
+                **environment["external_tools"],
+            },
             "status": "RUNNING",
         }
         atomic_write_json(run_dir / "run.json", run_record)
     else:
         run_dir = resume_run.resolve()
         if run_dir.parent.parent != workspace or not (run_dir / "run.json").is_file():
-            raise ValueError("resume directory must be a run inside the configured workspace")
+            raise ValueError(
+                "resume directory must be a run inside the configured workspace"
+            )
         run_record = read_json(run_dir / "run.json")
         run_id = str(run_record["run_id"])
         parameters = dict(run_record["parameters"])
-    atomic_write_json(workspace / "current_run.json", {"run_id": run_id, "run_dir": str(run_dir)})
+    atomic_write_json(
+        workspace / "current_run.json", {"run_id": run_id, "run_dir": str(run_dir)}
+    )
     database = connect(run_dir / "results.sqlite3")
+
+    def log_event(event: str, **fields: Any) -> None:
+        append_event(
+            run_dir / "events.jsonl",
+            event,
+            max_bytes=config.max_log_bytes,
+            **fields,
+        )
+
     if resume_run is None:
         insert_run(
             database,
             run_id,
             run_record["created_at"],
-            "erdos_gyarfas",
+            config.target,
             parameters,
             run_record["environment"],
         )
-        append_event(run_dir / "events.jsonl", "run_started", run_id=run_id)
+        database.executemany(
+            "INSERT OR REPLACE INTO tool_versions VALUES (?, ?, ?)",
+            (
+                (
+                    "sglab-cyclecheck",
+                    environment["cyclecheck_version"],
+                    str(cyclecheck_path()),
+                ),
+                *(
+                    (
+                        name,
+                        details.get("version"),
+                        details.get("path"),
+                    )
+                    for name, details in environment["external_tools"].items()
+                ),
+            ),
+        )
+        database.commit()
+        log_event("run_started", run_id=run_id)
     else:
         set_run_status(database, run_id, "RUNNING")
-        append_event(run_dir / "events.jsonl", "run_resumed", run_id=run_id)
+        log_event("run_resumed", run_id=run_id)
 
     context = get_context("spawn")
     queue = context.Queue(maxsize=config.queue_capacity)
@@ -386,7 +658,7 @@ def run_search(config: SearchConfig, resume_run: Path | None = None) -> Path:
     }
     processes = [
         context.Process(
-            target=_worker,
+            target=_worker_entry,
             args=(
                 worker_id,
                 config,
@@ -415,13 +687,22 @@ def run_search(config: SearchConfig, resume_run: Path | None = None) -> Path:
         for worker_id in range(worker_count)
     }
     worker_checkpoints: dict[int, dict[str, Any]] = {}
+    prior_state = (
+        read_json(run_dir / "state.json", default={}) if resume_run is not None else {}
+    )
+    prior_throughput = prior_state.get("throughput", {})
+    prior_elapsed = float(prior_state.get("elapsed_seconds", 0))
+    prior_evaluated = int(prior_throughput.get("candidates", 0))
+    prior_accepted = int(prior_throughput.get("accepted", 0))
+    prior_improvements = int(prior_throughput.get("improvements", 0))
     archive: dict[str, tuple[tuple[int, ...], dict[str, Any]]] = {}
+    plugin = TARGETS[config.target]
     for candidate_path in (run_dir / "best").glob("*.json"):
         record = read_json(candidate_path, default={})
         if "graph6" not in record:
             continue
         graph = BitGraph.from_graph6(str(record["graph6"]))
-        key = TARGETS["erdos_gyarfas"].canonical_key(graph).decode("ascii")
+        key = plugin.canonical_key(graph).decode("ascii")
         ordering = tuple(int(value) for value in record["score"]["ordering_key"])
         archive[key] = (ordering, record)
     last_control_version = int(
@@ -429,11 +710,15 @@ def run_search(config: SearchConfig, resume_run: Path | None = None) -> Path:
     )
     worker_restarts = [0] * worker_count
     worker_failure_restarts = [0] * worker_count
+    worker_last_rss = [0] * worker_count
     exited_workers: set[int] = set()
     worker_exit_reasons: dict[int, str] = {}
     stopped_by_user = False
     disk_exhausted = False
     memory_exhausted = False
+    memory_high_triggered = False
+    worker_memory_failure = False
+    unrecoverable_worker_failure = False
 
     try:
         while True:
@@ -447,24 +732,66 @@ def run_search(config: SearchConfig, resume_run: Path | None = None) -> Path:
                 worker_id = int(message["worker"])
                 if message["kind"] == "metrics":
                     worker_metrics[worker_id] = message
+                    worker_last_rss[worker_id] = int(message.get("rss_bytes", 0))
                 elif message["kind"] == "checkpoint":
                     worker_checkpoints[worker_id] = message
                 elif message["kind"] == "improvement":
                     graph = BitGraph.from_graph6(message["graph6"])
-                    key = TARGETS["erdos_gyarfas"].canonical_key(graph).decode("ascii")
-                    order_key = tuple(int(value) for value in message["score"]["ordering_key"])
+                    key = plugin.canonical_key(graph).decode("ascii")
+                    archive_novelty = min(
+                        (
+                            _novelty(
+                                graph,
+                                BitGraph.from_graph6(str(record["graph6"])),
+                            )
+                            for _, record in archive.values()
+                        ),
+                        default=1.0,
+                    )
+                    archive_score = replace(
+                        _score_from_payload(message["score"]),
+                        novelty=archive_novelty,
+                    )
+                    score_payload = _score_payload(archive_score)
+                    order_key = archive_score.ordering_key
                     if key not in archive:
                         if len(archive) >= config.archive_top_k:
                             worst_key = max(archive, key=lambda item: archive[item][0])
                             if order_key >= archive[worst_key][0]:
                                 continue
                             worst_record = archive.pop(worst_key)[1]
+                            database.execute(
+                                "DELETE FROM artifacts WHERE candidate_id=?",
+                                (worst_record["candidate_id"],),
+                            )
+                            database.execute(
+                                "DELETE FROM verifications WHERE candidate_id=?",
+                                (worst_record["candidate_id"],),
+                            )
+                            database.execute(
+                                "DELETE FROM candidate_scores WHERE candidate_id=?",
+                                (worst_record["candidate_id"],),
+                            )
+                            database.execute(
+                                "DELETE FROM candidates WHERE candidate_id=?",
+                                (worst_record["candidate_id"],),
+                            )
                             for filename in worst_record.get("artifacts", {}).values():
                                 path = run_dir / "best" / str(filename)
                                 if path.is_file():
                                     path.unlink()
+                            certificate_dir = (
+                                run_dir
+                                / "certificates"
+                                / str(worst_record["candidate_id"])
+                            )
+                            if certificate_dir.is_dir():
+                                for path in certificate_dir.iterdir():
+                                    if path.is_file() or path.is_symlink():
+                                        path.unlink()
+                                certificate_dir.rmdir()
                         candidate_id, record = write_candidate(
-                            run_dir, graph, message["score"], run_id
+                            run_dir, graph, score_payload, run_id
                         )
                         archive[key] = (order_key, record)
                         database.execute(
@@ -475,14 +802,47 @@ def run_search(config: SearchConfig, resume_run: Path | None = None) -> Path:
                                 graph.to_graph6(),
                                 graph.n,
                                 graph.size(),
-                                json.dumps(message["score"], sort_keys=True),
+                                json.dumps(score_payload, sort_keys=True),
                                 "PENDING",
                                 utc_now(),
                             ),
                         )
+                        components = {
+                            "valid": int(bool(score_payload["valid"])),
+                            "witness_total": sum(
+                                int(value)
+                                for value in score_payload["witness_counts"].values()
+                            ),
+                            "weighted_penalty": int(score_payload["weighted_penalty"]),
+                            "novelty": float(score_payload["novelty"]),
+                            "simplicity": int(score_payload["simplicity"]),
+                        }
+                        database.executemany(
+                            "INSERT OR REPLACE INTO candidate_scores VALUES (?, ?, ?)",
+                            (
+                                (candidate_id, component, value)
+                                for component, value in components.items()
+                            ),
+                        )
+                        database.executemany(
+                            """
+                            INSERT INTO artifacts
+                            (run_id, candidate_id, kind, path, sha256)
+                            VALUES (?, ?, ?, ?, ?)
+                            """,
+                            (
+                                (
+                                    run_id,
+                                    candidate_id,
+                                    kind,
+                                    str(Path("best") / filename),
+                                    hash_file(run_dir / "best" / filename),
+                                )
+                                for kind, filename in record["artifacts"].items()
+                            ),
+                        )
                         database.commit()
-                        append_event(
-                            run_dir / "events.jsonl",
+                        log_event(
                             "improvement_archived",
                             worker=worker_id,
                             candidate_id=candidate_id,
@@ -490,10 +850,25 @@ def run_search(config: SearchConfig, resume_run: Path | None = None) -> Path:
                         )
                 elif message["kind"] == "exit":
                     for field in ("evaluated", "accepted", "legal", "improvements"):
-                        worker_cumulative[worker_id][field] += int(message.get(field, 0))
-                    worker_metrics.pop(worker_id, None)
+                        worker_cumulative[worker_id][field] += int(
+                            message.get(field, 0)
+                        )
+                    last_metrics = worker_metrics.pop(worker_id, None)
+                    if last_metrics is not None:
+                        worker_last_rss[worker_id] = int(
+                            last_metrics.get("rss_bytes", 0)
+                        )
                     exited_workers.add(worker_id)
                     worker_exit_reasons[worker_id] = str(message["reason"])
+                    if message["reason"] == "memory":
+                        worker_memory_failure = True
+                    if message.get("error"):
+                        log_event(
+                            "worker_exit_error",
+                            worker=worker_id,
+                            reason=message["reason"],
+                            error=message["error"],
+                        )
 
             control = read_json(workspace / "control.json", default={"version": 0})
             version = int(control.get("version", 0))
@@ -507,14 +882,18 @@ def run_search(config: SearchConfig, resume_run: Path | None = None) -> Path:
                 elif action == "STOP":
                     stopped_by_user = True
                     stop.set()
-                append_event(run_dir / "events.jsonl", "control_processed", action=action)
+                log_event("control_processed", action=action)
 
-            total = sum(
-                values["evaluated"] for values in worker_cumulative.values()
-            ) + sum(int(item.get("evaluated", 0)) for item in worker_metrics.values())
+            total = (
+                sum(values["evaluated"] for values in worker_cumulative.values())
+                + sum(int(item.get("evaluated", 0)) for item in worker_metrics.values())
+                + prior_evaluated
+            )
             worker_rss = sum(
                 int(item.get("rss_bytes", 0)) for item in worker_metrics.values()
             )
+            master_rss = current_rss_bytes()
+            aggregate_rss = master_rss + worker_rss
             if config.max_candidates and total >= config.max_candidates:
                 stop.set()
             if elapsed >= config.wall_seconds:
@@ -522,9 +901,24 @@ def run_search(config: SearchConfig, resume_run: Path | None = None) -> Path:
             if disk_free_bytes(run_dir) < config.min_free_disk_bytes:
                 disk_exhausted = True
                 stop.set()
-            if config.memory_limit_bytes and worker_rss >= config.memory_limit_bytes:
+            if config.memory_limit_bytes and aggregate_rss >= config.memory_limit_bytes:
                 memory_exhausted = True
                 stop.set()
+            elif (
+                config.memory_high_bytes
+                and aggregate_rss >= config.memory_high_bytes
+                and not memory_high_triggered
+            ):
+                memory_high_triggered = True
+                pause.set()
+                log_event(
+                    "memory_high_pause",
+                    aggregate_rss_bytes=aggregate_rss,
+                    master_rss_bytes=master_rss,
+                    worker_rss_bytes=worker_rss,
+                    memory_high_bytes=config.memory_high_bytes,
+                )
+                database_checkpoint(database)
             for worker_id, process in enumerate(processes):
                 if (
                     not stop.is_set()
@@ -532,25 +926,49 @@ def run_search(config: SearchConfig, resume_run: Path | None = None) -> Path:
                     and process.exitcode is not None
                 ):
                     reason = worker_exit_reasons.get(worker_id)
+                    checkpoint_data = worker_checkpoints.get(worker_id, {})
+                    last_rss_bytes = worker_last_rss[worker_id]
                     if process.exitcode == 0 and reason is None:
                         # The process can exit just before its final queue message
                         # is drained. Do not misclassify normal recycling as a crash.
                         if message is not None:
                             continue
-                        reason = "recycle"
+                        candidate_budget = _worker_candidate_budget(config, worker_id)
+                        reason = (
+                            "budget"
+                            if candidate_budget is not None
+                            and int(checkpoint_data.get("lifetime_evaluated", 0))
+                            >= candidate_budget
+                            else "recycle"
+                        )
                     if worker_id in worker_metrics:
                         last_metrics = worker_metrics.pop(worker_id)
                         for field in ("evaluated", "accepted", "legal", "improvements"):
                             worker_cumulative[worker_id][field] += int(
                                 last_metrics.get(field, 0)
                             )
+                    if reason == "budget":
+                        continue
                     if reason != "recycle":
                         worker_failure_restarts[worker_id] += 1
                     if worker_failure_restarts[worker_id] > 3:
+                        if reason == "memory":
+                            worker_memory_failure = True
+                        else:
+                            unrecoverable_worker_failure = True
+                        log_event(
+                            "worker_abandoned",
+                            worker=worker_id,
+                            reason=reason,
+                            prior_exitcode=process.exitcode,
+                            last_candidate_id=_checkpoint_candidate_id(checkpoint_data),
+                            last_rss_bytes=last_rss_bytes,
+                            retry=False,
+                        )
                         stop.set()
                         continue
                     replacement = context.Process(
-                        target=_worker,
+                        target=_worker_entry,
                         args=(
                             worker_id,
                             config,
@@ -566,11 +984,14 @@ def run_search(config: SearchConfig, resume_run: Path | None = None) -> Path:
                     worker_restarts[worker_id] += 1
                     exited_workers.discard(worker_id)
                     worker_exit_reasons.pop(worker_id, None)
-                    append_event(
-                        run_dir / "events.jsonl",
+                    log_event(
                         "worker_restarted",
                         worker=worker_id,
+                        reason=reason,
                         prior_exitcode=process.exitcode,
+                        last_candidate_id=_checkpoint_candidate_id(checkpoint_data),
+                        last_rss_bytes=last_rss_bytes,
+                        retry=True,
                     )
             if all(not process.is_alive() for process in processes):
                 if len(exited_workers) == worker_count or any(
@@ -584,51 +1005,122 @@ def run_search(config: SearchConfig, resume_run: Path | None = None) -> Path:
                         run_dir / "checkpoints" / f"worker-{worker_id}.json",
                         checkpoint_data,
                     )
+                prune_metrics(database)
                 database_checkpoint(database)
                 last_checkpoint = now
 
             if now - last_state >= config.state_seconds:
-                total_accepted = sum(
-                    values["accepted"] for values in worker_cumulative.values()
-                ) + sum(int(item.get("accepted", 0)) for item in worker_metrics.values())
-                total_improvements = sum(
-                    values["improvements"] for values in worker_cumulative.values()
-                ) + sum(
-                    int(item.get("improvements", 0)) for item in worker_metrics.values()
+                total_accepted = (
+                    sum(values["accepted"] for values in worker_cumulative.values())
+                    + sum(
+                        int(item.get("accepted", 0)) for item in worker_metrics.values()
+                    )
+                    + prior_accepted
+                )
+                total_improvements = (
+                    sum(values["improvements"] for values in worker_cumulative.values())
+                    + sum(
+                        int(item.get("improvements", 0))
+                        for item in worker_metrics.values()
+                    )
+                    + prior_improvements
                 )
                 best_record = (
-                    min(archive.values(), key=lambda item: item[0])[1] if archive else None
+                    min(archive.values(), key=lambda item: item[0])[1]
+                    if archive
+                    else None
                 )
-                status = "PAUSED" if pause.is_set() else "STOPPING" if stop.is_set() else "RUNNING"
+                status = (
+                    "PAUSED_MEMORY_HIGH"
+                    if memory_high_triggered and pause.is_set()
+                    else "PAUSED"
+                    if pause.is_set()
+                    else "STOPPING"
+                    if stop.is_set()
+                    else "RUNNING"
+                )
                 state = {
                     "updated_at": utc_now(),
                     "run_id": run_id,
                     "run_dir": str(run_dir),
-                    "target": "erdos_gyarfas",
+                    "target": config.target,
                     "status": status,
-                    "elapsed_seconds": elapsed,
+                    "elapsed_seconds": prior_elapsed + elapsed,
+                    "remaining_seconds": max(0.0, config.wall_seconds - elapsed),
+                    "configuration": {
+                        "order": config.order,
+                        "mode": config.mode,
+                        "algorithm": config.algorithm,
+                        "seed": config.seed,
+                        "wall_seconds": config.wall_seconds,
+                    },
                     "workers": {
                         "configured": worker_count,
                         "alive": sum(process.is_alive() for process in processes),
                         "restarts": sum(worker_restarts),
                         "failed": sum(worker_failure_restarts),
+                        "items": [
+                            {
+                                "worker": worker_id,
+                                "alive": processes[worker_id].is_alive(),
+                                "restarts": worker_restarts[worker_id],
+                                "failures": worker_failure_restarts[worker_id],
+                                "session_evaluated": worker_cumulative[worker_id][
+                                    "evaluated"
+                                ]
+                                + int(
+                                    worker_metrics.get(worker_id, {}).get(
+                                        "evaluated", 0
+                                    )
+                                ),
+                                "session_accepted": worker_cumulative[worker_id][
+                                    "accepted"
+                                ]
+                                + int(
+                                    worker_metrics.get(worker_id, {}).get("accepted", 0)
+                                ),
+                                "rss_bytes": int(
+                                    worker_metrics.get(worker_id, {}).get(
+                                        "rss_bytes", 0
+                                    )
+                                ),
+                            }
+                            for worker_id in range(worker_count)
+                        ],
                     },
                     "throughput": {
                         "candidates": total,
                         "accepted": total_accepted,
-                        "candidates_per_second": total / max(elapsed, 0.001),
+                        "improvements": total_improvements,
+                        "candidates_per_second": total
+                        / max(prior_elapsed + elapsed, 0.001),
                     },
                     "best": best_record,
-                    "resources": {
-                        "master_rss_bytes": current_rss_bytes(),
-                        "worker_rss_bytes": sum(
-                            int(item.get("rss_bytes", 0)) for item in worker_metrics.values()
+                    "exact_verification": {
+                        "queued": 0,
+                        "verified_candidates": sum(
+                            _verification_completed(record)
+                            for _, record in archive.values()
                         ),
+                    },
+                    "resources": {
+                        "master_rss_bytes": master_rss,
+                        "worker_rss_bytes": sum(
+                            int(item.get("rss_bytes", 0))
+                            for item in worker_metrics.values()
+                        ),
+                        "aggregate_rss_bytes": aggregate_rss,
                         "load_average": list(os.getloadavg()),
                         "disk_free_bytes": disk_free_bytes(run_dir),
-                        "database_bytes": (run_dir / "results.sqlite3").stat().st_size,
+                        "database_bytes": sqlite_size_bytes(
+                            run_dir / "results.sqlite3"
+                        ),
                     },
-                    "queues": {"telemetry_max": config.queue_capacity},
+                    "queues": {
+                        "telemetry_current": _queue_size(queue),
+                        "telemetry_max": config.queue_capacity,
+                        "exact_current": 0,
+                    },
                 }
                 atomic_write_json(run_dir / "state.json", state)
                 atomic_write_json(workspace / "state.json", state)
@@ -640,8 +1132,8 @@ def run_search(config: SearchConfig, resume_run: Path | None = None) -> Path:
                             utc_now(),
                             total,
                             total_improvements,
-                            total / max(elapsed, 0.001),
-                            current_rss_bytes(),
+                            total / max(prior_elapsed + elapsed, 0.001),
+                            aggregate_rss,
                         )
                     ],
                 )
@@ -664,20 +1156,33 @@ def run_search(config: SearchConfig, resume_run: Path | None = None) -> Path:
 
     final_status = (
         "UNKNOWN_MEMORY_LIMIT"
-        if memory_exhausted
-        or any(process.exitcode not in (0, None, -15, -9) for process in processes)
+        if memory_exhausted or worker_memory_failure
         else "TOOL_FAILURE"
-        if disk_exhausted
+        if disk_exhausted or unrecoverable_worker_failure
         else "NO_RESULT_WITHIN_BUDGET"
     )
     verified_best_record: dict[str, Any] | None = None
-    if archive:
+    if archive and not disk_exhausted:
         best_record = min(archive.values(), key=lambda item: item[0])[1]
         best_graph = BitGraph.from_graph6(str(best_record["graph6"]))
+        verification_state = {
+            **read_json(run_dir / "state.json", default={}),
+            "updated_at": utc_now(),
+            "status": "VERIFYING_FINALIST",
+            "exact_verification": {
+                "queued": 1,
+                "verified_candidates": sum(
+                    _verification_completed(record) for _, record in archive.values()
+                ),
+            },
+        }
+        atomic_write_json(run_dir / "state.json", verification_state)
+        atomic_write_json(workspace / "state.json", verification_state)
         verification = certify(
             best_graph,
             run_dir / "certificates" / str(best_record["candidate_id"]),
             timeout_seconds=config.exact_timeout_seconds,
+            memory_limit_bytes=config.memory_limit_bytes,
         )
         best_record["verification_status"] = verification["status"]
         atomic_write_json(
@@ -687,6 +1192,19 @@ def run_search(config: SearchConfig, resume_run: Path | None = None) -> Path:
         database.execute(
             "UPDATE candidates SET verification_status=? WHERE candidate_id=?",
             (verification["status"], best_record["candidate_id"]),
+        )
+        database.execute(
+            "DELETE FROM verifications WHERE candidate_id=?",
+            (best_record["candidate_id"],),
+        )
+        best_json_relative = str(Path("best") / f"{best_record['candidate_id']}.json")
+        database.execute(
+            "UPDATE artifacts SET sha256=? WHERE candidate_id=? AND path=?",
+            (
+                hash_file(run_dir / best_json_relative),
+                best_record["candidate_id"],
+                best_json_relative,
+            ),
         )
         for verifier in verification["verifiers"]:
             database.execute(
@@ -704,9 +1222,31 @@ def run_search(config: SearchConfig, resume_run: Path | None = None) -> Path:
                     json.dumps(verifier, sort_keys=True),
                 ),
             )
+        certificate_dir = run_dir / "certificates" / str(best_record["candidate_id"])
+        database.execute(
+            "DELETE FROM artifacts WHERE candidate_id=? AND kind LIKE 'certificate_%'",
+            (best_record["candidate_id"],),
+        )
+        database.executemany(
+            """
+            INSERT INTO artifacts
+            (run_id, candidate_id, kind, path, sha256)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                (
+                    run_id,
+                    best_record["candidate_id"],
+                    f"certificate_{path.suffix.lstrip('.') or 'file'}",
+                    str(path.relative_to(run_dir)),
+                    hash_file(path),
+                )
+                for path in certificate_dir.iterdir()
+                if path.is_file()
+            ),
+        )
         database.commit()
-        append_event(
-            run_dir / "events.jsonl",
+        log_event(
             "finalist_verified",
             candidate_id=best_record["candidate_id"],
             status=verification["status"],
@@ -714,25 +1254,87 @@ def run_search(config: SearchConfig, resume_run: Path | None = None) -> Path:
         if verification["status"] == "COUNTEREXAMPLE_VERIFIED":
             final_status = "COUNTEREXAMPLE_VERIFIED"
         verified_best_record = best_record
-    total = sum(
-        values["evaluated"] for values in worker_cumulative.values()
-    ) + sum(int(item.get("evaluated", 0)) for item in worker_metrics.values())
+    elif archive:
+        log_event(
+            "finalist_verification_skipped",
+            reason="disk_free_below_configured_minimum",
+        )
+    total = (
+        sum(values["evaluated"] for values in worker_cumulative.values())
+        + sum(int(item.get("evaluated", 0)) for item in worker_metrics.values())
+        + prior_evaluated
+    )
+    total_accepted = (
+        sum(values["accepted"] for values in worker_cumulative.values())
+        + sum(int(item.get("accepted", 0)) for item in worker_metrics.values())
+        + prior_accepted
+    )
+    total_improvements = (
+        sum(values["improvements"] for values in worker_cumulative.values())
+        + sum(int(item.get("improvements", 0)) for item in worker_metrics.values())
+        + prior_improvements
+    )
+    total_elapsed = prior_elapsed + time.monotonic() - started
+    final_master_rss = current_rss_bytes()
     final_state = {
         **read_json(run_dir / "state.json", default={}),
         "updated_at": utc_now(),
         "run_id": run_id,
         "run_dir": str(run_dir),
         "status": final_status,
+        "elapsed_seconds": total_elapsed,
+        "remaining_seconds": 0,
         "stop_requested": stopped_by_user,
+        "configuration": {
+            "order": config.order,
+            "mode": config.mode,
+            "algorithm": config.algorithm,
+            "seed": config.seed,
+            "wall_seconds": config.wall_seconds,
+        },
         "workers": {
             "configured": worker_count,
             "alive": 0,
             "restarts": sum(worker_restarts),
             "failed": sum(worker_failure_restarts),
+            "items": [
+                {
+                    "worker": worker_id,
+                    "alive": False,
+                    "restarts": worker_restarts[worker_id],
+                    "failures": worker_failure_restarts[worker_id],
+                    "session_evaluated": worker_cumulative[worker_id]["evaluated"],
+                    "session_accepted": worker_cumulative[worker_id]["accepted"],
+                    "rss_bytes": 0,
+                }
+                for worker_id in range(worker_count)
+            ],
         },
         "throughput": {
             "candidates": total,
-            "candidates_per_second": total / max(time.monotonic() - started, 0.001),
+            "accepted": total_accepted,
+            "improvements": total_improvements,
+            "candidates_per_second": total / max(total_elapsed, 0.001),
+        },
+        "exact_verification": {
+            "queued": 0,
+            "verified_candidates": sum(
+                _verification_completed(record) for _, record in archive.values()
+            ),
+        },
+        "queues": {
+            "telemetry_current": 0,
+            "telemetry_max": config.queue_capacity,
+            "exact_current": 0,
+        },
+        "resources": {
+            **read_json(run_dir / "state.json", default={}).get("resources", {}),
+            "master_rss_bytes": final_master_rss,
+            "worker_rss_bytes": 0,
+            "aggregate_rss_bytes": final_master_rss,
+            "load_average": list(os.getloadavg()),
+            "disk_free_bytes": disk_free_bytes(run_dir),
+            "database_bytes": sqlite_size_bytes(run_dir / "results.sqlite3"),
         },
     }
     if verified_best_record is not None:
@@ -742,7 +1344,7 @@ def run_search(config: SearchConfig, resume_run: Path | None = None) -> Path:
     set_run_status(database, run_id, final_status)
     database_checkpoint(database)
     database.close()
-    append_event(run_dir / "events.jsonl", "run_finished", status=final_status)
+    log_event("run_finished", status=final_status)
     return run_dir
 
 
@@ -753,4 +1355,6 @@ def config_from_run(run_dir: Path, wall_seconds: float | None = None) -> SearchC
     if wall_seconds is not None:
         values["wall_seconds"] = wall_seconds
     allowed = SearchConfig.__dataclass_fields__
-    return SearchConfig(**{key: value for key, value in values.items() if key in allowed})
+    return SearchConfig(
+        **{key: value for key, value in values.items() if key in allowed}
+    )

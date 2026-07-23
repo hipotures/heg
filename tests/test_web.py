@@ -35,6 +35,47 @@ class WebAssetsTests(unittest.TestCase):
             response = connection.getresponse()
             self.assertEqual(response.status, 400)
             response.read()
+            connection.request(
+                "POST",
+                "/api/runs",
+                body=json.dumps(
+                    {
+                        "target": "erdos_gyarfas",
+                        "order": 8,
+                        "mode": "cubic_first",
+                        "algorithm": "simulated_annealing",
+                        "workers": 1,
+                        "seed": 1,
+                        "wall_seconds": 1,
+                        "memory_high_bytes": 2,
+                        "memory_limit_bytes": 1,
+                    }
+                ),
+                headers={"Content-Type": "application/json"},
+            )
+            response = connection.getresponse()
+            self.assertEqual(response.status, 400)
+            self.assertIn(b"memory high", response.read())
+            invalid = {
+                "target": "erdos_gyarfas",
+                "order": 8.5,
+                "mode": "cubic_first",
+                "algorithm": "simulated_annealing",
+                "workers": 1,
+                "seed": 1,
+                "wall_seconds": 1,
+                "memory_high_bytes": 0,
+                "memory_limit_bytes": 0,
+            }
+            connection.request(
+                "POST",
+                "/api/runs",
+                body=json.dumps(invalid),
+                headers={"Content-Type": "application/json"},
+            )
+            response = connection.getresponse()
+            self.assertEqual(response.status, 400)
+            self.assertIn(b"must be an integer", response.read())
             server.shutdown()
             server.server_close()
             thread.join(timeout=2)
@@ -45,6 +86,10 @@ class WebAssetsTests(unittest.TestCase):
             thread = Thread(target=server.serve_forever, daemon=True)
             thread.start()
             connection = HTTPConnection(*server.server_address, timeout=2)
+            connection.request("GET", "/api/status")
+            response = connection.getresponse()
+            self.assertEqual(response.status, 401)
+            response.read()
             connection.request(
                 "POST",
                 "/api/control",

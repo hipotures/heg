@@ -1,6 +1,6 @@
 # Implementation Status
 
-Last implementation audit: **2026-07-23**.
+Last implementation audit: **2026-07-24**.
 
 ## M0 — complete
 
@@ -33,7 +33,10 @@ Evidence: focused unit tests plus `make doctor`, `make test`, `make check`, and
 - lexicographic structural, witness, weighted, novelty, and simplicity score;
 - bounded top archive, improvement-only persistence, worker telemetry and
   recycling;
+- a deterministic per-length DFS-node budget for the explicitly incomplete
+  hot-loop scorer;
 - hashed checkpoints, same-run resume, and file-based pause/resume/stop;
+- one-coordinator workspace locking and bounded SQLite/event-log retention;
 - finalist submission to both exact verifier paths.
 
 A short automated soak exercised pause/resume and recycling. The production
@@ -61,8 +64,10 @@ silently inserted into the heuristic loop.
 - optional nauty overlap adapter;
 - conservative timeout and unchecked-UNSAT semantics.
 
-PySAT/CaDiCaL and nauty are not installed on the audited machine, so their
-larger overlap experiments remain explicit external-tool gates.
+PySAT 1.9.dev7 with the `cadical195` backend was exercised on Python 3.12 at
+`n=4`, including proof preservation, and with a forced timeout at `n=8`.
+The UNSAT proof remains deliberately unchecked and therefore unclaimed.
+nauty is not installed on the host, so its live overlap gate remains external.
 
 ## M5 — complete
 
@@ -71,6 +76,7 @@ larger overlap experiments remain explicit external-tool gates.
   deterministic SVGs;
 - validated start form and POST pause/resume/stop;
 - local binding by default and optional bearer protection;
+- bearer protection for every API route when configured;
 - path traversal, request size, response size, action, and numeric guards.
 
 ## M6 — implemented
@@ -82,9 +88,12 @@ larger overlap experiments remain explicit external-tool gates.
 - configurable soak runner that exercises pause/resume, recycling, RSS plateau,
   database growth, and bounded queues.
 
-The 15-minute, 16-process calibration completed on 2026-07-23 and is preserved
-under `docs/benchmarks/`. A short soak passed functional pause/resume and RSS
-checks; it does not substitute for the separate two-hour production soak gate.
+The earlier 15-minute, 16-process calibration is preserved under
+`docs/benchmarks/`, but the scorer work-budget correction requires a fresh
+calibration before final acceptance. A short soak passed functional
+pause/resume and RSS checks; a failed 265-second attempt is retained as
+negative evidence. Neither substitutes for the separate two-hour production
+soak gate.
 
 ## M7 — optional adapters complete
 

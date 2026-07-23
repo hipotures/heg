@@ -22,3 +22,8 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.data-files]
+"share/structural-graph-lab/web" = ["web/index.html"]
+"share/structural-graph-lab/configs" = ["configs/default.toml"]
+"share/structural-graph-lab/configs/targets" = ["configs/targets/erdos_gyarfas.toml"]

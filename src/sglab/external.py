@@ -18,7 +18,11 @@ class ExternalTool:
 
     def executable(self) -> str | None:
         return next(
-            (path for name in self.executable_names if (path := which(name)) is not None),
+            (
+                path
+                for name in self.executable_names
+                if (path := which(name)) is not None
+            ),
             None,
         )
 
@@ -32,7 +36,10 @@ class ExternalTool:
             output_limit_bytes=64 * 1024,
         )
         text = (result.stdout or result.stderr).decode("utf-8", errors="replace")
-        return {"path": executable, "version": text.splitlines()[0] if text else result.status}
+        return {
+            "path": executable,
+            "version": text.splitlines()[0] if text else result.status,
+        }
 
     def run(
         self,
@@ -43,7 +50,9 @@ class ExternalTool:
     ) -> ProcessResult:
         executable = self.executable()
         if executable is None:
-            return ProcessResult("TOOL_FAILURE", None, b"", f"{self.name} is unavailable".encode())
+            return ProcessResult(
+                "TOOL_FAILURE", None, b"", f"{self.name} is unavailable".encode()
+            )
         return run_bounded(
             [executable, *arguments],
             timeout_seconds=timeout_seconds,
@@ -78,6 +87,20 @@ def canonical_graph6(graph: BitGraph, timeout_seconds: float = 10) -> tuple[str,
             timeout_seconds=timeout_seconds,
             cwd=root,
         )
-        if result.status != "OK" or not destination.is_file():
+        if (
+            result.status != "OK"
+            or not destination.is_file()
+            or destination.stat().st_size > 1024 * 1024
+        ):
             return graph.to_graph6(), False
-        return destination.read_text(encoding="ascii").strip(), True
+        try:
+            canonical = BitGraph.from_graph6(destination.read_text(encoding="ascii"))
+        except (OSError, UnicodeDecodeError, ValueError):
+            return graph.to_graph6(), False
+        if (
+            canonical.n != graph.n
+            or canonical.size() != graph.size()
+            or sorted(canonical.degree_sequence()) != sorted(graph.degree_sequence())
+        ):
+            return graph.to_graph6(), False
+        return canonical.to_graph6(), True

@@ -22,6 +22,15 @@ class CertificationTests(unittest.TestCase):
             self.assertEqual(restored["n"], 4)
             self.assertEqual(
                 manifest["graph6_sha256"],
-                hashlib.sha256((Path(directory) / "candidate.graph6").read_bytes()).hexdigest(),
+                hashlib.sha256(
+                    (Path(directory) / "candidate.graph6").read_bytes()
+                ).hexdigest(),
             )
             self.assertTrue((Path(directory) / "commands.txt").is_file())
+        with tempfile.TemporaryDirectory() as directory:
+            invalid = certify(
+                BitGraph.empty(4),
+                Path(directory),
+                timeout_seconds=5,
+            )
+            self.assertEqual(invalid["status"], "INVALID_CANDIDATE")

@@ -25,7 +25,8 @@ sglab run \
   --workers 12 \
   --seed 1 \
   --time-limit 24h \
-  --memory-limit 0 \
+  --memory-high 161061273600 \
+  --memory-limit 180388626432 \
   --exact-timeout 30 \
   --workspace ./workspace
 ```
@@ -41,8 +42,14 @@ Algorithms:
 - `simulated_annealing`
 - `iterated_local_search`
 
-`--memory-limit 0` leaves the per-worker `RLIMIT_AS` unset; cgroups remain the
-preferred production limit. `--exact-timeout 0` removes the wall timeout from
+Crossing `--memory-high` pauses new search work and records the incident;
+crossing `--memory-limit` ends the run as `UNKNOWN_MEMORY_LIMIT`.
+The high-water and hard checks use aggregate master-plus-worker RSS; a
+nonzero hard value is also applied as a per-worker `RLIMIT_AS` fallback.
+`--memory-limit 0` leaves that hard fallback unset; cgroups remain the
+preferred production limit. When only a smaller hard limit is overridden, an
+incompatible configured high-water mark is disabled rather than causing a
+startup failure. `--exact-timeout 0` removes the wall timeout from
 finalist verification and is appropriate only for a deliberately supervised
 certification run.
 
@@ -54,7 +61,8 @@ sglab resume --run ./workspace/runs/<run-id> --time-limit 2h
 ```
 
 Checkpoints have adjacent SHA-256 manifests. Resume rejects a mismatched
-checkpoint rather than silently loading it.
+checkpoint rather than silently loading it. A workspace lock rejects a second
+concurrent coordinator.
 
 ## Dashboard
 
@@ -72,8 +80,9 @@ The dashboard exposes:
 - `POST /api/control`
 - `POST /api/runs`
 
-Set `SGLAB_WEB_TOKEN` to require `Authorization: Bearer ...` for mutations and
-artifact downloads. Run parameters are numeric-range checked and
+Set `SGLAB_WEB_TOKEN` to require `Authorization: Bearer ...` for every API
+request. Open the page as `http://127.0.0.1:8080/#token=<value>`; URL fragments
+are not sent in the HTTP request. Run parameters are numeric-range checked and
 allowlisted. No request parameter becomes a shell command.
 
 ## Verification
@@ -81,7 +90,8 @@ allowlisted. No request parameter becomes a shell command.
 ```bash
 sglab verify --graph6 candidate.graph6
 sglab verify --graph-json candidate.json
-sglab verify --graph6 candidate.graph6 --artifact-dir ./certificate
+sglab verify --graph6 candidate.graph6 --artifact-dir ./certificate \
+  --timeout 0 --memory-limit 0
 ```
 
 The default uses the Python reference DFS and independent C++17 bitset
@@ -96,13 +106,16 @@ sglab sat \
   --solver cadical195 \
   --seed 1 \
   --time-limit 10m \
+  --memory-limit 8589934592 \
   --output ./workspace/sat-n8
 ```
 
 The optional command requires `python-sat`. It preserves the final DIMACS CNF,
 metadata, candidate graph (if any), and every lazy clause in `learned.jsonl`.
 Cycle clauses include their ordered vertex witnesses. Timeouts and unchecked
-UNSAT results never become `UNSAT_CERTIFIED`.
+UNSAT results never become `UNSAT_CERTIFIED`. A nonzero `--memory-limit`
+applies `RLIMIT_AS` to the isolated solver process; exhaustion is
+`UNKNOWN_MEMORY_LIMIT`, never UNSAT.
 
 ## Benchmarking
 

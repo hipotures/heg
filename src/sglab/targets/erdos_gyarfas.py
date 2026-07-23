@@ -5,7 +5,8 @@ from time import perf_counter
 from typing import Any
 import math
 
-from ..model import BitGraph, find_cycle_of_length, find_cycles_of_length
+from ..model import BitGraph, find_cycle_of_length, find_cycles_of_length_bounded
+from ..external import canonical_graph6
 from .base import ScoreResult, ValidationResult, VerifyResult, Witness
 
 
@@ -24,19 +25,25 @@ def verify_reference(graph: BitGraph) -> VerifyResult:
     start = perf_counter()
     if graph.n == 0:
         return VerifyResult(
-            "INVALID", True, "graph must be non-empty",
+            "INVALID",
+            True,
+            "graph must be non-empty",
             elapsed_seconds=perf_counter() - start,
             implementation="python-reference-dfs",
         )
     if not graph.is_connected():
         return VerifyResult(
-            "INVALID", True, "minimal-candidate mode requires connectedness",
+            "INVALID",
+            True,
+            "minimal-candidate mode requires connectedness",
             elapsed_seconds=perf_counter() - start,
             implementation="python-reference-dfs",
         )
     if graph.minimum_degree() < 3:
         return VerifyResult(
-            "INVALID", True, "minimum degree is below 3",
+            "INVALID",
+            True,
+            "minimum degree is below 3",
             elapsed_seconds=perf_counter() - start,
             implementation="python-reference-dfs",
         )
@@ -79,8 +86,21 @@ class ErdosGyarfasPlugin:
         mode = str(config.get("mode", "cubic_first"))
         if n < 4:
             raise ValueError("order must be at least 4")
+        if mode not in {
+            "cubic_first",
+            "minimal_structure_mixed_degree",
+            "unrestricted_min_degree_3",
+        }:
+            raise ValueError(f"unsupported mode: {mode}")
         if mode == "cubic_first" and n % 2:
             raise ValueError("cubic graphs require an even order")
+        if mode == "minimal_structure_mixed_degree" and n < 5:
+            raise ValueError("minimal_structure_mixed_degree requires order at least 5")
+        if mode == "unrestricted_min_degree_3" and n % 2:
+            return self.generate_seed(
+                rng,
+                {**config, "mode": "minimal_structure_mixed_degree"},
+            )
         if mode == "minimal_structure_mixed_degree":
             high_count = 2 if n % 2 == 0 else 1
             high_count = min(high_count, max(1, math.floor(3 * n / 7)))
@@ -90,7 +110,11 @@ class ErdosGyarfasPlugin:
                 degrees = [4] * high_count + [3] * (n - high_count)
             high = set(range(high_count))
             for _ in range(2_000):
-                stubs = [vertex for vertex, degree in enumerate(degrees) for _ in range(degree)]
+                stubs = [
+                    vertex
+                    for vertex, degree in enumerate(degrees)
+                    for _ in range(degree)
+                ]
                 rng.shuffle(stubs)
                 edges: set[tuple[int, int]] = set()
                 valid = True
@@ -115,7 +139,9 @@ class ErdosGyarfasPlugin:
                         for u in range(n)
                     ):
                         return graph
-            raise RuntimeError("failed to generate a mixed-degree seed within retry budget")
+            raise RuntimeError(
+                "failed to generate a mixed-degree seed within retry budget"
+            )
         # A cycle plus a random non-neighbour perfect matching is a connected
         # cubic seed. Retry is bounded and deterministic for a fixed RNG state.
         cycle = {(u, (u + 1) % n) for u in range(n)}
@@ -170,7 +196,9 @@ class ErdosGyarfasPlugin:
                 continue
             pairing = ((a, c), (b, d)) if rng.randrange(2) == 0 else ((a, d), (b, c))
             additions = tuple(tuple(sorted(edge)) for edge in pairing)
-            if additions[0] == additions[1] or any(graph.has_edge(*edge) for edge in additions):
+            if additions[0] == additions[1] or any(
+                graph.has_edge(*edge) for edge in additions
+            ):
                 continue
             candidate = graph.with_edges(add=additions, remove=((a, b), (c, d)))
             if candidate.is_connected() and (
@@ -187,16 +215,19 @@ class ErdosGyarfasPlugin:
         counts: list[tuple[int, int]] = []
         weighted = 0
         complete = True
-        remaining = cap
+        node_budget = max(4_096, min(50_000, cap * 1_024))
         for length in forbidden_lengths(graph.n):
-            witnesses = find_cycles_of_length(graph, length, remaining)
-            count = len(witnesses)
+            witnesses, search_complete = find_cycles_of_length_bounded(
+                graph,
+                length,
+                cap + 1,
+                node_budget,
+            )
+            count = min(len(witnesses), cap)
             counts.append((length, count))
             weighted += count * max(1, 64 // length)
-            remaining -= count
-            if remaining == 0:
+            if len(witnesses) > cap or not search_complete:
                 complete = False
-                break
         return ScoreResult(
             True,
             tuple(counts),
@@ -209,8 +240,27 @@ class ErdosGyarfasPlugin:
         return verify_reference(graph)
 
     def canonical_key(self, graph: BitGraph) -> bytes:
-        # Stable but explicitly non-authoritative without nauty.
-        return graph.stable_hash().encode("ascii")
+        canonical, _authoritative = canonical_graph6(graph)
+        # Without nauty this remains stable but explicitly non-authoritative.
+        return canonical.encode("ascii")
+
+    def explain(self, graph: BitGraph, result: VerifyResult) -> dict[str, Any]:
+        return {
+            "target": self.id,
+            "order": graph.n,
+            "size": graph.size(),
+            "minimum_degree": graph.minimum_degree(),
+            "status": result.status,
+            "complete": result.complete,
+            "message": result.message,
+            "witnesses": [
+                {
+                    "kind": witness.kind,
+                    "vertices": list(witness.vertices),
+                }
+                for witness in result.witnesses
+            ],
+        }
 
     @staticmethod
     def _minimal_structure_valid(graph: BitGraph) -> bool:

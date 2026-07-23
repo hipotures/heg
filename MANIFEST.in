@@ -1,0 +1,11 @@
+include AGENTS.md
+include BUNDLE_MANIFEST.json
+include CODEX_PROMPT.md
+include Makefile
+include tools.lock.json
+recursive-include configs *.toml
+recursive-include cpp *.cpp
+recursive-include docs *.json *.md
+recursive-include examples *.json
+recursive-include scripts *.sh
+recursive-include web *.html

@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 import hashlib
-import json
 import math
 
 from .model import BitGraph
@@ -26,13 +25,12 @@ def graph_svg(graph: BitGraph, size: int = 480) -> str:
         for u, v in graph.edges()
     )
     vertices = "\n".join(
-        f'<circle cx="{x:.2f}" cy="{y:.2f}" r="5"/>'
-        for x, y in points
+        f'<circle cx="{x:.2f}" cy="{y:.2f}" r="5"/>' for x, y in points
     )
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" '
         f'viewBox="0 0 {size} {size}"><g stroke="#64748b" stroke-width="1">'
-        f"{edges}</g><g fill=\"#38bdf8\">{vertices}</g></svg>\n"
+        f'{edges}</g><g fill="#38bdf8">{vertices}</g></svg>\n'
     )
 
 

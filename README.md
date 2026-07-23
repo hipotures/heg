@@ -33,6 +33,11 @@ conjecture has been resolved.
 No rejected-candidate firehose is stored, no LLM is called in the candidate
 loop, and a timeout is always unknown rather than UNSAT.
 
+The installed runtime performs local computation only. Search workers, the
+C++ checker, and the optional SAT solver make no AI/API calls and require no
+outbound network access. The dashboard polls only its local standard-library
+HTTP server, bound to `127.0.0.1` by default.
+
 ## Install
 
 Python 3.12 or newer and a C++17 compiler are required.
@@ -51,7 +56,7 @@ Regular virtual environments are also supported:
 ```bash
 python3.12 -m venv .venv
 source .venv/bin/activate
-python -m pip install -e .
+uv pip install --python .venv/bin/python -e .
 make cyclecheck
 ```
 
@@ -88,6 +93,7 @@ sglab run \
   --workers 12 \
   --seed 1 \
   --time-limit 24h \
+  --memory-high 161061273600 \
   --workspace ./workspace
 
 sglab serve --workspace ./workspace --host 127.0.0.1 --port 8080
@@ -109,7 +115,7 @@ sglab resume --run ./workspace/runs/<run-id> --time-limit 2h
 ```
 
 For LAN exposure, explicitly pass `--host 0.0.0.0`, configure a firewall, and
-set `SGLAB_WEB_TOKEN`.
+set `SGLAB_WEB_TOKEN`; when configured, the token protects every API request.
 
 ## Independent verification
 
@@ -145,6 +151,7 @@ sglab benchmark soak \
 sglab sat \
   --order 8 \
   --time-limit 10m \
+  --memory-limit 8589934592 \
   --seed 1 \
   --output ./workspace/sat-n8
 ```

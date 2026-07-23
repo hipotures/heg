@@ -3,7 +3,7 @@
 ## High-level design
 
 ```text
-                           periodic human / LLM analysis
+                           optional post-run human analysis
                                       |
                                       v
 +------------------+       +----------------------+       +------------------+
@@ -58,7 +58,11 @@ Each worker:
 
 ### Exact-verifier workers
 
-Separate processes with stricter concurrency and memory limits. They may call:
+Finalist verification is isolated from search workers. The Python reference
+path runs in a child process and the C++ path runs as a bounded subprocess;
+the coordinator only launches them and records their reports. The optional
+SAT experiment is a separate command and process. There is no AI service,
+network client, or LLM call in the runtime data path. Exact paths may call:
 
 - the Python reference verifier;
 - the C++ exact cycle checker;
@@ -90,10 +94,12 @@ Write in batches. The master is the only writer.
 
 ```text
 workspace/
+  control.json
+  current_run.json
+  state.json
   runs/<run-id>/
     run.json
     state.json
-    control.json
     events.jsonl
     results.sqlite3
     checkpoints/

@@ -6,6 +6,7 @@ import json
 import sqlite3
 
 SCHEMA_VERSION = 1
+MAX_METRIC_ROWS = 100_000
 
 
 def connect(path: str | Path) -> sqlite3.Connection:
@@ -27,7 +28,9 @@ def connect(path: str | Path) -> sqlite3.Connection:
 def migrate(connection: sqlite3.Connection) -> None:
     version = int(connection.execute("PRAGMA user_version").fetchone()[0])
     if version > SCHEMA_VERSION:
-        raise RuntimeError(f"database schema {version} is newer than supported {SCHEMA_VERSION}")
+        raise RuntimeError(
+            f"database schema {version} is newer than supported {SCHEMA_VERSION}"
+        )
     if version == 0:
         connection.executescript(
             """
@@ -125,9 +128,27 @@ def set_run_status(connection: sqlite3.Connection, run_id: str, status: str) -> 
     connection.commit()
 
 
-def insert_metrics(connection: sqlite3.Connection, rows: Iterable[tuple[Any, ...]]) -> None:
+def insert_metrics(
+    connection: sqlite3.Connection, rows: Iterable[tuple[Any, ...]]
+) -> None:
     connection.executemany("INSERT INTO run_metrics VALUES (?, ?, ?, ?, ?, ?)", rows)
     connection.commit()
+
+
+def prune_metrics(
+    connection: sqlite3.Connection, max_rows: int = MAX_METRIC_ROWS
+) -> None:
+    if max_rows < 1:
+        raise ValueError("max_rows must be positive")
+    latest = int(
+        connection.execute(
+            "SELECT COALESCE(MAX(rowid), 0) FROM run_metrics"
+        ).fetchone()[0]
+    )
+    threshold = latest - max_rows
+    if threshold > 0:
+        connection.execute("DELETE FROM run_metrics WHERE rowid <= ?", (threshold,))
+        connection.commit()
 
 
 def checkpoint(connection: sqlite3.Connection) -> None:

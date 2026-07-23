@@ -123,8 +123,9 @@ Mitigation:
 - The C++ subprocess is slower than Python on the recorded easy,
   early-witness smoke cases because startup dominates. It remains valuable as
   an independent verifier; hot-loop activation requires a harder-case profile.
-- PySAT/CaDiCaL, nauty, SMS, and Glasgow were unavailable on the audited
-  machine. Adapters fail closed and the lock file leaves their commits unset.
+- PySAT 1.9.dev7 with `cadical195` was tested through an isolated optional
+  environment. nauty, SMS, and Glasgow were unavailable on the audited host;
+  their adapters fail closed and the lock file leaves commits unset.
 - The built-in DPLL solver is deliberately restricted to tiny ground-truth
   tests and must not be used for frontier claims.
 - An unchecked SAT-solver UNSAT is preserved but reported as
@@ -133,3 +134,9 @@ Mitigation:
   inspection aid.
 - Heuristic reproducibility fixes RNG seeds and checkpoints, but wall-time
   scheduling can change how many candidates multiple workers evaluate.
+- The hot-loop score is intentionally incomplete after a deterministic
+  per-length witness/DFS-node budget. This bounds latency but can flatten the
+  ranking signal; finalist verification is uncapped and exact.
+- Periodic metric retention keeps the newest 100,000 rows. Longer runs retain
+  immutable run metadata, events, checkpoints, and improvements, but not
+  second-by-second history beyond that window.

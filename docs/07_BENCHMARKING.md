@@ -67,6 +67,11 @@ Pass conditions:
 - dashboard remains responsive;
 - no queue grows without bound.
 
+The implemented two-hour gate additionally requires zero worker failures,
+observed worker recycling, monotonic candidate counters, post-resume progress,
+queue occupancy within configured capacity, and SQLite growth no greater than
+64 MiB during the run.
+
 ## Forecast model
 
 ### Heuristic search

@@ -37,13 +37,30 @@ The graph6 and JSON forms must be cross-hashed in the manifest.
 {
   "updated_at": "...",
   "run_id": "...",
+  "target": "erdos_gyarfas",
   "status": "RUNNING",
   "elapsed_seconds": 1234,
-  "workers": {"alive": 12, "failed": 0},
-  "throughput": {"candidates_per_second": 21000},
-  "best": {"candidate_id": "...", "score": [1, 3, 18, 0]},
-  "resources": {"rss_bytes": 123, "disk_free_bytes": 456},
-  "queues": {"improvements": 2, "exact": 1}
+  "remaining_seconds": 85166,
+  "configuration": {"order": 32, "mode": "cubic_first"},
+  "workers": {"configured": 12, "alive": 12, "failed": 0, "items": []},
+  "throughput": {"candidates": 123456, "candidates_per_second": 21000},
+  "best": {
+    "candidate_id": "...",
+    "score": {"ordering_key": [0, 3, 18, -730000, 48]}
+  },
+  "exact_verification": {"queued": 0, "verified_candidates": 1},
+  "resources": {
+    "master_rss_bytes": 123,
+    "worker_rss_bytes": 456,
+    "aggregate_rss_bytes": 579,
+    "disk_free_bytes": 789,
+    "database_bytes": 12345
+  },
+  "queues": {
+    "telemetry_current": 2,
+    "telemetry_max": 256,
+    "exact_current": 0
+  }
 }
 ```
 
@@ -73,12 +90,22 @@ The master processes each monotonically increasing version once.
     "valid": true,
     "witness_counts": {"4": 0, "8": 0, "16": 1, "32": 4},
     "weighted_penalty": 12,
-    "novelty": 0.73
+    "complete": false,
+    "novelty": 0.73,
+    "simplicity": 48,
+    "ordering_key": [0, 5, 12, -730000, 48]
   },
-  "verification_status": "PENDING"
+  "verification_status": "PENDING",
+  "artifacts": {
+    "graph6": "<candidate-id>.graph6",
+    "json": "<candidate-id>.json",
+    "svg": "<candidate-id>.svg"
+  }
 }
 ```
 
 ## Benchmark record
 
 Include raw samples or histograms, not only averages. Store units explicitly.
+Reports also preserve the exact reproduction argv, hardware/cgroup metadata,
+Git commit and dirty-state status when known, and all pass/fail gate fields.

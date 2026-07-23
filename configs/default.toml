@@ -13,9 +13,9 @@ queue_capacity = 256
 [limits]
 wall_seconds = 86400
 memory_high_bytes = 161061273600
-memory_max_bytes = 182536110080
+memory_max_bytes = 180388626432
 min_free_disk_bytes = 10737418240
-max_log_bytes = 1073741824
+max_log_bytes = 16777216
 
 [storage]
 workspace = "./workspace"

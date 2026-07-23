@@ -2,7 +2,7 @@
 set -euo pipefail
 
 MEMORY_HIGH="${SGLAB_MEMORY_HIGH:-150G}"
-MEMORY_MAX="${SGLAB_MEMORY_MAX:-170G}"
+MEMORY_MAX="${SGLAB_MEMORY_MAX:-168G}"
 CPU_QUOTA="${SGLAB_CPU_QUOTA:-1400%}"
 
 if command -v systemd-run >/dev/null 2>&1; then

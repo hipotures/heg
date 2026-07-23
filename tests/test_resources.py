@@ -20,4 +20,10 @@ class ResourceSafetyTests(unittest.TestCase):
             output_limit_bytes=64,
         )
         self.assertEqual(result.status, "ERROR_OUTPUT_LIMIT")
-        self.assertEqual(len(result.stdout), 64)
+        self.assertLessEqual(len(result.stdout) + len(result.stderr), 64)
+        missing = run_bounded(
+            ["/definitely/missing/sglab-tool"],
+            timeout_seconds=1,
+            output_limit_bytes=64,
+        )
+        self.assertEqual(missing.status, "TOOL_FAILURE")

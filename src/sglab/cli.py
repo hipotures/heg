@@ -6,10 +6,9 @@ from shutil import which
 from threading import Thread
 from urllib.request import urlopen
 import json
-import os
 import platform
+import sys
 import tempfile
-import time
 
 from .benchmark import calibrate, hardware_metadata, microbenchmark, soak, write_report
 from .model import BitGraph
@@ -17,27 +16,67 @@ from .certification import certify, verify_cpp
 from .config import load_config
 from .db import connect
 from .external import TOOLS
+from .locations import asset_path, cyclecheck_path
+from .resources import run_bounded
 from .search import ALGORITHMS, MODES, SearchConfig, config_from_run, run_search
 from .sat import run_pysat_cegar
-from .state import append_event, atomic_write_json, read_json, utc_now
+from .state import (
+    append_event,
+    atomic_write_json,
+    next_control,
+    utc_now,
+)
 from .targets.erdos_gyarfas import verify_reference
-from .web import serve
+from .web import create_server, serve
 
 
 def _workspace(path: str) -> Path:
     return Path(path).expanduser().resolve()
 
 
+def _read_text_limited(
+    path: str,
+    *,
+    encoding: str,
+    max_bytes: int = 4 * 1024 * 1024,
+) -> str:
+    source = Path(path)
+    with source.open("rb") as handle:
+        payload = handle.read(max_bytes + 1)
+    if len(payload) > max_bytes:
+        raise ValueError(f"input exceeds {max_bytes} bytes")
+    return payload.decode(encoding)
+
+
 def cmd_doctor(_: Namespace) -> int:
     external = {tool.name: tool.version() for tool in TOOLS}
     external["cadical"] = {"path": which("cadical"), "version": None}
+    cyclecheck = cyclecheck_path()
+    cycle_version = (
+        run_bounded(
+            [str(cyclecheck), "--version"],
+            timeout_seconds=5,
+            output_limit_bytes=4096,
+        )
+        if cyclecheck.is_file()
+        else None
+    )
     report = {
         "python": platform.python_version(),
-        "python_supported": tuple(map(int, platform.python_version_tuple()[:2])) >= (3, 12),
+        "python_supported": tuple(map(int, platform.python_version_tuple()[:2]))
+        >= (3, 12),
         "platform": platform.platform(),
         "cgroup_v2": Path("/sys/fs/cgroup/cgroup.controllers").exists(),
         "tools": external,
-        "cyclecheck": str(Path(__file__).resolve().parents[2] / "_build" / "sglab-cyclecheck"),
+        "cyclecheck": {
+            "path": str(cyclecheck),
+            "available": cyclecheck.is_file(),
+            "version": (
+                cycle_version.stdout.decode("utf-8", errors="replace").strip()
+                if cycle_version is not None and cycle_version.status == "OK"
+                else None
+            ),
+        },
     }
     print(json.dumps(report, indent=2, sort_keys=True))
     return 0 if report["python_supported"] else 1
@@ -83,21 +122,26 @@ def cmd_serve(args: Namespace) -> int:
 
 def cmd_verify(args: Namespace) -> int:
     if args.graph_json:
-        payload = json.loads(Path(args.graph_json).read_text(encoding="utf-8"))
+        payload = json.loads(_read_text_limited(args.graph_json, encoding="utf-8"))
         graph = BitGraph.from_edges(
             int(payload["n"]), [tuple(edge) for edge in payload["edges"]]
         )
     else:
-        graph = BitGraph.from_graph6(Path(args.graph6).read_text(encoding="ascii"))
+        graph = BitGraph.from_graph6(_read_text_limited(args.graph6, encoding="ascii"))
     if args.artifact_dir:
         report = certify(
             graph,
             Path(args.artifact_dir).resolve(),
             binary=Path(args.cpp_binary) if args.cpp_binary else None,
             timeout_seconds=args.timeout,
+            memory_limit_bytes=args.memory_limit,
         )
         print(json.dumps(report, indent=2, sort_keys=True))
-        return 0 if report["status"] in {"COUNTEREXAMPLE_VERIFIED", "INVALID_CANDIDATE"} else 2
+        return (
+            0
+            if report["status"] in {"COUNTEREXAMPLE_VERIFIED", "INVALID_CANDIDATE"}
+            else 2
+        )
     result = verify_reference(graph)
     reference_payload = {
         "status": result.status,
@@ -117,6 +161,7 @@ def cmd_verify(args: Namespace) -> int:
             graph,
             Path(args.cpp_binary) if args.cpp_binary else None,
             args.timeout,
+            args.memory_limit,
         )
         agrees = (
             (result.status == "VERIFIED" and independent["status"] == "ABSENT")
@@ -138,12 +183,26 @@ def cmd_dashboard_smoke(_: Namespace) -> int:
     with tempfile.TemporaryDirectory() as temp_dir:
         workspace = Path(temp_dir)
         atomic_write_json(workspace / "state.json", {"status": "SMOKE"})
-        thread = Thread(target=serve, args=(workspace, "127.0.0.1", 0), daemon=True)
-        # The generic serve function cannot report an ephemeral port. Test the
-        # state and static pieces directly instead of starting a hidden server.
-        assert json.loads((workspace / "state.json").read_text())["status"] == "SMOKE"
-        assert (Path(__file__).resolve().parents[2] / "web" / "index.html").is_file()
-        print("dashboard smoke: ok")
+        server = create_server(workspace, "127.0.0.1", 0)
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        host, port = server.server_address
+        try:
+            with urlopen(f"http://{host}:{port}/api/status", timeout=2) as response:
+                payload = json.load(response)
+                status = response.status
+            if status != 200 or payload.get("status") != "SMOKE":
+                raise RuntimeError("dashboard status endpoint failed its smoke check")
+            with urlopen(f"http://{host}:{port}/", timeout=2) as response:
+                page = response.read()
+                status = response.status
+            if status != 200 or b"STRUCTURAL GRAPH LAB" not in page:
+                raise RuntimeError("dashboard static page failed its smoke check")
+            print("dashboard smoke: ok")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
     return 0
 
 
@@ -165,10 +224,9 @@ def _duration(value: str) -> float:
 
 
 def cmd_run(args: Namespace) -> int:
-    root = Path(__file__).resolve().parents[2]
     loaded = load_config(
-        root / "configs" / "default.toml",
-        root / "configs" / "targets" / "erdos_gyarfas.toml",
+        asset_path("configs", "default.toml"),
+        asset_path("configs", "targets", "erdos_gyarfas.toml"),
         args.config,
     )
     runtime = loaded["runtime"]
@@ -176,8 +234,26 @@ def cmd_run(args: Namespace) -> int:
     storage = loaded["storage"]
     graph = loaded["graph"]
     search = loaded["search"]
+    memory_limit_bytes = (
+        args.memory_limit
+        if args.memory_limit is not None
+        else int(limits["memory_max_bytes"])
+    )
+    configured_memory_high = int(limits["memory_high_bytes"])
+    memory_high_bytes = (
+        args.memory_high
+        if args.memory_high is not None
+        else (
+            0
+            if args.memory_limit is not None
+            and memory_limit_bytes > 0
+            and configured_memory_high > memory_limit_bytes
+            else configured_memory_high
+        )
+    )
     config = SearchConfig(
         workspace=_workspace(args.workspace),
+        target=args.target,
         order=args.order if args.order is not None else int(graph["order"]),
         mode=args.mode or str(search["mode"]),
         algorithm=args.algorithm or str(search["algorithm"]),
@@ -199,12 +275,10 @@ def cmd_run(args: Namespace) -> int:
         state_seconds=float(runtime["state_update_seconds"]),
         checkpoint_seconds=float(runtime["checkpoint_seconds"]),
         worker_recycle_candidates=int(runtime["worker_recycle_candidates"]),
-        memory_limit_bytes=(
-            args.memory_limit
-            if args.memory_limit is not None
-            else int(limits["memory_max_bytes"])
-        ),
+        memory_high_bytes=memory_high_bytes,
+        memory_limit_bytes=memory_limit_bytes,
         min_free_disk_bytes=int(limits["min_free_disk_bytes"]),
+        max_log_bytes=int(limits["max_log_bytes"]),
         notes=args.notes or str(loaded.get("notes", {}).get("text", "")),
         exact_timeout_seconds=args.exact_timeout,
     )
@@ -224,13 +298,7 @@ def cmd_resume(args: Namespace) -> int:
 
 def cmd_control(args: Namespace) -> int:
     workspace = _workspace(args.workspace)
-    current = read_json(workspace / "control.json", default={"version": 0})
-    request = {
-        "version": int(current.get("version", 0)) + 1,
-        "requested_at": utc_now(),
-        "action": args.action,
-    }
-    atomic_write_json(workspace / "control.json", request)
+    request = next_control(workspace, args.action)
     print(json.dumps(request, sort_keys=True))
     return 0
 
@@ -242,6 +310,7 @@ def cmd_sat(args: Namespace) -> int:
         timeout_seconds=_duration(args.time_limit),
         seed=args.seed,
         solver_name=args.solver,
+        memory_limit_bytes=args.memory_limit,
     )
     print(json.dumps(report, indent=2, sort_keys=True))
     return 0 if report["status"] != "TOOL_FAILURE" else 2
@@ -262,6 +331,7 @@ def cmd_benchmark(args: Namespace) -> int:
     output = _workspace(args.output)
     output.mkdir(parents=True, exist_ok=True)
     report["target"] = "erdos_gyarfas"
+    report["reproduce_argv"] = ["sglab", *sys.argv[1:]]
     report["hardware"] = hardware_metadata(output)
     paths = write_report(report, output)
     print(json.dumps({"json": str(paths[0]), "markdown": str(paths[1])}, indent=2))
@@ -292,6 +362,7 @@ def build_parser() -> ArgumentParser:
     verify.add_argument("--artifact-dir")
     verify.add_argument("--cpp-binary")
     verify.add_argument("--timeout", type=float, default=0)
+    verify.add_argument("--memory-limit", type=int, default=0)
     verify.add_argument("--reference-only", action="store_true")
     verify.set_defaults(func=cmd_verify)
 
@@ -312,6 +383,7 @@ def build_parser() -> ArgumentParser:
     run.add_argument("--time-limit")
     run.add_argument("--max-candidates", type=int, default=0)
     run.add_argument("--witness-cap", type=int)
+    run.add_argument("--memory-high", type=int)
     run.add_argument("--memory-limit", type=int)
     run.add_argument("--notes")
     run.add_argument("--exact-timeout", type=float, default=30)
@@ -334,15 +406,20 @@ def build_parser() -> ArgumentParser:
     sat.add_argument("--time-limit", default="60s")
     sat.add_argument("--seed", type=int, default=1)
     sat.add_argument("--solver", default="cadical195")
+    sat.add_argument("--memory-limit", type=int, default=0)
     sat.set_defaults(func=cmd_sat)
 
     benchmark = subparsers.add_parser("benchmark")
-    benchmark_commands = benchmark.add_subparsers(dest="benchmark_command", required=True)
+    benchmark_commands = benchmark.add_subparsers(
+        dest="benchmark_command", required=True
+    )
     calibration = benchmark_commands.add_parser("calibrate")
     calibration.add_argument("--minutes", type=float, default=15)
     calibration.add_argument("--seeds", type=int, default=2)
     calibration.add_argument("--jobs", type=int)
-    calibration.add_argument("--target", choices=["erdos_gyarfas"], default="erdos_gyarfas")
+    calibration.add_argument(
+        "--target", choices=["erdos_gyarfas"], default="erdos_gyarfas"
+    )
     calibration.add_argument("--output", required=True)
     calibration.set_defaults(func=cmd_benchmark)
     micro = benchmark_commands.add_parser("micro")

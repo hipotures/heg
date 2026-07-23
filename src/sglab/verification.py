@@ -42,7 +42,9 @@ def verify_dynamic(graph: BitGraph) -> VerifyResult:
     if graph.n == 0:
         return _result("INVALID", "graph must be non-empty", started)
     if not graph.is_connected():
-        return _result("INVALID", "minimal-candidate mode requires connectedness", started)
+        return _result(
+            "INVALID", "minimal-candidate mode requires connectedness", started
+        )
     if graph.minimum_degree() < 3:
         return _result("INVALID", "minimum degree is below 3", started)
     for length in forbidden_lengths(graph.n):

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 from datetime import UTC, datetime
+import fcntl
+import hashlib
 import json
 import os
 from typing import Any
@@ -27,7 +29,9 @@ def atomic_write_json(path: str | Path, data: dict[str, Any]) -> None:
         os.close(directory_fd)
 
 
-def read_json(path: str | Path, default: dict[str, Any] | None = None) -> dict[str, Any]:
+def read_json(
+    path: str | Path, default: dict[str, Any] | None = None
+) -> dict[str, Any]:
     target = Path(path)
     if not target.exists():
         return {} if default is None else default
@@ -53,11 +57,47 @@ def append_event(
 
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    if target.exists() and target.stat().st_size >= max_bytes:
-        rotated = target.with_suffix(target.suffix + ".1")
-        os.replace(target, rotated)
     record = {"at": utc_now(), "event": event, **fields}
     line = json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n"
+    encoded = line.encode("utf-8")
+    if max_bytes >= 512 and len(encoded) > max_bytes:
+        line = (
+            json.dumps(
+                {
+                    "at": record["at"],
+                    "event": event,
+                    "detail_sha256": hashlib.sha256(encoded).hexdigest(),
+                    "original_bytes": len(encoded),
+                    "truncated": True,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            + "\n"
+        )
+    if (
+        target.exists()
+        and target.stat().st_size + len(line.encode("utf-8")) > max_bytes
+    ):
+        rotated = target.with_suffix(target.suffix + ".1")
+        os.replace(target, rotated)
     with target.open("a", encoding="utf-8") as handle:
         handle.write(line)
         handle.flush()
+
+
+def next_control(workspace: str | Path, action: str) -> dict[str, Any]:
+    root = Path(workspace)
+    root.mkdir(parents=True, exist_ok=True)
+    lock_path = root / ".control.lock"
+    with lock_path.open("a", encoding="ascii") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        current = read_json(root / "control.json", default={"version": 0})
+        request = {
+            "version": int(current.get("version", 0)) + 1,
+            "requested_at": utc_now(),
+            "action": action,
+        }
+        atomic_write_json(root / "control.json", request)
+        fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+    return request

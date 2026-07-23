@@ -51,6 +51,7 @@
         <label>Workers<input name="workers" type="number" min="1" max="256" value="1"></label>
         <label>Seed<input name="seed" type="number" min="0" value="1"></label>
         <label>Time (seconds)<input name="wall_seconds" type="number" min="1" max="604800" value="60"></label>
+        <label>Memory high bytes<input name="memory_high_bytes" type="number" min="0" value="0"></label>
         <label>Memory bytes<input name="memory_limit_bytes" type="number" min="0" value="0"></label>
         <label>Notes<input name="notes" maxlength="500"></label>
       </form>
@@ -65,7 +66,7 @@
     <section class="wide"><h2>Experiments</h2><div id="runs"></div></section>
   </main>
 <script>
-const token = new URLSearchParams(location.search).get('token');
+const token = new URLSearchParams(location.hash.slice(1)).get('token');
 const headers = {'Content-Type': 'application/json', ...(token ? {'Authorization': `Bearer ${token}`} : {})};
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function api(path, options = {}) {
@@ -105,7 +106,7 @@ async function refresh() {
 }
 document.getElementById('start').addEventListener('click', async () => {
   const data = Object.fromEntries(new FormData(document.getElementById('run-form')));
-  for (const key of ['order','workers','seed','wall_seconds','memory_limit_bytes']) data[key] = Number(data[key]);
+  for (const key of ['order','workers','seed','wall_seconds','memory_high_bytes','memory_limit_bytes']) data[key] = Number(data[key]);
   try { const result = await api('/api/runs', {method: 'POST', body: JSON.stringify(data)}); document.getElementById('notice').textContent = `Started PID ${result.pid}`; }
   catch (error) { document.getElementById('notice').textContent = error.message; }
 });

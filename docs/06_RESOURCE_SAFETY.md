@@ -23,7 +23,7 @@ Do not automatically use every logical CPU. Solver and memory behavior must dete
 For 192 GB RAM, suggested initial limits:
 
 - `MemoryHigh`: 150 GB;
-- `MemoryMax`: 170 GB;
+- `MemoryMax`: 168 GiB (180,388,626,432 bytes);
 - hard reserve: at least 20 GB for OS, filesystem cache, and recovery.
 
 Tune after measuring. Do not assume a solver's memory scales linearly.
@@ -35,7 +35,7 @@ Preferred launch pattern with systemd:
 ```bash
 systemd-run --user --scope \
   -p MemoryHigh=150G \
-  -p MemoryMax=170G \
+  -p MemoryMax=168G \
   -p TasksMax=512 \
   -p CPUQuota=1400% \
   ./scripts/run_experiment.sh ...
@@ -74,6 +74,8 @@ Never accumulate all candidates or all cycle witnesses.
 - one writer;
 - batch inserts;
 - periodic WAL checkpoint;
+- retain at most 100,000 periodic metric rows per run database;
+- delete evicted candidate rows and files with the bounded top-K archive;
 - database size shown in dashboard;
 - no per-candidate write;
 - index only columns used by UI and reports.

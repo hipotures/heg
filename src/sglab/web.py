@@ -3,6 +3,7 @@ from __future__ import annotations
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from subprocess import DEVNULL, Popen
+from threading import Lock
 from urllib.parse import parse_qs, urlparse
 from typing import Any
 import hmac
@@ -13,8 +14,9 @@ import re
 import sys
 
 from .resources import recommended_workers
+from .locations import asset_path
 from .search import ALGORITHMS, MODES
-from .state import atomic_write_json, read_json, utc_now
+from .state import atomic_write_json, next_control, read_json, utc_now
 
 ARTIFACT_PATTERN = re.compile(r"^[0-9a-f]{20}\.(?:graph6|json|svg)$")
 MAX_JSON_RESPONSE = 2 * 1024 * 1024
@@ -32,6 +34,7 @@ class DashboardServer(ThreadingHTTPServer):
         self.static_dir = static_dir.resolve()
         self.token = token
         self.runner: Popen[bytes] | None = None
+        self.launch_lock = Lock()
         super().__init__(address, DashboardHandler)
 
     def current_run_dir(self) -> Path | None:
@@ -46,13 +49,20 @@ class DashboardServer(ThreadingHTTPServer):
         return None
 
     def start_run(self, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
-        if self.runner is not None and self.runner.poll() is None:
+        with self.launch_lock:
+            return self._start_run_locked(payload)
+
+    def _start_run_locked(self, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        if (
+            self.runner is not None and self.runner.poll() is None
+        ) or _workspace_run_is_live(self):
             return 409, {"error": "a dashboard-started run is already active"}
         try:
             order = _integer(payload, "order", 4, 128)
             workers = _integer(payload, "workers", 1, max(1, recommended_workers(256)))
             seed = _integer(payload, "seed", 0, 2**31 - 1)
             wall_seconds = _integer(payload, "wall_seconds", 1, 7 * 86400)
+            memory_high = _integer(payload, "memory_high_bytes", 0, 2**63 - 1)
             memory_limit = _integer(payload, "memory_limit_bytes", 0, 2**63 - 1)
             mode = str(payload.get("mode", "cubic_first"))
             algorithm = str(payload.get("algorithm", "simulated_annealing"))
@@ -66,6 +76,12 @@ class DashboardServer(ThreadingHTTPServer):
             return 400, {"error": "unsupported mode or algorithm"}
         if mode == "cubic_first" and order % 2:
             return 400, {"error": "cubic_first requires an even order"}
+        if mode == "minimal_structure_mixed_degree" and order < 5:
+            return 400, {
+                "error": ("minimal_structure_mixed_degree requires order at least 5")
+            }
+        if memory_high and memory_limit and memory_high > memory_limit:
+            return 400, {"error": "memory high cannot exceed memory limit"}
         if len(notes) > 500:
             return 400, {"error": "notes exceed 500 characters"}
         command = [
@@ -89,14 +105,18 @@ class DashboardServer(ThreadingHTTPServer):
             str(wall_seconds),
             "--memory-limit",
             str(memory_limit),
-            "--notes",
-            notes,
+            "--memory-high",
+            str(memory_high),
+            f"--notes={notes}",
             "--workspace",
             str(self.workspace),
         ]
         logs = self.workspace / "logs"
         logs.mkdir(parents=True, exist_ok=True)
-        with (logs / "dashboard-runner.log").open("ab") as log:
+        runner_log = logs / "dashboard-runner.log"
+        if runner_log.is_file() and runner_log.stat().st_size >= 16 * 1024 * 1024:
+            os.replace(runner_log, runner_log.with_suffix(".log.1"))
+        with runner_log.open("ab") as log:
             self.runner = Popen(
                 command,
                 stdin=DEVNULL,
@@ -105,7 +125,7 @@ class DashboardServer(ThreadingHTTPServer):
                 start_new_session=True,
                 env=os.environ.copy(),
             )
-        request = _next_control(self.workspace, "START")
+        request = next_control(self.workspace, "START")
         atomic_write_json(self.workspace / "launch.json", {**payload, **request})
         return 202, {"accepted": True, "pid": self.runner.pid, **request}
 
@@ -168,7 +188,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.send_error(404)
             return
         body = candidate.read_bytes()
-        content_type = mimetypes.guess_type(candidate.name)[0] or "application/octet-stream"
+        content_type = (
+            mimetypes.guess_type(candidate.name)[0] or "application/octet-stream"
+        )
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
@@ -183,6 +205,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        if parsed.path.startswith("/api/") and not self._require_authorized():
+            return
         if parsed.path == "/api/status":
             self._json(
                 200,
@@ -208,7 +232,22 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 try:
                     record = read_json(path)
                     state = read_json(path.parent / "state.json", default={})
-                    runs.append({**record, "live_status": state.get("status", "UNKNOWN")})
+                    runs.append(
+                        {
+                            **record,
+                            "live_status": state.get("status", "UNKNOWN"),
+                            "elapsed_seconds": state.get("elapsed_seconds", 0),
+                            "candidates": state.get("throughput", {}).get(
+                                "candidates", 0
+                            ),
+                            "candidates_per_second": state.get("throughput", {}).get(
+                                "candidates_per_second", 0
+                            ),
+                            "best_score": state.get("best", {})
+                            .get("score", {})
+                            .get("ordering_key"),
+                        }
+                    )
                 except (OSError, ValueError, json.JSONDecodeError):
                     continue
             self._json(200, {"runs": runs})
@@ -221,16 +260,19 @@ class DashboardHandler(BaseHTTPRequestHandler):
             run_dir = self.server.current_run_dir()
             records = []
             if run_dir is not None:
-                for path in sorted((run_dir / "best").glob("*.json"))[:limit]:
+                for path in (run_dir / "best").glob("*.json"):
                     try:
                         records.append(read_json(path))
                     except (OSError, ValueError, json.JSONDecodeError):
                         continue
-            self._json(200, {"candidates": records})
+            records.sort(
+                key=lambda record: tuple(
+                    record.get("score", {}).get("ordering_key", [10**9] * 5)
+                )
+            )
+            self._json(200, {"candidates": records[:limit]})
             return
         if parsed.path.startswith("/api/artifact/"):
-            if not self._require_authorized():
-                return
             filename = parsed.path.removeprefix("/api/artifact/")
             if not ARTIFACT_PATTERN.fullmatch(filename):
                 self._json(400, {"error": "invalid artifact id"})
@@ -253,7 +295,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 mimetypes.guess_type(filename)[0] or "application/octet-stream",
             )
             self.send_header("Content-Length", str(len(body)))
-            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+            self.send_header(
+                "Content-Disposition", f'attachment; filename="{filename}"'
+            )
             self.end_headers()
             self.wfile.write(body)
             return
@@ -261,6 +305,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         if not self._require_authorized():
+            return
+        if self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower() != (
+            "application/json"
+        ):
+            self._json(415, {"error": "Content-Type must be application/json"})
             return
         parsed = urlparse(self.path)
         payload = self._body()
@@ -277,7 +326,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if action not in {"PAUSE", "RESUME", "STOP"}:
             self._json(400, {"error": "unsupported action"})
             return
-        request = _next_control(self.server.workspace, str(action))
+        request = next_control(self.server.workspace, str(action))
         self._json(202, {"accepted": True, **request})
 
     def log_message(self, format: str, *args: object) -> None:
@@ -286,12 +335,39 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
 def _integer(payload: dict[str, Any], key: str, minimum: int, maximum: int) -> int:
     value = payload.get(key)
-    if isinstance(value, bool):
+    if isinstance(value, bool) or not isinstance(value, int):
         raise TypeError(f"{key} must be an integer")
-    parsed = int(value)
-    if not minimum <= parsed <= maximum:
+    if not minimum <= value <= maximum:
         raise ValueError(f"{key} must be between {minimum} and {maximum}")
-    return parsed
+    return value
+
+
+def _workspace_run_is_live(server: DashboardServer) -> bool:
+    state = read_json(server.workspace / "state.json", default={})
+    if state.get("status") not in {
+        "RUNNING",
+        "PAUSED",
+        "PAUSED_MEMORY_HIGH",
+        "STOPPING",
+        "VERIFYING_FINALIST",
+    }:
+        return False
+    run_dir = server.current_run_dir()
+    if run_dir is None:
+        return False
+    run_record = read_json(run_dir / "run.json", default={})
+    try:
+        pid = int(run_record.get("environment", {}).get("pid", 0))
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        command = Path(f"/proc/{pid}/cmdline").read_bytes()
+    except (OSError, PermissionError):
+        return False
+    return b"sglab" in command
 
 
 def _query_limit(query: str, *, default: int, maximum: int) -> int | None:
@@ -300,17 +376,6 @@ def _query_limit(query: str, *, default: int, maximum: int) -> int | None:
         return max(1, min(maximum, int(raw)))
     except ValueError:
         return None
-
-
-def _next_control(workspace: Path, action: str) -> dict[str, Any]:
-    current = read_json(workspace / "control.json", default={"version": 0})
-    request = {
-        "version": int(current.get("version", 0)) + 1,
-        "requested_at": utc_now(),
-        "action": action,
-    }
-    atomic_write_json(workspace / "control.json", request)
-    return request
 
 
 def _bounded_tail(path: Path, limit: int) -> list[str]:
@@ -330,7 +395,7 @@ def create_server(
     *,
     token: str | None = None,
 ) -> DashboardServer:
-    static_dir = Path(__file__).resolve().parents[2] / "web"
+    static_dir = asset_path("web")
     return DashboardServer(
         (host, port),
         workspace=workspace,

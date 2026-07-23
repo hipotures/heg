@@ -33,6 +33,12 @@ Acceptance:
 
 Use adaptive reheating after stagnation.
 
+The hot-loop cycle counter is intentionally incomplete. It caps witnesses per
+forbidden length and also caps deterministic DFS work at
+`max(4096, min(50000, cap * 1024))` visited search nodes per length. Exhausting
+either bound sets `ScoreResult.complete = false`; it never implies absence.
+Every archived finalist still goes through uncapped exact verification.
+
 ## Iterated local search
 
 - run greedy or tabu-improving moves to a local optimum;
@@ -123,6 +129,10 @@ Use:
 Never use a non-canonical hash as proof that two graphs are isomorphic or non-isomorphic.
 
 ## LLM role
+
+This is an optional, manual, post-run development activity. The installed
+search, SAT, verification, and dashboard runtime contains no LLM client and
+makes no AI/API request.
 
 The LLM may:
 

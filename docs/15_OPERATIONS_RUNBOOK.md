@@ -25,7 +25,8 @@ sglab run \
 ```
 
 The command runs in the foreground and writes all live and immutable artifacts
-under `workspace/runs/<run-id>/`.
+under `workspace/runs/<run-id>/`. A nonblocking workspace lock prevents two
+coordinators from writing the same workspace concurrently.
 
 ## Monitoring
 
@@ -60,6 +61,10 @@ Resume must not create a new run ID unless explicitly requested.
 - wait for bounded grace period;
 - terminate remaining process groups;
 - mark run status accurately.
+
+After workers stop, the best archived finalist enters
+`VERIFYING_FINALIST`; Python and C++ reports are recorded before the terminal
+run status is written.
 
 ## Crash recovery
 

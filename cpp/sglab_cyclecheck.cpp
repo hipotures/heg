@@ -1,4 +1,5 @@
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <fstream>
 #include <iostream>
@@ -124,8 +125,18 @@ Graph parse_graph6(std::string raw) {
         throw std::runtime_error("cycle checker supports at most 128 vertices");
     }
     const std::size_t required = static_cast<std::size_t>(n) * (n - 1) / 2;
-    if ((raw.size() - offset) * 6 < required) {
+    const std::size_t required_bytes = (required + 5) / 6;
+    if (raw.size() - offset < required_bytes) {
         throw std::runtime_error("truncated graph6 input");
+    }
+    if (raw.size() - offset > required_bytes) {
+        throw std::runtime_error("graph6 input contains trailing data");
+    }
+    if (required % 6 != 0 && required_bytes != 0) {
+        const int unused_mask = (1 << (6 - required % 6)) - 1;
+        if ((value(raw.size() - 1) & unused_mask) != 0) {
+            throw std::runtime_error("graph6 padding bits must be zero");
+        }
     }
     Graph graph{n, std::vector<Bits>(n, 0)};
     std::size_t position = 0;
@@ -177,6 +188,14 @@ int main(int argc, char** argv) {
         }
         if (graph_path.empty() || lengths.empty()) {
             throw std::runtime_error("--graph6 and at least one --length are required");
+        }
+        if (!std::isfinite(timeout_seconds) || timeout_seconds < 0.0) {
+            throw std::runtime_error("--timeout-seconds must be finite and nonnegative");
+        }
+        for (const int length : lengths) {
+            if (length < 3 || length > 128) {
+                throw std::runtime_error("--length must be between 3 and 128");
+            }
         }
         std::ifstream input(graph_path);
         std::string encoded;

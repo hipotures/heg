@@ -45,6 +45,8 @@ class BitGraph:
                 raise ValueError("edge endpoint out of range")
             if u == v:
                 raise ValueError("loops are not allowed")
+            if rows[u] & (1 << v):
+                raise ValueError("duplicate edges are not allowed")
             rows[u] |= 1 << v
             rows[v] |= 1 << u
         return cls(n=n, rows=tuple(rows))
@@ -159,10 +161,16 @@ class BitGraph:
         encoded = raw[offset:]
         if any(byte < 63 or byte > 126 for byte in encoded):
             raise ValueError("invalid graph6 byte")
-        available = len(encoded) * 6
         required = n * (n - 1) // 2
-        if available < required:
+        required_bytes = (required + 5) // 6
+        if len(encoded) < required_bytes:
             raise ValueError("truncated graph6 input")
+        if len(encoded) > required_bytes:
+            raise ValueError("graph6 input contains trailing data")
+        if required % 6 and encoded:
+            unused_mask = (1 << (6 - required % 6)) - 1
+            if (encoded[-1] - 63) & unused_mask:
+                raise ValueError("graph6 padding bits must be zero")
         edges: list[tuple[int, int]] = []
         position = 0
         for v in range(1, n):
@@ -222,15 +230,39 @@ def find_cycles_of_length(
 ) -> tuple[tuple[int, ...], ...]:
     """Enumerate at most ``limit`` cycles, without rotations or reversals."""
 
+    return find_cycles_of_length_bounded(graph, length, limit, None)[0]
+
+
+def find_cycles_of_length_bounded(
+    graph: BitGraph,
+    length: int,
+    limit: int,
+    node_budget: int | None,
+) -> tuple[tuple[tuple[int, ...], ...], bool]:
+    """Enumerate cycles under an optional DFS-node budget.
+
+    The boolean is true only when enumeration was exhaustive before reaching
+    either the witness limit or the work budget.
+    """
+
     if limit <= 0 or length < 3 or length > graph.n:
-        return ()
+        return (), True
+    if node_budget is not None and node_budget < 1:
+        raise ValueError("node_budget must be positive")
     found: list[tuple[int, ...]] = []
+    visited_nodes = 0
+    budget_exhausted = False
     for start in range(graph.n):
         path = [start]
         visited = 1 << start
 
         def dfs(last: int, seen: int) -> None:
-            if len(found) >= limit:
+            nonlocal visited_nodes, budget_exhausted
+            if len(found) >= limit or budget_exhausted:
+                return
+            visited_nodes += 1
+            if node_budget is not None and visited_nodes > node_budget:
+                budget_exhausted = True
                 return
             if len(path) == length:
                 if graph.has_edge(last, start) and path[1] < path[-1]:
@@ -238,7 +270,7 @@ def find_cycles_of_length(
                 return
             bits = graph.rows[last] & ~seen
             bits &= ~((1 << (start + 1)) - 1)
-            while bits and len(found) < limit:
+            while bits and len(found) < limit and not budget_exhausted:
                 bit = bits & -bits
                 path.append(bit.bit_length() - 1)
                 dfs(path[-1], seen | bit)
@@ -248,4 +280,6 @@ def find_cycles_of_length(
         dfs(start, visited)
         if len(found) >= limit:
             break
-    return tuple(found)
+        if budget_exhausted:
+            break
+    return tuple(found), not budget_exhausted and len(found) < limit

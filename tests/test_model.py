@@ -1,7 +1,11 @@
 import unittest
 
-from sglab.model import BitGraph, find_cycle_of_length
-from sglab.targets.erdos_gyarfas import forbidden_lengths, verify_reference
+from sglab.model import (
+    BitGraph,
+    find_cycle_of_length,
+    find_cycles_of_length_bounded,
+)
+from sglab.targets.erdos_gyarfas import PLUGIN, forbidden_lengths, verify_reference
 
 
 class BitGraphTests(unittest.TestCase):
@@ -12,6 +16,8 @@ class BitGraphTests(unittest.TestCase):
     def test_rejects_loop(self) -> None:
         with self.assertRaises(ValueError):
             BitGraph(1, (1,))
+        with self.assertRaises(ValueError):
+            BitGraph.from_edges(2, [(0, 1), (1, 0)])
 
     def test_basic_invariants(self) -> None:
         graph = BitGraph.from_edges(4, [(0, 1), (1, 2), (2, 3), (3, 0)])
@@ -25,6 +31,9 @@ class BitGraphTests(unittest.TestCase):
         cycle = find_cycle_of_length(graph, 4)
         self.assertIsNotNone(cycle)
         self.assertEqual(len(cycle or ()), 4)
+        witnesses, complete = find_cycles_of_length_bounded(graph, 4, 2, 1)
+        self.assertEqual(witnesses, ())
+        self.assertFalse(complete)
 
     def test_k4_is_rejected(self) -> None:
         graph = BitGraph.from_edges(
@@ -34,6 +43,9 @@ class BitGraphTests(unittest.TestCase):
         result = verify_reference(graph)
         self.assertEqual(result.status, "REJECTED")
         self.assertTrue(result.complete)
+        score = PLUGIN.cheap_score(graph, cap=1)
+        self.assertEqual(score.witness_counts, ((4, 1),))
+        self.assertFalse(score.complete)
 
     def test_forbidden_lengths(self) -> None:
         self.assertEqual(forbidden_lengths(31), (4, 8, 16))
@@ -48,8 +60,14 @@ class BitGraphTests(unittest.TestCase):
             self.assertEqual(BitGraph.from_graph6(graph.to_graph6()), graph)
 
     def test_graph6_known_k4(self) -> None:
-        graph = BitGraph.from_edges(4, ((u, v) for u in range(4) for v in range(u + 1, 4)))
+        graph = BitGraph.from_edges(
+            4, ((u, v) for u in range(4) for v in range(u + 1, 4))
+        )
         self.assertEqual(graph.to_graph6(), "C~")
+        with self.assertRaisesRegex(ValueError, "trailing data"):
+            BitGraph.from_graph6("C~?")
+        with self.assertRaisesRegex(ValueError, "padding bits"):
+            BitGraph.from_graph6("A@")
 
     def test_stable_hash_is_deterministic(self) -> None:
         graph = BitGraph.from_edges(3, [(0, 1)])

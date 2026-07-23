@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from sglab.config import merge_config
-from sglab.db import SCHEMA_VERSION, connect
+from sglab.db import SCHEMA_VERSION, connect, insert_metrics, insert_run, prune_metrics
 
 
 class ConfigAndDatabaseTests(unittest.TestCase):
@@ -25,6 +25,16 @@ class ConfigAndDatabaseTests(unittest.TestCase):
             self.assertEqual(
                 connection.execute("PRAGMA journal_mode").fetchone()[0].lower(),
                 "wal",
+            )
+            insert_run(connection, "run", "now", "target", {}, {})
+            insert_metrics(
+                connection,
+                (("run", str(index), index, 0, 1.0, 1) for index in range(5)),
+            )
+            prune_metrics(connection, max_rows=2)
+            self.assertEqual(
+                connection.execute("SELECT count(*) FROM run_metrics").fetchone()[0],
+                2,
             )
             connection.close()
             connect(path).close()
