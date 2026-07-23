@@ -132,6 +132,7 @@ exact paths agree that every target cycle length is absent.
 sglab benchmark micro --iterations 10 --output ./workspace/benchmarks
 sglab benchmark calibrate \
   --minutes 15 \
+  --seeds 2 \
   --target erdos_gyarfas \
   --output ./workspace/benchmarks
 sglab benchmark soak \

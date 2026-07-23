@@ -108,7 +108,7 @@ UNSAT results never become `UNSAT_CERTIFIED`.
 
 ```bash
 sglab benchmark micro --iterations 10 --output ./workspace/benchmarks
-sglab benchmark calibrate --minutes 15 --target erdos_gyarfas \
+sglab benchmark calibrate --minutes 15 --seeds 2 --target erdos_gyarfas \
   --output ./workspace/benchmarks
 sglab benchmark soak --hours 2 --order 32 --workers 12 \
   --workspace ./workspace-soak --output ./workspace-soak/benchmarks
@@ -117,3 +117,5 @@ sglab benchmark soak --hours 2 --order 32 --workers 12 \
 Reports preserve raw samples, p50/p90/p95/max, hardware metadata, peak RSS,
 adjacent-order factors, and range forecasts. The soak command automatically
 exercises pause/resume and records bounded-queue and worker-recycle settings.
+Calibration cases run in separate processes; `--jobs` caps concurrency while
+the default reserves at least two logical CPU threads.

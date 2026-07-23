@@ -82,8 +82,9 @@ larger overlap experiments remain explicit external-tool gates.
 - configurable soak runner that exercises pause/resume, recycling, RSS plateau,
   database growth, and bounded queues.
 
-Short smoke reports do not substitute for a requested 15-minute calibration or
-two-hour production soak; the report metadata always records actual duration.
+The 15-minute, 16-process calibration completed on 2026-07-23 and is preserved
+under `docs/benchmarks/`. A short soak passed functional pause/resume and RSS
+checks; it does not substitute for the separate two-hour production soak gate.
 
 ## M7 — optional adapters complete
 

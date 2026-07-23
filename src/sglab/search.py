@@ -416,7 +416,9 @@ def run_search(config: SearchConfig, resume_run: Path | None = None) -> Path:
         read_json(workspace / "control.json", default={"version": 0}).get("version", 0)
     )
     worker_restarts = [0] * worker_count
+    worker_failure_restarts = [0] * worker_count
     exited_workers: set[int] = set()
+    worker_exit_reasons: dict[int, str] = {}
     stopped_by_user = False
     disk_exhausted = False
     memory_exhausted = False
@@ -476,6 +478,7 @@ def run_search(config: SearchConfig, resume_run: Path | None = None) -> Path:
                         )
                 elif message["kind"] == "exit":
                     exited_workers.add(worker_id)
+                    worker_exit_reasons[worker_id] = str(message["reason"])
 
             control = read_json(workspace / "control.json", default={"version": 0})
             version = int(control.get("version", 0))
@@ -511,7 +514,16 @@ def run_search(config: SearchConfig, resume_run: Path | None = None) -> Path:
                     and not process.is_alive()
                     and process.exitcode is not None
                 ):
-                    if worker_restarts[worker_id] >= 3:
+                    reason = worker_exit_reasons.get(worker_id)
+                    if process.exitcode == 0 and reason is None:
+                        # The process can exit just before its final queue message
+                        # is drained. Do not misclassify normal recycling as a crash.
+                        if message is not None:
+                            continue
+                        reason = "recycle"
+                    if reason != "recycle":
+                        worker_failure_restarts[worker_id] += 1
+                    if worker_failure_restarts[worker_id] > 3:
                         stop.set()
                         continue
                     replacement = context.Process(
@@ -530,6 +542,7 @@ def run_search(config: SearchConfig, resume_run: Path | None = None) -> Path:
                     processes[worker_id] = replacement
                     worker_restarts[worker_id] += 1
                     exited_workers.discard(worker_id)
+                    worker_exit_reasons.pop(worker_id, None)
                     append_event(
                         run_dir / "events.jsonl",
                         "worker_restarted",
@@ -571,7 +584,7 @@ def run_search(config: SearchConfig, resume_run: Path | None = None) -> Path:
                         "configured": worker_count,
                         "alive": sum(process.is_alive() for process in processes),
                         "restarts": sum(worker_restarts),
-                        "failed": sum(process.exitcode not in (None, 0) for process in processes),
+                        "failed": sum(worker_failure_restarts),
                     },
                     "throughput": {
                         "candidates": total,

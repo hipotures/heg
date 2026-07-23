@@ -77,3 +77,20 @@ class SearchTests(unittest.TestCase):
                 '"event":"run_resumed"',
                 (first / "events.jsonl").read_text(encoding="utf-8"),
             )
+
+    def test_normal_worker_recycling_is_not_treated_as_repeated_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = run_search(
+                SearchConfig(
+                    workspace=Path(directory),
+                    order=8,
+                    wall_seconds=0.8,
+                    worker_recycle_candidates=10,
+                    state_seconds=0.1,
+                    checkpoint_seconds=0.1,
+                    min_free_disk_bytes=1,
+                )
+            )
+            events = (run_dir / "events.jsonl").read_text(encoding="utf-8")
+            self.assertGreater(events.count('"event":"worker_restarted"'), 3)
+            self.assertIn('"status":"NO_RESULT_WITHIN_BUDGET"', events)

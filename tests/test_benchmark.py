@@ -13,7 +13,7 @@ class BenchmarkTests(unittest.TestCase):
         self.assertEqual(result["maximum"], 100)
 
     def test_short_calibration_covers_frontier_gates_and_writes_reports(self) -> None:
-        report = calibrate(0.002)
+        report = calibrate(0.002, seeds=1, jobs=2)
         self.assertEqual({case["order"] for case in report["cases"]}, {20, 24, 28, 32})
         self.assertIn("24_hour_candidates", report["forecast"])
         with tempfile.TemporaryDirectory() as directory:

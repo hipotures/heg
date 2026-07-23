@@ -249,7 +249,7 @@ def cmd_sat(args: Namespace) -> int:
 
 def cmd_benchmark(args: Namespace) -> int:
     if args.benchmark_command == "calibrate":
-        report = calibrate(args.minutes)
+        report = calibrate(args.minutes, seeds=args.seeds, jobs=args.jobs)
     elif args.benchmark_command == "soak":
         report = soak(
             _workspace(args.workspace),
@@ -340,6 +340,8 @@ def build_parser() -> ArgumentParser:
     benchmark_commands = benchmark.add_subparsers(dest="benchmark_command", required=True)
     calibration = benchmark_commands.add_parser("calibrate")
     calibration.add_argument("--minutes", type=float, default=15)
+    calibration.add_argument("--seeds", type=int, default=2)
+    calibration.add_argument("--jobs", type=int)
     calibration.add_argument("--target", choices=["erdos_gyarfas"], default="erdos_gyarfas")
     calibration.add_argument("--output", required=True)
     calibration.set_defaults(func=cmd_benchmark)

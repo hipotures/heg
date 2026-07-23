@@ -1,0 +1,356 @@
+{
+  "benchmark_id": "calibration-20260723T215711Z",
+  "cases": [
+    {
+      "accepted_move_rate": 0.10494892833809862,
+      "algorithm": "simulated_annealing",
+      "best_score": [
+        0,
+        3,
+        48,
+        0,
+        30
+      ],
+      "candidates": 1138792,
+      "candidates_per_second": 1265.3238789361108,
+      "elapsed_seconds": 900.0004022349603,
+      "improvements": 17,
+      "legal_move_rate": 1.0,
+      "order": 20,
+      "rss_bytes": 27168768,
+      "seed": 10200
+    },
+    {
+      "accepted_move_rate": 0.1304557031202077,
+      "algorithm": "iterated_local_search",
+      "best_score": [
+        0,
+        3,
+        48,
+        0,
+        30
+      ],
+      "candidates": 1255269,
+      "candidates_per_second": 1394.7429670271295,
+      "elapsed_seconds": 900.0002363701351,
+      "improvements": 18,
+      "legal_move_rate": 1.0,
+      "order": 20,
+      "rss_bytes": 27209728,
+      "seed": 10201
+    },
+    {
+      "accepted_move_rate": 0.09091877475657677,
+      "algorithm": "simulated_annealing",
+      "best_score": [
+        0,
+        3,
+        48,
+        0,
+        36
+      ],
+      "candidates": 1013872,
+      "candidates_per_second": 1126.5236240043457,
+      "elapsed_seconds": 900.0006554643624,
+      "improvements": 17,
+      "legal_move_rate": 1.0,
+      "order": 24,
+      "rss_bytes": 27291648,
+      "seed": 10240
+    },
+    {
+      "accepted_move_rate": 0.11928234640580437,
+      "algorithm": "iterated_local_search",
+      "best_score": [
+        0,
+        3,
+        48,
+        0,
+        36
+      ],
+      "candidates": 1180904,
+      "candidates_per_second": 1312.111147763358,
+      "elapsed_seconds": 900.0030233818106,
+      "improvements": 14,
+      "legal_move_rate": 1.0,
+      "order": 24,
+      "rss_bytes": 27189248,
+      "seed": 10241
+    },
+    {
+      "accepted_move_rate": 0.08163638141406657,
+      "algorithm": "simulated_annealing",
+      "best_score": [
+        0,
+        4,
+        56,
+        0,
+        42
+      ],
+      "candidates": 1165914,
+      "candidates_per_second": 1295.4583667475183,
+      "elapsed_seconds": 900.0011346773244,
+      "improvements": 24,
+      "legal_move_rate": 1.0,
+      "order": 28,
+      "rss_bytes": 27271168,
+      "seed": 10280
+    },
+    {
+      "accepted_move_rate": 0.11444056662570856,
+      "algorithm": "iterated_local_search",
+      "best_score": [
+        0,
+        5,
+        72,
+        0,
+        42
+      ],
+      "candidates": 1182509,
+      "candidates_per_second": 1313.898027393502,
+      "elapsed_seconds": 900.000590111129,
+      "improvements": 16,
+      "legal_move_rate": 1.0,
+      "order": 28,
+      "rss_bytes": 27254784,
+      "seed": 10281
+    },
+    {
+      "accepted_move_rate": 0.08180248287078304,
+      "algorithm": "simulated_annealing",
+      "best_score": [
+        0,
+        32,
+        128,
+        0,
+        48
+      ],
+      "candidates": 895254,
+      "candidates_per_second": 994.7264285856845,
+      "elapsed_seconds": 900.0002154088579,
+      "improvements": 11,
+      "legal_move_rate": 1.0,
+      "order": 32,
+      "rss_bytes": 27455488,
+      "seed": 10320
+    },
+    {
+      "accepted_move_rate": 0.11471037127399442,
+      "algorithm": "iterated_local_search",
+      "best_score": [
+        0,
+        32,
+        128,
+        0,
+        48
+      ],
+      "candidates": 914015,
+      "candidates_per_second": 1015.5717846305387,
+      "elapsed_seconds": 900.0003877938725,
+      "improvements": 10,
+      "legal_move_rate": 1.0,
+      "order": 32,
+      "rss_bytes": 27156480,
+      "seed": 10321
+    },
+    {
+      "accepted_move_rate": 0.10523042829360951,
+      "algorithm": "simulated_annealing",
+      "best_score": [
+        0,
+        3,
+        48,
+        0,
+        30
+      ],
+      "candidates": 1149772,
+      "candidates_per_second": 1277.5243402726212,
+      "elapsed_seconds": 900.0000733877532,
+      "improvements": 12,
+      "legal_move_rate": 1.0,
+      "order": 20,
+      "rss_bytes": 27070464,
+      "seed": 110200
+    },
+    {
+      "accepted_move_rate": 0.1300273893613954,
+      "algorithm": "iterated_local_search",
+      "best_score": [
+        0,
+        3,
+        48,
+        0,
+        30
+      ],
+      "candidates": 1248660,
+      "candidates_per_second": 1387.3994467573818,
+      "elapsed_seconds": 900.0003588860855,
+      "improvements": 15,
+      "legal_move_rate": 1.0,
+      "order": 20,
+      "rss_bytes": 27095040,
+      "seed": 110201
+    },
+    {
+      "accepted_move_rate": 0.09157652600678141,
+      "algorithm": "simulated_annealing",
+      "best_score": [
+        0,
+        3,
+        48,
+        0,
+        36
+      ],
+      "candidates": 1054648,
+      "candidates_per_second": 1171.829306520254,
+      "elapsed_seconds": 900.00138597982,
+      "improvements": 14,
+      "legal_move_rate": 1.0,
+      "order": 24,
+      "rss_bytes": 27258880,
+      "seed": 110240
+    },
+    {
+      "accepted_move_rate": 0.11947597693029034,
+      "algorithm": "iterated_local_search",
+      "best_score": [
+        0,
+        3,
+        48,
+        0,
+        36
+      ],
+      "candidates": 1184757,
+      "candidates_per_second": 1316.396150750553,
+      "elapsed_seconds": 900.0003527239896,
+      "improvements": 29,
+      "legal_move_rate": 1.0,
+      "order": 24,
+      "rss_bytes": 27299840,
+      "seed": 110241
+    },
+    {
+      "accepted_move_rate": 0.08196009555188048,
+      "algorithm": "simulated_annealing",
+      "best_score": [
+        0,
+        5,
+        80,
+        0,
+        42
+      ],
+      "candidates": 1170045,
+      "candidates_per_second": 1300.04939349535,
+      "elapsed_seconds": 900.0004198718816,
+      "improvements": 17,
+      "legal_move_rate": 1.0,
+      "order": 28,
+      "rss_bytes": 27324416,
+      "seed": 110280
+    },
+    {
+      "accepted_move_rate": 0.11373392746938504,
+      "algorithm": "iterated_local_search",
+      "best_score": [
+        0,
+        4,
+        56,
+        0,
+        42
+      ],
+      "candidates": 1176386,
+      "candidates_per_second": 1307.094656412311,
+      "elapsed_seconds": 900.0006191050634,
+      "improvements": 20,
+      "legal_move_rate": 1.0,
+      "order": 28,
+      "rss_bytes": 27189248,
+      "seed": 110281
+    },
+    {
+      "accepted_move_rate": 0.08123444767800607,
+      "algorithm": "simulated_annealing",
+      "best_score": [
+        0,
+        32,
+        128,
+        0,
+        48
+      ],
+      "candidates": 891346,
+      "candidates_per_second": 990.3835426610157,
+      "elapsed_seconds": 900.0008194856346,
+      "improvements": 12,
+      "legal_move_rate": 1.0,
+      "order": 32,
+      "rss_bytes": 27078656,
+      "seed": 110320
+    },
+    {
+      "accepted_move_rate": 0.11452071032385042,
+      "algorithm": "iterated_local_search",
+      "best_score": [
+        0,
+        14,
+        120,
+        0,
+        48
+      ],
+      "candidates": 894240,
+      "candidates_per_second": 993.5989921320842,
+      "elapsed_seconds": 900.0009129247628,
+      "improvements": 23,
+      "legal_move_rate": 1.0,
+      "order": 32,
+      "rss_bytes": 27058176,
+      "seed": 110321
+    }
+  ],
+  "created_at": "2026-07-23T21:57:11Z",
+  "forecast": {
+    "24_hour_candidates": {
+      "central": 1324537235.9946537,
+      "optimistic": 1438455746.3980534,
+      "pessimistic": 110378102.99955447
+    },
+    "7_day_candidates": {
+      "central": 9271760651.962576,
+      "optimistic": 10069190224.786375,
+      "pessimistic": 772646720.9968814
+    },
+    "recommended_workers": 12,
+    "warning": "Throughput forecasts describe heuristic evaluations only; SAT and long-cycle runtimes are heavy-tailed and are not linearly extrapolated."
+  },
+  "growth_factors": {
+    "20_to_24": 1.0728613813726016,
+    "24_to_28": 0.9527438479556155,
+    "28_to_32": 1.3112260310822277
+  },
+  "hardware": {
+    "cgroup_v2": true,
+    "compiler": [
+      "c++ (GCC) 16.1.1 20260430",
+      "Copyright (C) 2026 Free Software Foundation, Inc."
+    ],
+    "cpu_governor": "powersave",
+    "cpu_model": "AMD Ryzen 9 7950X3D 16-Core Processor",
+    "filesystem_free_bytes": 155807641600,
+    "kernel": "7.0.10-1-MANJARO",
+    "logical_cpu_count": 32,
+    "memory_total_bytes": 201412857856,
+    "platform": "Linux-7.0.10-1-MANJARO-x86_64-with-glibc2.43",
+    "python": "3.14.5"
+  },
+  "kind": "calibration",
+  "parallel_processes": 16,
+  "peak_rss_bytes": 28639232,
+  "requested_minutes": 15.0,
+  "seeds_per_case": 2,
+  "target": "erdos_gyarfas",
+  "throughput_quantiles": {
+    "maximum": 1394.7429670271295,
+    "p50": 1277.5243402726212,
+    "p90": 1387.3994467573818,
+    "p95": 1394.7429670271295
+  }
+}

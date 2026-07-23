@@ -164,55 +164,70 @@ def _sqlite_batch(connection: sqlite3.Connection) -> None:
     connection.commit()
 
 
-def calibrate(minutes: float) -> dict[str, Any]:
+def _calibration_case(task: tuple[int, str, int, float]) -> dict[str, Any]:
+    n, algorithm, seed, seconds = task
+    rng = Random(seed)
+    graph = PLUGIN.generate_seed(rng, {"order": n, "mode": "cubic_first"})
+    score = PLUGIN.cheap_score(graph, 32)
+    best = score.ordering_key
+    evaluated = accepted = legal = improvements = 0
+    started = time.perf_counter()
+    while time.perf_counter() - started < seconds:
+        candidate = PLUGIN.mutate(graph, rng, {"mode": "cubic_first"})
+        evaluated += 1
+        if candidate == graph:
+            continue
+        legal += 1
+        candidate_score = PLUGIN.cheap_score(candidate, 32)
+        take = candidate_score.ordering_key <= score.ordering_key
+        if algorithm == "simulated_annealing" and not take:
+            take = rng.random() < 0.01
+        elif algorithm == "iterated_local_search" and evaluated % 64 == 0:
+            take = True
+        if take:
+            graph, score = candidate, candidate_score
+            accepted += 1
+        if candidate_score.ordering_key < best:
+            best = candidate_score.ordering_key
+            improvements += 1
+    elapsed = time.perf_counter() - started
+    return {
+        "order": n,
+        "algorithm": algorithm,
+        "seed": seed,
+        "elapsed_seconds": elapsed,
+        "candidates": evaluated,
+        "candidates_per_second": evaluated / max(elapsed, 1e-9),
+        "legal_move_rate": legal / max(evaluated, 1),
+        "accepted_move_rate": accepted / max(evaluated, 1),
+        "improvements": improvements,
+        "best_score": list(best),
+        "rss_bytes": current_rss_bytes(),
+    }
+
+
+def calibrate(minutes: float, *, seeds: int = 2, jobs: int | None = None) -> dict[str, Any]:
     if minutes <= 0 or minutes > 1440:
         raise ValueError("minutes must be between 0 and 1440")
+    if seeds < 1 or seeds > 20:
+        raise ValueError("seeds must be between 1 and 20")
     orders = (20, 24, 28, 32)
     algorithms = ("simulated_annealing", "iterated_local_search")
-    seconds_per_case = minutes * 60 / (len(orders) * len(algorithms))
-    cases: list[dict[str, Any]] = []
-    for n in orders:
-        for algorithm_index, algorithm in enumerate(algorithms):
-            rng = Random(10_000 + n * 10 + algorithm_index)
-            graph = PLUGIN.generate_seed(rng, {"order": n, "mode": "cubic_first"})
-            score = PLUGIN.cheap_score(graph, 32)
-            best = score.ordering_key
-            evaluated = accepted = legal = improvements = 0
-            started = time.perf_counter()
-            while time.perf_counter() - started < seconds_per_case:
-                candidate = PLUGIN.mutate(graph, rng, {"mode": "cubic_first"})
-                evaluated += 1
-                if candidate == graph:
-                    continue
-                legal += 1
-                candidate_score = PLUGIN.cheap_score(candidate, 32)
-                take = candidate_score.ordering_key <= score.ordering_key
-                if algorithm == "simulated_annealing" and not take:
-                    take = rng.random() < 0.01
-                elif algorithm == "iterated_local_search" and evaluated % 64 == 0:
-                    take = True
-                if take:
-                    graph, score = candidate, candidate_score
-                    accepted += 1
-                if candidate_score.ordering_key < best:
-                    best = candidate_score.ordering_key
-                    improvements += 1
-            elapsed = time.perf_counter() - started
-            cases.append(
-                {
-                    "order": n,
-                    "algorithm": algorithm,
-                    "seed": 10_000 + n * 10 + algorithm_index,
-                    "elapsed_seconds": elapsed,
-                    "candidates": evaluated,
-                    "candidates_per_second": evaluated / max(elapsed, 1e-9),
-                    "legal_move_rate": legal / max(evaluated, 1),
-                    "accepted_move_rate": accepted / max(evaluated, 1),
-                    "improvements": improvements,
-                    "best_score": list(best),
-                    "rss_bytes": current_rss_bytes(),
-                }
-            )
+    tasks = [
+        (
+            n,
+            algorithm,
+            10_000 + n * 10 + algorithm_index + seed_index * 100_000,
+            minutes * 60,
+        )
+        for seed_index in range(seeds)
+        for n in orders
+        for algorithm_index, algorithm in enumerate(algorithms)
+    ]
+    process_count = recommended_workers(jobs or len(tasks))
+    context = get_context("spawn")
+    with context.Pool(processes=process_count) as pool:
+        cases = pool.map(_calibration_case, tasks)
     rates = [case["candidates_per_second"] for case in cases]
     rate_stats = quantiles(rates)
     by_order = {
@@ -249,6 +264,8 @@ def calibrate(minutes: float) -> dict[str, Any]:
         "created_at": utc_now(),
         "kind": "calibration",
         "requested_minutes": minutes,
+        "seeds_per_case": seeds,
+        "parallel_processes": process_count,
         "cases": cases,
         "throughput_quantiles": rate_stats,
         "growth_factors": growth_factors,
