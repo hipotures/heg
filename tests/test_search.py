@@ -1,4 +1,5 @@
 import random
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -94,3 +95,5 @@ class SearchTests(unittest.TestCase):
             events = (run_dir / "events.jsonl").read_text(encoding="utf-8")
             self.assertGreater(events.count('"event":"worker_restarted"'), 3)
             self.assertIn('"status":"NO_RESULT_WITHIN_BUDGET"', events)
+            final_state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+            self.assertGreater(final_state["throughput"]["candidates"], 40)

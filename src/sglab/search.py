@@ -274,6 +274,9 @@ def _worker(
             "worker": worker_id,
             "reason": "stopped" if stop.is_set() else "recycle",
             "evaluated": evaluated,
+            "accepted": accepted,
+            "legal": legal,
+            "improvements": improvements,
         },
         important=True,
     )
@@ -402,6 +405,15 @@ def run_search(config: SearchConfig, resume_run: Path | None = None) -> Path:
     started = time.monotonic()
     last_state = last_checkpoint = started
     worker_metrics: dict[int, dict[str, Any]] = {}
+    worker_cumulative = {
+        worker_id: {
+            "evaluated": 0,
+            "accepted": 0,
+            "legal": 0,
+            "improvements": 0,
+        }
+        for worker_id in range(worker_count)
+    }
     worker_checkpoints: dict[int, dict[str, Any]] = {}
     archive: dict[str, tuple[tuple[int, ...], dict[str, Any]]] = {}
     for candidate_path in (run_dir / "best").glob("*.json"):
@@ -477,6 +489,9 @@ def run_search(config: SearchConfig, resume_run: Path | None = None) -> Path:
                             score=order_key,
                         )
                 elif message["kind"] == "exit":
+                    for field in ("evaluated", "accepted", "legal", "improvements"):
+                        worker_cumulative[worker_id][field] += int(message.get(field, 0))
+                    worker_metrics.pop(worker_id, None)
                     exited_workers.add(worker_id)
                     worker_exit_reasons[worker_id] = str(message["reason"])
 
@@ -494,7 +509,9 @@ def run_search(config: SearchConfig, resume_run: Path | None = None) -> Path:
                     stop.set()
                 append_event(run_dir / "events.jsonl", "control_processed", action=action)
 
-            total = sum(int(item.get("evaluated", 0)) for item in worker_metrics.values())
+            total = sum(
+                values["evaluated"] for values in worker_cumulative.values()
+            ) + sum(int(item.get("evaluated", 0)) for item in worker_metrics.values())
             worker_rss = sum(
                 int(item.get("rss_bytes", 0)) for item in worker_metrics.values()
             )
@@ -521,6 +538,12 @@ def run_search(config: SearchConfig, resume_run: Path | None = None) -> Path:
                         if message is not None:
                             continue
                         reason = "recycle"
+                    if worker_id in worker_metrics:
+                        last_metrics = worker_metrics.pop(worker_id)
+                        for field in ("evaluated", "accepted", "legal", "improvements"):
+                            worker_cumulative[worker_id][field] += int(
+                                last_metrics.get(field, 0)
+                            )
                     if reason != "recycle":
                         worker_failure_restarts[worker_id] += 1
                     if worker_failure_restarts[worker_id] > 3:
@@ -565,8 +588,12 @@ def run_search(config: SearchConfig, resume_run: Path | None = None) -> Path:
                 last_checkpoint = now
 
             if now - last_state >= config.state_seconds:
-                total_accepted = sum(int(item.get("accepted", 0)) for item in worker_metrics.values())
+                total_accepted = sum(
+                    values["accepted"] for values in worker_cumulative.values()
+                ) + sum(int(item.get("accepted", 0)) for item in worker_metrics.values())
                 total_improvements = sum(
+                    values["improvements"] for values in worker_cumulative.values()
+                ) + sum(
                     int(item.get("improvements", 0)) for item in worker_metrics.values()
                 )
                 best_record = (
@@ -687,7 +714,9 @@ def run_search(config: SearchConfig, resume_run: Path | None = None) -> Path:
         if verification["status"] == "COUNTEREXAMPLE_VERIFIED":
             final_status = "COUNTEREXAMPLE_VERIFIED"
         verified_best_record = best_record
-    total = sum(int(item.get("evaluated", 0)) for item in worker_metrics.values())
+    total = sum(
+        values["evaluated"] for values in worker_cumulative.values()
+    ) + sum(int(item.get("evaluated", 0)) for item in worker_metrics.values())
     final_state = {
         **read_json(run_dir / "state.json", default={}),
         "updated_at": utc_now(),
@@ -695,6 +724,12 @@ def run_search(config: SearchConfig, resume_run: Path | None = None) -> Path:
         "run_dir": str(run_dir),
         "status": final_status,
         "stop_requested": stopped_by_user,
+        "workers": {
+            "configured": worker_count,
+            "alive": 0,
+            "restarts": sum(worker_restarts),
+            "failed": sum(worker_failure_restarts),
+        },
         "throughput": {
             "candidates": total,
             "candidates_per_second": total / max(time.monotonic() - started, 0.001),
