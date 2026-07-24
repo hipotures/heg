@@ -1,0 +1,110 @@
+{
+  "schema_version": "1.0",
+  "date": "2026-07-24",
+  "initial_phase_b_commit": "32cdba7eed07f22f5746555739e9a501087f26e5",
+  "tested_production_commit": "f1a9575cbf69be79134db796212fb2f3213b587c",
+  "codex_cli_version": "codex-cli 0.145.0",
+  "authorization": {
+    "granted": true,
+    "authorized_source": "/home/xai/.codex/auth.json",
+    "copied_files": [
+      "auth.json"
+    ],
+    "private_hashes_and_destinations": "retained_in_private_runtime_report",
+    "other_normal_codex_home_data_copied": false
+  },
+  "model_contract": {
+    "expected_model": "gpt-5.6-luna",
+    "expected_reasoning_effort": "xhigh",
+    "effective_model": "gpt-5.6-luna",
+    "effective_reasoning_effort": "xhigh",
+    "model_contract_matched": true,
+    "checked_before_inference": true
+  },
+  "runtime": {
+    "inference_starts_reaching_model": 1,
+    "successful_completed_turns": 1,
+    "timed_out_or_aborted_turns": 0,
+    "retries_reaching_inference": 0,
+    "tool_calls": 0,
+    "search_batches": 0,
+    "research_lanes": 0,
+    "action_dispatches": 0,
+    "candidate_evaluations": 0,
+    "compaction_operations": 0,
+    "graceful_shutdown": true,
+    "sqlite_user_version": 9,
+    "sqlite_integrity_check": "ok"
+  },
+  "slots": {
+    "S2": {
+      "lifecycle_status": "completed",
+      "thread_id": "019f95b2-5ccb-7e50-8e41-8d9c0cc8996e",
+      "turn_id": "019f95b2-5d0e-70b3-9a1e-fa51ee914c5e",
+      "request_id": "11",
+      "final_item_id": "msg_0f54820d364b5a12016a63c3590f588191b924f837de864be2",
+      "schema_validity": true,
+      "semantic_validity": false,
+      "validation_issues": [
+        {
+          "path": "$.actions[0].lane_id",
+          "message": "does not reference an active lane"
+        }
+      ],
+      "selected_action": "stop_lane",
+      "selected_algorithm": null,
+      "measurement_only": true,
+      "executed": false,
+      "usage": {
+        "input_tokens": 10180,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 3001,
+        "reasoning_output_tokens": 2471,
+        "server_reported_total_tokens": 13181
+      },
+      "latency_seconds": {
+        "first_item": 0.9829834839329123,
+        "final_answer": 56.28035815060139,
+        "total_wall": 59.289329562336206
+      }
+    },
+    "P1": {
+      "lifecycle_status": "not_started"
+    },
+    "P2": {
+      "lifecycle_status": "not_started"
+    }
+  },
+  "comparison": {
+    "s2_p2_scientific_input_equal": true,
+    "s2_p2_evidence_registry_equal": true,
+    "input_token_difference": null,
+    "stateless_input_token_reduction_percent": null,
+    "stateless_total_token_reduction_percent": null,
+    "context_mode_comparison": "inconclusive",
+    "statistical_superiority_claimed": false
+  },
+  "final_status": {
+    "canonical_evidence_registry": "proven",
+    "incomplete_turn_persistence": "proven_deterministically",
+    "director_state_v2_bounded": "proven",
+    "stateless_A4_completed": false,
+    "persistent_A1_completed": false,
+    "persistent_A4_completed": false,
+    "exactly_three_or_fewer_inference_starts": true,
+    "zero_retries_reaching_inference": true,
+    "zero_search_batches": true,
+    "zero_action_dispatches": true,
+    "zero_candidate_evaluations": true,
+    "zero_compaction_operations": true,
+    "zero_tool_calls": true,
+    "usage_accounting_complete": false,
+    "semantic_validity_stateless_A4": false,
+    "semantic_validity_persistent_A4": "unavailable",
+    "stateless_token_reduction_percent": null,
+    "completion_reliability_comparison": "inconclusive",
+    "context_mode_comparison": "inconclusive",
+    "recommended_default_context_mode": "inconclusive"
+  }
+}

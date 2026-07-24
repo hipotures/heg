@@ -35,6 +35,22 @@ and offline P1 revalidation remains schema-valid and semantically valid. No
 auth access, model inference, installed App Server start, or graph-search batch
 occurred. See `docs/reports/M6_REDUCED_CONTEXT_SCREEN_PHASE_A.md`.
 
+## Reduced context-mode screen — authenticated run stopped at S2
+
+With explicit authorization, the runtime imported only `auth.json` into two
+separate private homes and started the strict stateless arm first. The
+server-reported model contract matched `gpt-5.6-luna:xhigh` before inference.
+S2 completed with a final structured response and authoritative usage, but the
+local semantic validator correctly rejected its `stop_lane` action because the
+referenced historical lane was not active in the measurement context.
+
+Fail-closed sequencing then stopped before P1 and P2. The run therefore used
+exactly one inference start, no retries, and zero search batches, lanes,
+dispatches, candidate evaluations, compactions, or tool calls. Shutdown was
+graceful and SQLite integrity was `ok`. The S2/P2 token comparison is
+unavailable and the context-mode result remains inconclusive. See
+`docs/reports/M6_REDUCED_CONTEXT_SCREEN_RUNTIME.md`.
+
 ## Context-screen deterministic failure fixes complete
 
 The aborted persistent P1 output was revalidated offline without changing the
