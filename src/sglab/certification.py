@@ -18,7 +18,8 @@ from .model import BitGraph
 from .locations import cyclecheck_path, source_root
 from .resources import run_bounded, set_address_space_limit
 from .state import atomic_write_json, utc_now
-from .targets.erdos_gyarfas import forbidden_lengths, verify_reference
+from .targets import TARGETS
+from .targets.erdos_gyarfas import forbidden_lengths
 
 
 def default_cyclecheck() -> Path:
@@ -30,6 +31,8 @@ def verify_cpp(
     binary: Path | None = None,
     timeout_seconds: float = 0,
     memory_limit_bytes: int = 0,
+    *,
+    lengths: tuple[int, ...] | None = None,
 ) -> dict[str, Any]:
     if not math.isfinite(timeout_seconds) or timeout_seconds < 0:
         raise ValueError("timeout_seconds must be finite and nonnegative")
@@ -46,7 +49,8 @@ def verify_cpp(
         graph_path = Path(directory) / "candidate.graph6"
         graph_path.write_text(graph.to_graph6() + "\n", encoding="ascii")
         command = [str(executable), "--graph6", str(graph_path)]
-        for length in forbidden_lengths(graph.n):
+        checked_lengths = lengths or forbidden_lengths(graph.n)
+        for length in checked_lengths:
             command.extend(("--length", str(length)))
         if timeout_seconds > 0:
             command.extend(("--timeout-seconds", str(timeout_seconds)))
@@ -85,7 +89,9 @@ def verify_cpp(
             "message": "cycle checker returned invalid JSON",
             "stderr": result.stderr.decode("utf-8", errors="replace"),
         }
-    validation_error = _cyclecheck_payload_error(payload, graph)
+    validation_error = _cyclecheck_payload_error(
+        payload, graph, checked_lengths
+    )
     if validation_error is not None:
         return {
             "status": "TOOL_FAILURE",
@@ -112,7 +118,11 @@ def verify_cpp(
     return payload
 
 
-def _cyclecheck_payload_error(payload: object, graph: BitGraph) -> str | None:
+def _cyclecheck_payload_error(
+    payload: object,
+    graph: BitGraph,
+    lengths: tuple[int, ...] | None = None,
+) -> str | None:
     if not isinstance(payload, dict):
         return "cycle checker JSON must be an object"
     status = payload.get("status")
@@ -120,14 +130,14 @@ def _cyclecheck_payload_error(payload: object, graph: BitGraph) -> str | None:
         return "cycle checker returned an unknown status"
     if not isinstance(payload.get("complete"), bool):
         return "cycle checker omitted its completeness flag"
-    lengths = set(forbidden_lengths(graph.n))
+    requested_lengths = set(lengths or forbidden_lengths(graph.n))
     if status == "FOUND":
         length = payload.get("length")
         witness = payload.get("witness")
         if (
             isinstance(length, bool)
             or not isinstance(length, int)
-            or length not in lengths
+            or length not in requested_lengths
         ):
             return "cycle checker returned an invalid witness length"
         if (
@@ -158,7 +168,7 @@ def _cyclecheck_payload_error(payload: object, graph: BitGraph) -> str | None:
                 isinstance(length, bool) or not isinstance(length, int)
                 for length in reported
             )
-            or set(reported) != lengths
+            or set(reported) != requested_lengths
         ):
             return "cycle checker absence result does not cover all requested lengths"
     elif payload["complete"]:
@@ -166,10 +176,15 @@ def _cyclecheck_payload_error(payload: object, graph: BitGraph) -> str | None:
     return None
 
 
-def _reference_worker(graph: BitGraph, queue: Any, memory_limit_bytes: int) -> None:
+def _reference_worker(
+    graph: BitGraph,
+    queue: Any,
+    memory_limit_bytes: int,
+    target: str,
+) -> None:
     set_address_space_limit(memory_limit_bytes or None)
     try:
-        result = verify_reference(graph)
+        result = TARGETS[target].exact_verify(graph)
     except MemoryError:
         queue.put(
             {
@@ -201,16 +216,20 @@ def verify_reference_bounded(
     graph: BitGraph,
     timeout_seconds: float = 0,
     memory_limit_bytes: int = 0,
+    *,
+    target: str = "erdos_gyarfas",
 ) -> dict[str, Any]:
     if not math.isfinite(timeout_seconds) or timeout_seconds < 0:
         raise ValueError("timeout_seconds must be finite and nonnegative")
     if memory_limit_bytes < 0:
         raise ValueError("memory_limit_bytes cannot be negative")
+    if target not in TARGETS:
+        raise ValueError(f"unsupported target: {target}")
     context = get_context("spawn")
     queue = context.Queue(maxsize=1)
     process = context.Process(
         target=_reference_worker,
-        args=(graph, queue, memory_limit_bytes),
+        args=(graph, queue, memory_limit_bytes, target),
     )
     process.start()
     process.join(timeout_seconds if timeout_seconds > 0 else None)
@@ -253,6 +272,7 @@ def certify(
     binary: Path | None = None,
     timeout_seconds: float = 0,
     memory_limit_bytes: int = 0,
+    target: str = "erdos_gyarfas",
 ) -> dict[str, Any]:
     """Create a standalone two-verifier artifact from a graph only."""
 
@@ -260,6 +280,12 @@ def certify(
         raise ValueError("timeout_seconds must be finite and nonnegative")
     if memory_limit_bytes < 0:
         raise ValueError("memory_limit_bytes cannot be negative")
+    if target not in TARGETS:
+        raise ValueError(f"unsupported target: {target}")
+    plugin = TARGETS[target]
+    lengths = plugin.forbidden_lengths(graph.n)
+    if not lengths:
+        raise ValueError("target has no verifier lengths for this graph order")
     output_dir.mkdir(parents=True, exist_ok=True)
     graph6 = graph.to_graph6()
     graph6_bytes = (graph6 + "\n").encode("ascii")
@@ -276,12 +302,14 @@ def certify(
         graph,
         timeout_seconds,
         memory_limit_bytes,
+        target=target,
     )
     independent = verify_cpp(
         graph,
         binary,
         timeout_seconds,
         memory_limit_bytes,
+        lengths=lengths,
     )
     if reference_payload["status"] == "INVALID":
         status = "INVALID_CANDIDATE"
@@ -367,13 +395,13 @@ def certify(
     atomic_write_json(output_dir / "environment.json", environment)
     manifest = {
         "candidate_id": hashlib.sha256(graph6.encode("ascii")).hexdigest()[:20],
-        "target": "erdos_gyarfas",
+        "target": target,
         "status": status,
         "status_checked_at": "2026-07-23",
         "order": graph.n,
         "size": graph.size(),
         "minimum_degree": graph.minimum_degree(),
-        "forbidden_lengths": list(forbidden_lengths(graph.n)),
+        "forbidden_lengths": list(lengths),
         "graph6_sha256": hashlib.sha256(graph6_bytes).hexdigest(),
         "edge_list_sha256": hashlib.sha256(edge_bytes).hexdigest(),
         "verifiers": [reference_payload, independent],
@@ -382,7 +410,8 @@ def certify(
     }
     atomic_write_json(output_dir / "manifest.json", manifest)
     (output_dir / "commands.txt").write_text(
-        "sglab verify --graph6 candidate.graph6 --artifact-dir reproduced\n",
+        f"sglab verify --target {target} --graph6 candidate.graph6 "
+        "--artifact-dir reproduced\n",
         encoding="utf-8",
     )
     return manifest

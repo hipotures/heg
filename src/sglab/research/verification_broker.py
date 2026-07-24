@@ -29,6 +29,7 @@ class _RunningVerification:
 
 def _verification_worker(
     graph6: str,
+    target: str,
     output_dir: str,
     binary: str | None,
     timeout_seconds: float,
@@ -41,6 +42,7 @@ def _verification_worker(
         manifest = certify(
             BitGraph.from_graph6(graph6),
             Path(output_dir),
+            target=target,
             binary=Path(binary) if binary else None,
             timeout_seconds=timeout_seconds,
             memory_limit_bytes=verifier_memory_bytes,
@@ -157,6 +159,7 @@ class M4VerificationBroker:
             target=_verification_worker,
             args=(
                 str(candidate["graph6"]),
+                str(self.store.campaign(self.campaign_id)["target"]),
                 str(output),
                 str(self.binary) if self.binary is not None else None,
                 self.timeout_seconds,

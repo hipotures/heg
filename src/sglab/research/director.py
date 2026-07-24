@@ -6,6 +6,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any
 import hashlib
+import json
 import os
 
 from .app_server_client import (
@@ -126,6 +127,70 @@ class ActiveDirector:
         self.session_record_id = record_id
         return session
 
+    def rollover_due(
+        self,
+        *,
+        maximum_turns: int = 24,
+        maximum_input_tokens: int = 1_000_000,
+    ) -> bool:
+        if self.session_record_id is None:
+            return False
+        row = self.store.connection.execute(
+            """
+            SELECT count(*) AS turns, COALESCE(sum(input_tokens), 0) AS input
+            FROM app_server_turns
+            WHERE session_record_id=? AND status LIKE 'completed_%'
+            """,
+            (self.session_record_id,),
+        ).fetchone()
+        return (
+            int(row["turns"]) >= maximum_turns
+            or int(row["input"]) >= maximum_input_tokens
+        )
+
+    async def rollover(self) -> AppServerSession:
+        if self.session is None or self.session_record_id is None:
+            raise RuntimeError("Director session has not been started")
+        parent_thread_id = self.session.thread_id
+        brief = self._rollover_brief(parent_thread_id)
+        relative = (
+            Path("director")
+            / "rollovers"
+            / f"{new_id('rollover-brief')}.json"
+        )
+        path = self.campaign_dir / relative
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        payload = canonical_json(brief, max_bytes=32 * 1024)
+        _write_private(path, payload + b"\n")
+        _write_private(
+            path.with_suffix(".sha256"),
+            (hashlib.sha256(payload).hexdigest() + "\n").encode("ascii"),
+        )
+        instructions = (
+            base_instructions()
+            + "\nDurable rollover continuity brief (SQLite and the next "
+            "snapshot remain authoritative): "
+            + payload.decode("ascii")
+        )
+        session = await self.client.start_thread(instructions)
+        self.store.close_session(self.session_record_id, state="rolled_over")
+        record_id = self.store.record_session(
+            record_id=new_id("app-session"),
+            campaign_id=self.campaign_id,
+            thread_id=session.thread_id,
+            session_id=session.session_id,
+            thread_path=session.thread_path,
+            parent_thread_id=parent_thread_id,
+            model=session.model,
+            effort=session.effort,
+            codex_version=self.codex_version,
+            executable_sha256=self.executable_sha256,
+            protocol_schema_sha256=self.protocol_schema_sha256,
+        )
+        self.session = session
+        self.session_record_id = record_id
+        return session
+
     async def request_decision(
         self,
         *,
@@ -194,8 +259,10 @@ class ActiveDirector:
                 self.campaign_dir / response_relative,
                 response_bytes + b"\n",
             )
-            wire = self.client.wire_bytes
+            take_wire = getattr(self.client, "take_wire_bytes", None)
+            wire = take_wire() if callable(take_wire) else self.client.wire_bytes
             _write_private(self.campaign_dir / wire_relative, wire)
+            self._prune_wire_artifacts()
             validation = validate_decision(result.parsed, context)
             self.store.complete_turn(
                 turn_record_id,
@@ -255,6 +322,71 @@ class ActiveDirector:
 
     async def close(self) -> None:
         await self.client.close()
+        if self.session_record_id is not None:
+            row = self.store.connection.execute(
+                """
+                SELECT state FROM app_server_sessions
+                WHERE session_record_id=?
+                """,
+                (self.session_record_id,),
+            ).fetchone()
+            if row is not None and row["state"] == "active":
+                self.store.close_session(self.session_record_id, state="closed")
+
+    def _prune_wire_artifacts(self, maximum: int = 64) -> None:
+        paths = sorted(
+            (self.audit_dir / "wire").glob("*.jsonl"),
+            key=lambda path: path.stat().st_mtime_ns,
+            reverse=True,
+        )
+        for path in paths[maximum:]:
+            path.unlink()
+
+    def _rollover_brief(self, parent_thread_id: str) -> dict[str, Any]:
+        campaign = self.store.campaign(self.campaign_id)
+        assessment = self.store.connection.execute(
+            """
+            SELECT campaign_assessment, created_at
+            FROM director_action_batches WHERE campaign_id=?
+            ORDER BY created_at DESC, rowid DESC LIMIT 1
+            """,
+            (self.campaign_id,),
+        ).fetchone()
+        hypotheses = self.store.connection.execute(
+            """
+            SELECT hypothesis_id, statement, confidence, status, created_at
+            FROM research_hypotheses_v2 WHERE campaign_id=?
+            ORDER BY created_at DESC, rowid DESC LIMIT 32
+            """,
+            (self.campaign_id,),
+        ).fetchall()
+        lanes = self.store.connection.execute(
+            """
+            SELECT lane_id, lane_version, algorithm, graph_family, state,
+                   current_parameters_json, resource_share
+            FROM research_lanes WHERE campaign_id=?
+            ORDER BY updated_at DESC LIMIT 32
+            """,
+            (self.campaign_id,),
+        ).fetchall()
+        return {
+            "schema_version": "1.0",
+            "campaign_id": self.campaign_id,
+            "parent_thread_id": parent_thread_id,
+            "target": campaign["target"],
+            "stop_mode": campaign["stop_mode"],
+            "deadline_at": campaign["deadline_at"],
+            "campaign_state_version": campaign["state_version"],
+            "latest_assessment": dict(assessment) if assessment else None,
+            "hypotheses": [dict(row) for row in hypotheses],
+            "lanes": [
+                {
+                    **dict(row),
+                    "parameters": json.loads(row["current_parameters_json"]),
+                }
+                for row in lanes
+            ],
+        }
 
 
 def _usage_payload(result: AppServerTurnResult) -> dict[str, Any] | None:

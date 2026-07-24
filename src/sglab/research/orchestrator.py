@@ -73,6 +73,10 @@ class ActiveResearchOrchestrator:
             events.append(event)
             if event.get("kind") == "improvement" and self.candidates is not None:
                 self.candidates.observe_improvement(event)
+            elif event.get("kind") == "checkpoint" and self.candidates is not None:
+                candidate_id = self.candidates.observe_checkpoint(event)
+                if candidate_id is not None:
+                    self.triggers.offer("new_global_best")
             runtime = self.manager.lanes.get(str(event["lane_id"]))
             recent = runtime.telemetry.recent() if runtime is not None else {}
             self.triggers.observe_lane_event(event, recent_metrics=recent)

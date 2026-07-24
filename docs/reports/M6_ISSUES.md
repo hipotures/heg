@@ -52,3 +52,18 @@ which could delay deadline and emergency control handling for the full
 inference timeout. The supervisor now owns the turn as an asynchronous task.
 Campaign controls are checked independently; cancellation durably fails the
 interrupted turn, and optimistic campaign versions reject late decisions.
+
+## I-008 — resolved — zero-score seed absent from candidate archive
+
+The first candidate path retained only strict improvements emitted after lane
+startup, so an initial seed that already falsified the control statement could
+not be promoted to M4. Candidate retention now compares every committed
+checkpoint's best score against the bounded campaign archive and retains a
+strictly better initial best without storing every checkpoint.
+
+## I-009 — resolved — cumulative wire duplication
+
+Each Director turn originally wrote the client's whole rolling wire buffer,
+which duplicated older protocol traffic and could grow quickly. The client now
+atomically drains the bounded buffer per turn, and the Director retains only
+the latest 64 diagnostic wire artifacts.

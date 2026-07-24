@@ -116,3 +116,26 @@ campaign supervisor, while the orchestrator itself continues pumping lane and
 verification events. Rationale: deadline and emergency controls must remain
 observable even during a long inference turn; a resulting campaign-version
 change makes any returned old action batch stale by construction.
+
+## D-016 — 2026-07-24 — target-aware M4 control, not a verifier stub
+
+Decision: implement the deliberately false acceptance target as a real target
+plugin and pass its exact cycle-length contract through the unchanged Python
+and C++ M4 boundary. Rationale: a fake success hook would not demonstrate that
+M4 remains the sole mathematical authority, while reusing the two independent
+implementations exercises the actual terminal transaction.
+
+## D-017 — 2026-07-24 — bounded retry only while AI leases remain valid
+
+Decision: on provider failure, retry the direct app-server process and resume
+the persisted thread while continuing to pump lanes; abort coordination when
+any active AI policy lease expires. Rationale: continuing an expired policy or
+silently installing a deterministic controller would both violate active AI
+control.
+
+## D-018 — 2026-07-24 — bounded context and wire rollover
+
+Decision: roll a Director thread after 24 completed turns or one million input
+tokens using a durable compact parent-linked brief, and retain at most 64
+per-turn wire logs. Rationale: SQLite/snapshots stay authoritative while
+conversation and diagnostic growth remain explicitly bounded.

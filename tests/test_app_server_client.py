@@ -58,8 +58,12 @@ class AppServerClientTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result.usage.cached_input_tokens, 3)
             self.assertEqual(result.usage.output_tokens, 5)
             self.assertEqual(result.usage.reasoning_output_tokens, 2)
+            self.assertEqual(result.usage.raw["total"]["totalTokens"], 15)
             self.assertEqual(client.unsupported_server_requests, 1)
             self.assertIn(b"turn/completed", client.wire_bytes)
+            taken = client.take_wire_bytes()
+            self.assertIn(b"turn/completed", taken)
+            self.assertEqual(client.wire_bytes, b"")
             resumed = await client.resume_thread(
                 session.thread_id, "Return only JSON."
             )

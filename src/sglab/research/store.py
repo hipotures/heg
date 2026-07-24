@@ -395,6 +395,20 @@ class ResearchStore:
                 ),
             )
 
+    def close_session(self, session_record_id: str, *, state: str) -> None:
+        if state not in {"closed", "interrupted", "rolled_over"}:
+            raise ValueError("invalid app-server session close state")
+        with self.transaction() as database:
+            cursor = database.execute(
+                """
+                UPDATE app_server_sessions SET state=?, closed_at=?
+                WHERE session_record_id=? AND state='active'
+                """,
+                (state, utc_now(), session_record_id),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("app-server session close is stale")
+
     def complete_turn(
         self,
         turn_record_id: str,
@@ -1068,7 +1082,7 @@ class ResearchStore:
             action = database.execute(
                 """
                 SELECT campaign_id, target_lane_id, expected_lane_version,
-                       action_type
+                       action_type, lease_expires_at
                 FROM director_actions WHERE action_id=?
                 """,
                 (action_id,),
@@ -1108,7 +1122,8 @@ class ResearchStore:
                         UPDATE research_lanes
                         SET lane_version=?, current_parameters_json=?,
                             resource_share=?, checkpoint_ref=?,
-                            checkpoint_sha256=?, state=?, updated_at=?,
+                            checkpoint_sha256=?, lease_expires_at=?,
+                            state=?, updated_at=?,
                             stopped_at=?
                         WHERE lane_id=? AND lane_version=?
                         """,
@@ -1118,6 +1133,7 @@ class ResearchStore:
                             new_share,
                             checkpoint_ref or lane["checkpoint_ref"],
                             checkpoint_sha256 or lane["checkpoint_sha256"],
+                            action["lease_expires_at"],
                             (
                                 "stopped"
                                 if action["action_type"] == "stop_lane"
@@ -1203,7 +1219,8 @@ class ResearchStore:
                 return False
             action = database.execute(
                 """
-                SELECT campaign_id, action_type FROM director_actions
+                SELECT campaign_id, action_type, lease_expires_at
+                FROM director_actions
                 WHERE action_id=?
                 """,
                 (action_id,),
@@ -1243,7 +1260,7 @@ class ResearchStore:
                     """
                     UPDATE research_lanes
                     SET lane_version=?, resource_share=?, checkpoint_ref=?,
-                        checkpoint_sha256=?, updated_at=?
+                        checkpoint_sha256=?, lease_expires_at=?, updated_at=?
                     WHERE lane_id=? AND lane_version=?
                     """,
                     (
@@ -1251,6 +1268,7 @@ class ResearchStore:
                         revision["resource_share"],
                         checkpoint_ref,
                         checkpoint_sha256,
+                        action["lease_expires_at"],
                         now,
                         lane["lane_id"],
                         lane["lane_version"],

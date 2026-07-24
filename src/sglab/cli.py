@@ -39,7 +39,7 @@ from .state import (
     next_control,
     utc_now,
 )
-from .targets.erdos_gyarfas import verify_reference
+from .targets import TARGETS
 from .web import create_server, serve
 
 
@@ -145,6 +145,7 @@ def cmd_verify(args: Namespace) -> int:
         report = certify(
             graph,
             Path(args.artifact_dir).resolve(),
+            target=args.target,
             binary=Path(args.cpp_binary) if args.cpp_binary else None,
             timeout_seconds=args.timeout,
             memory_limit_bytes=args.memory_limit,
@@ -155,7 +156,8 @@ def cmd_verify(args: Namespace) -> int:
             if report["status"] in {"COUNTEREXAMPLE_VERIFIED", "INVALID_CANDIDATE"}
             else 2
         )
-    result = verify_reference(graph)
+    plugin = TARGETS[args.target]
+    result = plugin.exact_verify(graph)
     reference_payload = {
         "status": result.status,
         "complete": result.complete,
@@ -175,6 +177,7 @@ def cmd_verify(args: Namespace) -> int:
             Path(args.cpp_binary) if args.cpp_binary else None,
             args.timeout,
             args.memory_limit,
+            lengths=plugin.forbidden_lengths(graph.n),
         )
         agrees = (
             (result.status == "VERIFIED" and independent["status"] == "ABSENT")
@@ -503,6 +506,7 @@ def build_parser() -> ArgumentParser:
     graph_input.add_argument("--graph-json")
     graph_input.add_argument("--graph6")
     verify.add_argument("--artifact-dir")
+    verify.add_argument("--target", choices=sorted(TARGETS), default="erdos_gyarfas")
     verify.add_argument("--cpp-binary")
     verify.add_argument("--timeout", type=float, default=0)
     verify.add_argument("--memory-limit", type=int, default=0)

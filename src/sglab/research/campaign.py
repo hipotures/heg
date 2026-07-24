@@ -3,7 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 import asyncio
 import fcntl
 import hashlib
@@ -19,6 +19,7 @@ from ..resources import (
     sqlite_size_bytes,
 )
 from ..state import atomic_write_json, read_json, utc_now
+from ..targets import TARGETS
 from .actions import LaneActionDispatcher
 from .app_server_client import AppServerClient, AppServerConfig
 from .app_server_protocol import generate_protocol_preflight
@@ -58,12 +59,18 @@ def parse_duration(value: str) -> float:
     return seconds
 
 
-def target_definition_sha256() -> str:
+def target_definition_sha256(target: str = "erdos_gyarfas") -> str:
+    if target not in TARGETS:
+        raise ValueError(f"unsupported target: {target}")
     digest = hashlib.sha256()
-    sources = (
-        asset_path("configs", "targets", "erdos_gyarfas.toml"),
-        Path(__file__).resolve().parents[1] / "targets" / "erdos_gyarfas.py",
-    )
+    target_module = {
+        "erdos_gyarfas": "erdos_gyarfas.py",
+        "m6_hidden_witness_control_v1": "hidden_witness_control.py",
+    }[target]
+    sources = [Path(__file__).resolve().parents[1] / "targets" / target_module]
+    if target == "erdos_gyarfas":
+        sources.append(asset_path("configs", "targets", "erdos_gyarfas.toml"))
+    digest.update(TARGETS[target].statement.encode("utf-8"))
     for path in sources:
         payload = path.read_bytes()
         digest.update(path.name.encode("utf-8"))
@@ -307,11 +314,14 @@ class ResearchCampaignRunner:
         stop_mode: str,
         duration_seconds: float | None = None,
         campaign_id: str | None = None,
+        target: str = "erdos_gyarfas",
         codex: str = "codex",
         poll_seconds: float = 0.05,
     ):
         if stop_mode not in {"time_limit", "until_success"}:
             raise ValueError("invalid stop mode")
+        if target not in TARGETS:
+            raise ValueError(f"unsupported target: {target}")
         if (
             campaign_id is None
             and (stop_mode == "time_limit") != (duration_seconds is not None)
@@ -321,6 +331,7 @@ class ResearchCampaignRunner:
         self.stop_mode = stop_mode
         self.duration_seconds = duration_seconds
         self.campaign_id = campaign_id
+        self.target = target
         self.codex = codex
         self.poll_seconds = poll_seconds
 
@@ -360,8 +371,8 @@ class ResearchCampaignRunner:
             )
             store.create_campaign(
                 campaign_id=campaign_id,
-                target="erdos_gyarfas",
-                target_definition_sha256=target_definition_sha256(),
+                target=self.target,
+                target_definition_sha256=target_definition_sha256(self.target),
                 stop_mode=self.stop_mode,
                 deadline_at=(
                     deadline.isoformat(timespec="seconds").replace("+00:00", "Z")
@@ -371,6 +382,7 @@ class ResearchCampaignRunner:
             )
         else:
             campaign = store.campaign(campaign_id)
+            self.target = str(campaign["target"])
             if campaign["state"] in TERMINAL_STATES:
                 raise RuntimeError("terminal campaigns cannot be resumed")
             recovery = CampaignRecovery(
@@ -405,15 +417,18 @@ class ResearchCampaignRunner:
                 separators=(",", ":"),
             ).encode("ascii")
         ).hexdigest()
-        director = ActiveDirector(
-            client=AppServerClient(client_config),
-            store=store,
-            campaign_id=campaign_id,
-            campaign_dir=campaign_dir,
-            codex_version=str(preflight["codex_version_output"]),
-            executable_sha256=str(preflight["codex_executable_sha256"]),
-            protocol_schema_sha256=protocol_hash,
-        )
+        def director_factory() -> ActiveDirector:
+            return ActiveDirector(
+                client=AppServerClient(client_config),
+                store=store,
+                campaign_id=campaign_id,
+                campaign_dir=campaign_dir,
+                codex_version=str(preflight["codex_version_output"]),
+                executable_sha256=str(preflight["codex_executable_sha256"]),
+                protocol_schema_sha256=protocol_hash,
+            )
+
+        director = director_factory()
         provider = AppServerDecisionProvider(director)
         candidates = CandidateArchive(
             store=store, campaign_id=campaign_id, campaign_dir=campaign_dir
@@ -456,7 +471,21 @@ class ResearchCampaignRunner:
             director_task: asyncio.Task[Any] | None = None
             while True:
                 if director_task is not None and director_task.done():
-                    await director_task
+                    try:
+                        await director_task
+                    except Exception:
+                        director = await self._recover_director(
+                            current=director,
+                            factory=director_factory,
+                            store=store,
+                            campaign_id=campaign_id,
+                            orchestrator=orchestrator,
+                        )
+                        provider.director = director
+                        orchestrator.triggers.offer("recovery")
+                    else:
+                        if director.rollover_due():
+                            await director.rollover()
                     director_task = None
                 campaign = store.campaign(campaign_id)
                 if campaign["state"] in TERMINAL_STATES:
@@ -529,6 +558,83 @@ class ResearchCampaignRunner:
                 )
             store.close()
         return campaign_status(self.workspace, campaign_id)
+
+    async def _recover_director(
+        self,
+        *,
+        current: ActiveDirector,
+        factory: Callable[[], ActiveDirector],
+        store: ResearchStore,
+        campaign_id: str,
+        orchestrator: ActiveResearchOrchestrator,
+        maximum_attempts: int = 3,
+        maximum_wall_seconds: float = 90,
+        retry_backoff_seconds: float = 1,
+    ) -> ActiveDirector:
+        await current.close()
+        resume_thread_id = store.latest_app_server_thread(campaign_id)
+        deadline = asyncio.get_running_loop().time() + maximum_wall_seconds
+        last_error: Exception | None = None
+        for attempt in range(maximum_attempts):
+            if attempt:
+                delay_until = (
+                    asyncio.get_running_loop().time()
+                    + attempt * retry_backoff_seconds
+                )
+                while asyncio.get_running_loop().time() < delay_until:
+                    orchestrator.pump_events()
+                    self._require_unexpired_lane_leases(store, campaign_id)
+                    await asyncio.sleep(self.poll_seconds)
+            candidate = factory()
+            task = asyncio.create_task(
+                candidate.start(resume_thread_id=resume_thread_id)
+            )
+            try:
+                while not task.done():
+                    orchestrator.pump_events()
+                    self._require_unexpired_lane_leases(store, campaign_id)
+                    if asyncio.get_running_loop().time() >= deadline:
+                        raise RuntimeError("app-server recovery wall limit exceeded")
+                    await asyncio.sleep(self.poll_seconds)
+                await task
+                return candidate
+            except Exception as error:
+                last_error = error
+                if not task.done():
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+                await candidate.close()
+        raise RuntimeError(
+            f"app-server recovery failed after {maximum_attempts} attempts: "
+            f"{last_error}"
+        ) from last_error
+
+    @staticmethod
+    def _require_unexpired_lane_leases(
+        store: ResearchStore, campaign_id: str
+    ) -> None:
+        rows = store.connection.execute(
+            """
+            SELECT lane_id, lease_expires_at FROM research_lanes
+            WHERE campaign_id=? AND state IN ('starting', 'running')
+            """,
+            (campaign_id,),
+        ).fetchall()
+        now = datetime.now(UTC)
+        expired = [
+            str(row["lane_id"])
+            for row in rows
+            if row["lease_expires_at"] is not None
+            and datetime.fromisoformat(
+                str(row["lease_expires_at"]).replace("Z", "+00:00")
+            ).astimezone(UTC)
+            <= now
+        ]
+        if expired:
+            raise RuntimeError(
+                "AI policy lease expired during provider outage: "
+                + ", ".join(expired[:8])
+            )
 
 
 def _deadline_reached(campaign: dict[str, Any]) -> bool:

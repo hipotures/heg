@@ -51,3 +51,12 @@ A new target requires:
 8. known lower bounds and searched ranges;
 9. artifact format;
 10. target-specific risk note.
+
+## M6 hidden-witness control
+
+`m6_hidden_witness_control_v1` is a deliberately false, control-only installed
+target for acceptance testing. It is never the default research target and
+must never be reported as an open mathematical result. Its verifier contract
+uses the same two independent M4 implementations with target-specific cycle
+lengths. The finite witness is retained in test/certification artifacts but is
+not supplied to the Director snapshot.

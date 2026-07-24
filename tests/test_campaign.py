@@ -1,5 +1,7 @@
+import asyncio
 import tempfile
 import unittest
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from sglab.cli import build_parser
@@ -163,6 +165,121 @@ class CampaignStateTests(unittest.TestCase):
             self.assertEqual(status["state"], "completed_deadline_reached")
             self.assertEqual(status["target"], "erdos_gyarfas")
             self.assertEqual(status["verification"]["certified"], 0)
+
+
+class _FakeDirector:
+    def __init__(self, *, fail: bool = False, delay: float = 0):
+        self.fail = fail
+        self.delay = delay
+        self.closed = False
+        self.resume_thread_id = None
+
+    async def start(self, *, resume_thread_id=None, parent_thread_id=None):
+        self.resume_thread_id = resume_thread_id
+        if self.delay:
+            await asyncio.sleep(self.delay)
+        if self.fail:
+            raise RuntimeError("simulated provider outage")
+        return object()
+
+    async def close(self):
+        self.closed = True
+
+
+class _Pump:
+    def __init__(self):
+        self.calls = 0
+
+    def pump_events(self):
+        self.calls += 1
+
+
+class ProviderRecoveryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_bounded_recovery_retries_without_controller_takeover(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = ResearchStore(root / "campaign.sqlite3")
+            store.create_campaign(
+                campaign_id="campaign-1",
+                target="erdos_gyarfas",
+                target_definition_sha256="a" * 64,
+                stop_mode="until_success",
+                deadline_at=None,
+            )
+            current = _FakeDirector()
+            attempts = iter((True, True, False))
+            created = []
+
+            def factory():
+                director = _FakeDirector(fail=next(attempts))
+                created.append(director)
+                return director
+
+            pump = _Pump()
+            runner = ResearchCampaignRunner(
+                workspace=root,
+                stop_mode="until_success",
+                poll_seconds=0.001,
+            )
+            recovered = await runner._recover_director(
+                current=current,  # type: ignore[arg-type]
+                factory=factory,  # type: ignore[arg-type]
+                store=store,
+                campaign_id="campaign-1",
+                orchestrator=pump,  # type: ignore[arg-type]
+                retry_backoff_seconds=0.001,
+            )
+            self.assertIs(recovered, created[-1])
+            self.assertTrue(current.closed)
+            self.assertTrue(all(item.closed for item in created[:-1]))
+            self.assertFalse(created[-1].closed)
+            self.assertGreater(pump.calls, 0)
+            store.close()
+
+    async def test_expired_lane_lease_aborts_recovery(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = ResearchStore(root / "campaign.sqlite3")
+            store.create_campaign(
+                campaign_id="campaign-1",
+                target="erdos_gyarfas",
+                target_definition_sha256="a" * 64,
+                stop_mode="until_success",
+                deadline_at=None,
+            )
+            expired = (
+                datetime.now(UTC) - timedelta(seconds=1)
+            ).isoformat(timespec="seconds").replace("+00:00", "Z")
+            store.create_lane(
+                lane_id="lane-1",
+                campaign_id="campaign-1",
+                target="erdos_gyarfas",
+                parent_lane_id=None,
+                parent_checkpoint_ref=None,
+                action_id="bootstrap",
+                algorithm="simulated_annealing",
+                graph_family="connected_cubic",
+                parameters={"order": 8},
+                seed_lineage=[1],
+                resource_share=1,
+                lease_expires_at=expired,
+            )
+            store.mark_lane_running("lane-1")
+            runner = ResearchCampaignRunner(
+                workspace=root,
+                stop_mode="until_success",
+                poll_seconds=0.001,
+            )
+            with self.assertRaisesRegex(RuntimeError, "policy lease expired"):
+                await runner._recover_director(
+                    current=_FakeDirector(),  # type: ignore[arg-type]
+                    factory=lambda: _FakeDirector(delay=0.05),  # type: ignore[arg-type]
+                    store=store,
+                    campaign_id="campaign-1",
+                    orchestrator=_Pump(),  # type: ignore[arg-type]
+                    retry_backoff_seconds=0.001,
+                )
+            store.close()
 
 
 if __name__ == "__main__":

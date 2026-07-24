@@ -1,5 +1,12 @@
 # Exact Verification and Scientific Artifacts
 
+The certification entry point accepts an installed target ID and obtains the
+exact forbidden lengths and structural reference verifier from that target.
+The C++17 checker receives the same explicit length set. Manifests record the
+target and length set, and reproduction commands include `--target`. The
+default remains `erdos_gyarfas`; the M6 control target is clearly marked
+control-only.
+
 ## Verification layers
 
 ### Layer 1 — internal structural validation

@@ -10,6 +10,7 @@ import os
 from ..resources import current_rss_bytes
 from ..model import BitGraph
 from ..state import utc_now
+from ..targets import target_summary
 from .lanes import LaneManager
 from .protocol import MAX_SNAPSHOT_BYTES, canonical_json
 from .store import ResearchStore, new_id
@@ -76,11 +77,10 @@ class SnapshotBuilder:
                 "remaining_seconds": remaining,
             },
             "target": {
-                "target_id": campaign["target"],
+                **target_summary(str(campaign["target"])),
                 "immutable_definition_hash": campaign[
                     "target_definition_sha256"
                 ],
-                "success_authority": "M4_independent_verifier",
             },
             "resources": self._resources(verification),
             "lanes": lanes,

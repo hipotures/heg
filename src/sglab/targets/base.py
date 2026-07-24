@@ -53,7 +53,10 @@ class ScoreResult:
 
 class TargetPlugin(Protocol):
     id: str
+    statement: str
+    control_only: bool
 
+    def forbidden_lengths(self, order: int) -> tuple[int, ...]: ...
     def validate_graph(self, graph: BitGraph) -> ValidationResult: ...
     def generate_seed(self, rng: Random, config: dict[str, Any]) -> BitGraph: ...
     def mutate(

@@ -71,6 +71,14 @@ def verify_reference(graph: BitGraph) -> VerifyResult:
 
 class ErdosGyarfasPlugin:
     id = "erdos_gyarfas"
+    statement = (
+        "Every graph of minimum degree at least three contains a cycle whose "
+        "length is a power of two."
+    )
+    control_only = False
+
+    def forbidden_lengths(self, order: int) -> tuple[int, ...]:
+        return forbidden_lengths(order)
 
     def validate_graph(self, graph: BitGraph) -> ValidationResult:
         if graph.n == 0:
@@ -216,7 +224,7 @@ class ErdosGyarfasPlugin:
         weighted = 0
         complete = True
         node_budget = max(4_096, min(50_000, cap * 1_024))
-        for length in forbidden_lengths(graph.n):
+        for length in self.forbidden_lengths(graph.n):
             witnesses, search_complete = find_cycles_of_length_bounded(
                 graph,
                 length,

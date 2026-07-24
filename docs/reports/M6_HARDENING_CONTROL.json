@@ -1,0 +1,41 @@
+{
+  "date": "2026-07-24",
+  "milestone": "M6.8 control target and provider resilience",
+  "status": "offline_complete",
+  "m6_complete": false,
+  "control_target": {
+    "id": "m6_hidden_witness_control_v1",
+    "control_only": true,
+    "default": false,
+    "python_verifier": "python-reference-dfs",
+    "independent_verifier": "cpp17-bitset-dfs",
+    "m4_positive_path": "passed"
+  },
+  "provider_recovery": {
+    "maximum_attempts": 3,
+    "maximum_wall_seconds": 90,
+    "same_thread_resume": true,
+    "deterministic_takeover": false,
+    "lease_expiry_pauses_fault": true
+  },
+  "growth_bounds": {
+    "thread_rollover_turns": 24,
+    "thread_rollover_input_tokens": 1000000,
+    "wire_files": 64,
+    "wire_bytes_per_turn": 8388608
+  },
+  "verification": {
+    "tests_passed": 81,
+    "tests_seconds": 13.622,
+    "doctor": "passed",
+    "compile_check": "passed",
+    "benchmark_smoke": "passed",
+    "dashboard_smoke": "passed"
+  },
+  "pending": [
+    "authenticated_live_active_control",
+    "saved_rollout_isolation_audit",
+    "equal_budget_multi_seed_comparison",
+    "two_hour_active_director_soak"
+  ]
+}

@@ -90,14 +90,15 @@ class AppServerUsage:
 
     @classmethod
     def from_notification(cls, payload: dict[str, Any]) -> AppServerUsage:
-        raw = dict(payload.get("tokenUsage", {}).get("last", {}))
+        token_usage = dict(payload.get("tokenUsage") or {})
+        last = dict(token_usage.get("last") or {})
         return cls(
-            input_tokens=int(raw.get("inputTokens", 0)),
-            cached_input_tokens=int(raw.get("cachedInputTokens", 0)),
-            output_tokens=int(raw.get("outputTokens", 0)),
-            reasoning_output_tokens=int(raw.get("reasoningOutputTokens", 0)),
-            total_tokens=int(raw.get("totalTokens", 0)),
-            raw=raw,
+            input_tokens=int(last.get("inputTokens", 0)),
+            cached_input_tokens=int(last.get("cachedInputTokens", 0)),
+            output_tokens=int(last.get("outputTokens", 0)),
+            reasoning_output_tokens=int(last.get("reasoningOutputTokens", 0)),
+            total_tokens=int(last.get("totalTokens", 0)),
+            raw=token_usage,
         )
 
 
@@ -145,6 +146,12 @@ class _BoundedBytes:
 
     def value(self) -> bytes:
         return b"".join(self.parts)
+
+    def take(self) -> bytes:
+        value = self.value()
+        self.parts.clear()
+        self.size = 0
+        return value
 
 
 class AppServerClient:
@@ -518,6 +525,9 @@ class AppServerClient:
     @property
     def wire_bytes(self) -> bytes:
         return self._wire.value()
+
+    def take_wire_bytes(self) -> bytes:
+        return self._wire.take()
 
     async def close(self, *, force: bool = False) -> None:
         process = self.process

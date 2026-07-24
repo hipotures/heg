@@ -296,15 +296,17 @@ class StubDecisionClient:
         self.decisions = decisions
         self.wire_bytes = b'{"bounded":"wire"}\n'
         self.closed = False
+        self.thread_count = 0
 
     async def start(self) -> None:
         return None
 
     async def start_thread(self, _: str) -> AppServerSession:
+        self.thread_count += 1
         return AppServerSession(
-            thread_id="thread-1",
-            session_id="session-1",
-            thread_path="/private/rollout.jsonl",
+            thread_id=f"thread-{self.thread_count}",
+            session_id=f"session-{self.thread_count}",
+            thread_path=f"/private/rollout-{self.thread_count}.jsonl",
             model="model",
             effort="high",
             resumed=False,
@@ -413,6 +415,35 @@ class ActiveDirectorTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(statuses["action-start"], "accepted")
             self.assertEqual(statuses["action-patch"], "rejected_stale_state")
             self.assertEqual(store.campaign("campaign-1")["state_version"], 1)
+            self.assertTrue(director.rollover_due(maximum_turns=2))
+            rolled = await director.rollover()
+            self.assertEqual(rolled.thread_id, "thread-2")
+            sessions = store.connection.execute(
+                """
+                SELECT thread_id, parent_thread_id, state
+                FROM app_server_sessions ORDER BY started_at, rowid
+                """
+            ).fetchall()
+            self.assertEqual(
+                [tuple(row) for row in sessions],
+                [
+                    ("thread-1", None, "rolled_over"),
+                    ("thread-2", "thread-1", "active"),
+                ],
+            )
+            self.assertEqual(
+                len(list((root / "director" / "rollovers").glob("*.json"))),
+                1,
+            )
+            wire_dir = root / "director" / "wire"
+            for index in range(70):
+                retained = wire_dir / f"retention-{index:02d}.jsonl"
+                retained.write_text(
+                    "{}\n", encoding="utf-8"
+                )
+                retained.chmod(0o600)
+            director._prune_wire_artifacts(maximum=64)
+            self.assertEqual(len(list(wire_dir.glob("*.jsonl"))), 64)
             for path in (root / "director").glob("*/*"):
                 self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
             await director.close()

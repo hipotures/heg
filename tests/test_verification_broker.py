@@ -126,10 +126,82 @@ class M4VerificationBrokerTests(unittest.TestCase):
         invalid["verifiers"][1]["implementation"] = "python-reference-dfs"
         self.assertFalse(_valid_manifest(invalid))
 
-    def _seed_campaign(self, store: ResearchStore) -> None:
+    def test_control_target_success_is_latched_only_by_broker(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = ResearchStore(root / "campaign.sqlite3")
+            manager = LaneManager(root)
+            broker = M4VerificationBroker(
+                store=store,
+                manager=manager,
+                campaign_id="campaign-1",
+                campaign_dir=root,
+                timeout_seconds=5,
+            )
+            try:
+                target = "m6_hidden_witness_control_v1"
+                self._seed_campaign(store, target=target)
+                graph = BitGraph.from_edges(
+                    10,
+                    {
+                        (0, 1), (1, 2), (2, 3), (3, 4), (0, 4),
+                        (5, 7), (7, 9), (6, 9), (6, 8), (5, 8),
+                        (0, 5), (1, 6), (2, 7), (3, 8), (4, 9),
+                    },
+                )
+                candidate_id = CandidateArchive(
+                    store=store,
+                    campaign_id="campaign-1",
+                    campaign_dir=root,
+                ).observe_improvement(
+                    {
+                        "lane_id": "lane-1",
+                        "lane_version": 0,
+                        "checkpoint_id": "checkpoint-1",
+                        "graph6": graph.to_graph6(),
+                        "score": {
+                            "valid": True,
+                            "ordering_key": [0, 0, 0, 0, 15],
+                        },
+                    }
+                )
+                self._seed_promote_action(store, candidate_id)
+                broker.dispatch_pending_actions()
+                broker.start_ready()
+                deadline = time.monotonic() + 15
+                event = None
+                while time.monotonic() < deadline and event is None:
+                    event = broker.poll()
+                    time.sleep(0.01)
+                self.assertIsNotNone(event)
+                self.assertEqual(event["status"], "COUNTEREXAMPLE_VERIFIED")
+                self.assertTrue(event["terminal"])
+                self.assertEqual(
+                    store.campaign("campaign-1")["state"],
+                    "succeeded_certified_counterexample",
+                )
+                terminal = store.connection.execute(
+                    "SELECT * FROM campaign_terminal_events"
+                ).fetchall()
+                self.assertEqual(len(terminal), 1)
+                self.assertEqual(
+                    terminal[0]["terminal_kind"],
+                    "succeeded_certified_counterexample",
+                )
+            finally:
+                broker.shutdown()
+                manager.shutdown()
+                store.close()
+
+    def _seed_campaign(
+        self,
+        store: ResearchStore,
+        *,
+        target: str = "erdos_gyarfas",
+    ) -> None:
         store.create_campaign(
             campaign_id="campaign-1",
-            target="erdos_gyarfas",
+            target=target,
             target_definition_sha256="a" * 64,
             stop_mode="until_success",
             deadline_at=None,
@@ -137,7 +209,7 @@ class M4VerificationBrokerTests(unittest.TestCase):
         store.create_lane(
             lane_id="lane-1",
             campaign_id="campaign-1",
-            target="erdos_gyarfas",
+            target=target,
             parent_lane_id=None,
             parent_checkpoint_ref=None,
             action_id="bootstrap",

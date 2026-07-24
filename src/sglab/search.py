@@ -1183,6 +1183,7 @@ def _run_search_locked(config: SearchConfig, resume_run: Path | None = None) -> 
             run_dir / "certificates" / str(best_record["candidate_id"]),
             timeout_seconds=config.exact_timeout_seconds,
             memory_limit_bytes=config.memory_limit_bytes,
+            target=config.target,
         )
         best_record["verification_status"] = verification["status"]
         atomic_write_json(

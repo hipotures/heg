@@ -182,6 +182,34 @@ authenticated production turns, the hidden-witness live acceptance,
 multi-controller study, outage hardening, and the two-hour Active Director
 soak remain pending.
 
+### M6.8 control target and provider resilience — offline milestone complete
+
+A deliberately false, control-only target is now registered separately from
+the Erdős–Gyárfás profile. Its statement is restricted to connected cubic
+graphs on ten vertices and its finite witness is never included in the
+Director prompt. The existing Python DFS and C++17 bitset verifier both check
+the target-specific forbidden length; only their complete agreement through
+the M4 broker can latch campaign success. Initial lane checkpoints can enter
+the bounded candidate archive, closing the case where a seed is already a
+counterexample.
+
+Production provider failure now causes bounded app-server restart attempts and
+`thread/resume` on the same persisted thread while lane telemetry and the M4
+queue continue to be pumped. Current AI policies are never replaced by a
+deterministic controller. If an active lane's AI-issued lease expires during
+the outage, recovery aborts and the campaign enters `paused_fault`.
+
+Long sessions roll over after bounded turn/token thresholds into a new
+persisted thread with a hashed durable continuity brief and parent-thread
+lineage. Raw app-server token usage is preserved alongside normalized
+per-turn categories. Wire diagnostics are drained per turn and retained at a
+fixed maximum of 64 files rather than repeatedly copying cumulative logs.
+
+The focused control, recovery, rollover, and M4 gates pass; the full suite now
+has 81 passing tests. See `docs/reports/M6_HARDENING_CONTROL.md`. The control
+target has not yet been run with authenticated AI, so the live active-control
+acceptance, equal-budget comparison, and two-hour soak remain pending.
+
 ## M0 — complete
 
 - installable standard `src/` package and CLI entry point;
