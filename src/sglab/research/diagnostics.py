@@ -113,17 +113,17 @@ class ScientificActionDispatcher:
                 ]
             }
         elif diagnostic_type == "mutation_ancestry":
+            candidate_lanes = self._lanes(
+                [str(candidate["lane_id"]) for candidate in candidates]
+            )
+            selected_lanes = {
+                str(lane["lane_id"]): lane
+                for lane in (*lanes, *candidate_lanes)
+            }
             result = {
                 "lanes": [
-                    {
-                        "lane_id": lane["lane_id"],
-                        "parent_lane_id": lane["parent_lane_id"],
-                        "parent_checkpoint_ref": lane[
-                            "parent_checkpoint_ref"
-                        ],
-                        "seed_lineage": json.loads(lane["seed_lineage_json"]),
-                    }
-                    for lane in lanes
+                    self._mutation_ancestry(lane)
+                    for lane in selected_lanes.values()
                 ]
             }
         elif diagnostic_type == "operator_yield":
@@ -217,6 +217,36 @@ class ScientificActionDispatcher:
             "mean_operator_yield": (
                 sum(yields) / len(yields) if yields else 0.0
             ),
+        }
+
+    def _mutation_ancestry(self, lane: dict[str, Any]) -> dict[str, Any]:
+        rows = self.store.connection.execute(
+            """
+            SELECT metrics_json FROM lane_metric_windows
+            WHERE lane_id=? ORDER BY end_high_water DESC LIMIT 16
+            """,
+            (lane["lane_id"],),
+        ).fetchall()
+        global_records: list[dict[str, Any]] = []
+        final_best: list[dict[str, Any]] = []
+        for row in reversed(rows):
+            metrics = json.loads(row["metrics_json"])
+            ancestry = metrics.get("mutation_ancestry", {})
+            global_records.extend(
+                ancestry.get("global_record_improvements", [])
+            )
+            if ancestry.get("final_best_ancestry"):
+                final_best = list(ancestry["final_best_ancestry"])[-64:]
+        truncated = len(global_records) > 64
+        return {
+            "lane_id": lane["lane_id"],
+            "parent_lane_id": lane["parent_lane_id"],
+            "parent_checkpoint_ref": lane["parent_checkpoint_ref"],
+            "seed_lineage": json.loads(lane["seed_lineage_json"]),
+            "global_record_improvements": global_records[-64:],
+            "global_records_truncated": truncated,
+            "final_best_ancestry": final_best,
+            "maximum_accepted_ancestors": 64,
         }
 
 

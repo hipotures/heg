@@ -30,6 +30,21 @@ from .protocol import canonical_json
 from .telemetry import TelemetrySeries
 
 
+ANCESTRY_LIMIT = 64
+TIMING_COUNTER_NAMES = (
+    "mutation_generation",
+    "graph_validation",
+    "witness_counting",
+    "score_calculation",
+    "duplicate_detection",
+    "tabu_bookkeeping",
+    "ancestry_construction",
+    "telemetry_construction",
+    "sqlite_persistence",
+    "exact_final_verification",
+)
+
+
 @dataclass(frozen=True, slots=True)
 class LaneSpec:
     lane_id: str
@@ -105,11 +120,25 @@ class _LaneKernel:
         spec: LaneSpec,
         checkpoint: dict[str, Any] | None,
         fork_seed: int | None,
+        *,
+        instrumentation_enabled: bool = True,
     ):
         self.spec = spec
         self.plugin = TARGETS[spec.target]
         self.parameters = dict(spec.parameters)
         self.mode = GRAPH_FAMILIES[spec.graph_family]
+        self.instrumentation_enabled = instrumentation_enabled
+        self.timing_ns = (
+            {name: 0 for name in TIMING_COUNTER_NAMES}
+            if instrumentation_enabled
+            else None
+        )
+        self.accepted_ancestry: deque[dict[str, Any]] = deque(
+            maxlen=ANCESTRY_LIMIT
+        )
+        self.best_ancestry: list[dict[str, Any]] = []
+        self.current_candidate_id = ""
+        self.best_candidate_id = ""
         self.rng = Random(spec.seed)
         self.algorithm_evaluated = 0
         self.stagnation = 0
@@ -150,6 +179,29 @@ class _LaneKernel:
             )
             if not self.tabu:
                 self.tabu.append(self.graph.stable_hash())
+            self.accepted_ancestry = deque(
+                (
+                    dict(value)
+                    for value in checkpoint.get("accepted_ancestry", [])
+                ),
+                maxlen=ANCESTRY_LIMIT,
+            )
+            self.best_ancestry = [
+                dict(value)
+                for value in checkpoint.get("best_ancestry", [])
+            ][-ANCESTRY_LIMIT:]
+            self.current_candidate_id = str(
+                checkpoint.get(
+                    "current_candidate_id",
+                    _candidate_id(self.spec.campaign_id, self.graph),
+                )
+            )
+            self.best_candidate_id = str(
+                checkpoint.get(
+                    "best_candidate_id",
+                    _candidate_id(self.spec.campaign_id, self.best_graph),
+                )
+            )
 
     def _new_seed(self, seed: int) -> None:
         self.rng = Random(seed)
@@ -162,6 +214,12 @@ class _LaneKernel:
         )
         self.best_graph = self.graph
         self.best_score = self.score
+        self.current_candidate_id = _candidate_id(
+            self.spec.campaign_id, self.graph
+        )
+        self.best_candidate_id = self.current_candidate_id
+        self.accepted_ancestry.clear()
+        self.best_ancestry = []
         self.algorithm_evaluated = 0
         self.stagnation = 0
         self.tabu.clear()
@@ -182,6 +240,28 @@ class _LaneKernel:
         )
         self.best_score = _score_from_payload(
             checkpoint.get("best_score", checkpoint["score"])
+        )
+        self.accepted_ancestry = deque(
+            (
+                dict(value)
+                for value in checkpoint.get("accepted_ancestry", [])
+            ),
+            maxlen=ANCESTRY_LIMIT,
+        )
+        self.best_ancestry = [
+            dict(value) for value in checkpoint.get("best_ancestry", [])
+        ][-ANCESTRY_LIMIT:]
+        self.current_candidate_id = str(
+            checkpoint.get(
+                "current_candidate_id",
+                _candidate_id(self.spec.campaign_id, self.graph),
+            )
+        )
+        self.best_candidate_id = str(
+            checkpoint.get(
+                "best_candidate_id",
+                _candidate_id(self.spec.campaign_id, self.best_graph),
+            )
         )
         self.rng = Random(seed)
         self.algorithm_evaluated = 0
@@ -217,6 +297,9 @@ class _LaneKernel:
             raise ValueError("batch evaluation limit must be positive")
         if max_wall_seconds is not None and max_wall_seconds <= 0:
             raise ValueError("batch wall limit must be positive")
+        if self.timing_ns is not None:
+            for name in self.timing_ns:
+                self.timing_ns[name] = 0
         started = time.perf_counter()
         deadline = (
             started + max_wall_seconds
@@ -225,6 +308,8 @@ class _LaneKernel:
         )
         initial_score = self.score
         trajectory: list[dict[str, Any]] = []
+        global_records: list[dict[str, Any]] = []
+        ancestry_operator_statistics: dict[str, dict[str, int]] = {}
         evaluated = accepted = legal = improvements = duplicates = 0
         for _ in range(target):
             if stop_event.is_set():
@@ -239,6 +324,11 @@ class _LaneKernel:
                 == 0
             ):
                 self._new_seed(self.rng.randrange(2**63))
+            mutation_started = (
+                time.perf_counter_ns()
+                if self.timing_ns is not None
+                else 0
+            )
             candidate = (
                 self.plugin.generate_seed(
                     self.rng,
@@ -254,31 +344,101 @@ class _LaneKernel:
                     {"mode": self.mode},
                 )
             )
+            if self.timing_ns is not None:
+                self.timing_ns["mutation_generation"] += (
+                    time.perf_counter_ns() - mutation_started
+                )
             evaluated += 1
             self.algorithm_evaluated += 1
             if candidate == self.graph:
                 continue
             legal += 1
+            duplicate_started = (
+                time.perf_counter_ns()
+                if self.timing_ns is not None
+                else 0
+            )
             key = candidate.stable_hash()
             if key in self.recent_hash_set:
                 duplicates += 1
             self._remember_hash(key)
-            candidate_score = self.plugin.cheap_score(
-                candidate, int(self.parameters["witness_cap"])
+            if self.timing_ns is not None:
+                self.timing_ns["duplicate_detection"] += (
+                    time.perf_counter_ns() - duplicate_started
+                )
+            candidate_score = self._score(candidate)
+            tabu_started = (
+                time.perf_counter_ns()
+                if self.timing_ns is not None
+                and self.algorithm
+                in {"iterated_local_search", "iterated_local_search_tabu"}
+                else 0
             )
             accept = (
                 True
                 if self.algorithm == "random_restart"
                 else self._accept(candidate_score, key)
             )
+            if tabu_started and self.timing_ns is not None:
+                self.timing_ns["tabu_bookkeeping"] += (
+                    time.perf_counter_ns() - tabu_started
+                )
+            global_record = (
+                candidate_score.ordering_key
+                < self.best_score.ordering_key
+            )
+            mutation_record: dict[str, Any] | None = None
+            if self.instrumentation_enabled and (accept or global_record):
+                ancestry_started = time.perf_counter_ns()
+                mutation_record = _mutation_record(
+                    campaign_id=self.spec.campaign_id,
+                    parent=self.graph,
+                    child=candidate,
+                    parent_candidate_id=self.current_candidate_id,
+                    score_before=self.score,
+                    score_after=candidate_score,
+                    evaluation=evaluated,
+                    accepted=accept,
+                    global_record=global_record,
+                )
+                operator = str(mutation_record["mutation_operator"])
+                operator_counts = ancestry_operator_statistics.setdefault(
+                    operator,
+                    {"accepted": 0, "global_records": 0},
+                )
+                operator_counts["accepted"] += int(accept)
+                operator_counts["global_records"] += int(global_record)
+                if self.timing_ns is not None:
+                    self.timing_ns["ancestry_construction"] += (
+                        time.perf_counter_ns() - ancestry_started
+                    )
             if accept:
                 self.graph = candidate
                 self.score = candidate_score
+                if mutation_record is not None:
+                    self.accepted_ancestry.append(mutation_record)
+                    self.current_candidate_id = str(
+                        mutation_record["candidate_id"]
+                    )
                 accepted += 1
                 self.total_accepted += 1
-            if candidate_score.ordering_key < self.best_score.ordering_key:
+            if global_record:
                 self.best_graph = candidate
                 self.best_score = candidate_score
+                self.best_candidate_id = _candidate_id(
+                    self.spec.campaign_id, candidate
+                )
+                if mutation_record is not None:
+                    if accept:
+                        self.best_ancestry = list(self.accepted_ancestry)
+                    else:
+                        self.best_ancestry = (
+                            list(self.accepted_ancestry)[
+                                -(ANCESTRY_LIMIT - 1) :
+                            ]
+                            + [mutation_record]
+                        )
+                    global_records.append(mutation_record)
                 improvements += 1
                 self.total_improvements += 1
                 self.stagnation = 0
@@ -292,7 +452,8 @@ class _LaneKernel:
             else:
                 self.stagnation += 1
         self.high_water += evaluated
-        elapsed = max(time.perf_counter() - started, 1e-9)
+        loop_finished = time.perf_counter()
+        elapsed = max(loop_finished - started, 1e-9)
         termination_reason = (
             "stop_requested"
             if stop_event.is_set()
@@ -304,7 +465,12 @@ class _LaneKernel:
                 else "evaluation_limit"
             )
         )
-        return {
+        telemetry_started = (
+            time.perf_counter_ns()
+            if self.timing_ns is not None
+            else 0
+        )
+        result = {
             "evaluated": evaluated,
             "accepted": accepted,
             "legal": legal,
@@ -336,10 +502,26 @@ class _LaneKernel:
                 "acceptance_rate": accepted / max(1, legal),
                 "duplicate_rate": duplicates / max(1, legal),
                 "operator_yield": improvements / max(1, legal),
+                "mutation_operators": ancestry_operator_statistics,
             },
+            "mutation_ancestry": _ancestry_payload(
+                global_records=global_records,
+                final_best_ancestry=self.best_ancestry,
+                current_accepted_ancestry=list(self.accepted_ancestry),
+                maximum_evaluations=target,
+            ),
             "termination_reason": termination_reason,
             "end_high_water": self.high_water,
         }
+        if self.timing_ns is not None:
+            self.timing_ns["telemetry_construction"] += (
+                time.perf_counter_ns() - telemetry_started
+            )
+            result["timing"] = _timing_payload(
+                self.timing_ns,
+                search_loop_seconds=elapsed,
+            )
+        return result
 
     @property
     def algorithm(self) -> str:
@@ -378,6 +560,30 @@ class _LaneKernel:
         self.recent_hashes.append(key)
         self.recent_hash_set.add(key)
 
+    def _score(self, graph: BitGraph) -> ScoreResult:
+        cap = int(self.parameters["witness_cap"])
+        if self.timing_ns is None:
+            return self.plugin.cheap_score(graph, cap)
+        profiled = getattr(self.plugin, "cheap_score_profiled", None)
+        if profiled is None:
+            started = time.perf_counter_ns()
+            score = self.plugin.cheap_score(graph, cap)
+            self.timing_ns["score_calculation"] += (
+                time.perf_counter_ns() - started
+            )
+            return score
+        score, timings = profiled(graph, cap)
+        self.timing_ns["graph_validation"] += int(
+            timings["graph_validation_ns"]
+        )
+        self.timing_ns["witness_counting"] += int(
+            timings["witness_counting_ns"]
+        )
+        self.timing_ns["score_calculation"] += int(
+            timings["score_calculation_ns"]
+        )
+        return score
+
     def checkpoint(self, lane_version: int) -> dict[str, Any]:
         payload = {
             "lane_id": self.spec.lane_id,
@@ -392,6 +598,18 @@ class _LaneKernel:
             "tabu": list(self.tabu),
             "parameters": dict(self.parameters),
             "high_water": self.high_water,
+            "accepted_ancestry": list(self.accepted_ancestry),
+            "best_ancestry": list(self.best_ancestry),
+            "current_candidate_id": (
+                self.current_candidate_id
+                if self.instrumentation_enabled
+                else _candidate_id(self.spec.campaign_id, self.graph)
+            ),
+            "best_candidate_id": (
+                self.best_candidate_id
+                if self.instrumentation_enabled
+                else _candidate_id(self.spec.campaign_id, self.best_graph)
+            ),
         }
         digest = hashlib.sha256(
             canonical_json(payload, max_bytes=1024 * 1024)
@@ -657,6 +875,7 @@ class LaneManager:
         self._checkpoint_order: dict[str, deque[str]] = {}
         self._pinned_checkpoint_ids: set[str] = set()
         self._pinned_checkpoint_order: deque[str] = deque()
+        self._deferred_events: deque[dict[str, Any]] = deque()
         self.checkpoint_dir = self.campaign_dir / "lane-checkpoints"
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
@@ -852,10 +1071,16 @@ class LaneManager:
             raise KeyError(f"unknown lane: {lane_id}") from error
 
     def poll(self, timeout: float = 0.1) -> dict[str, Any] | None:
+        if self._deferred_events:
+            return self._deferred_events.popleft()
         try:
             event = self.events.get(timeout=timeout)
         except Empty:
             return None
+        self._apply_event(event)
+        return event
+
+    def _apply_event(self, event: dict[str, Any]) -> None:
         runtime = self._runtime(str(event["lane_id"]))
         kind = event["kind"]
         if kind == "ready":
@@ -902,7 +1127,6 @@ class LaneManager:
             checkpoint = event.get("checkpoint")
             if isinstance(checkpoint, dict):
                 self._remember_checkpoint(runtime, checkpoint)
-        return event
 
     def _remember_checkpoint(
         self, runtime: LaneRuntime, checkpoint: dict[str, Any]
@@ -982,8 +1206,21 @@ class LaneManager:
             runtime.stop_event.set()
             runtime.pause_event.clear()
         deadline = time.monotonic() + timeout
-        for runtime in self.lanes.values():
-            runtime.process.join(timeout=max(0.0, deadline - time.monotonic()))
+        while (
+            any(runtime.process.is_alive() for runtime in self.lanes.values())
+            and time.monotonic() < deadline
+        ):
+            try:
+                event = self.events.get(
+                    timeout=min(0.05, max(0.0, deadline - time.monotonic()))
+                )
+            except Empty:
+                pass
+            else:
+                self._apply_event(event)
+                self._deferred_events.append(event)
+            for runtime in self.lanes.values():
+                runtime.process.join(timeout=0)
         for runtime in self.lanes.values():
             if runtime.process.is_alive():
                 runtime.process.kill()
@@ -1004,6 +1241,164 @@ def _score_payload(score: ScoreResult) -> dict[str, Any]:
         "simplicity": score.simplicity,
         "ordering_key": list(score.ordering_key),
     }
+
+
+def _candidate_id(campaign_id: str, graph: BitGraph) -> str:
+    graph_sha256 = hashlib.sha256(
+        graph.to_graph6().encode("ascii")
+    ).hexdigest()
+    identity = hashlib.sha256(
+        f"{campaign_id}:{graph_sha256}".encode("ascii")
+    ).hexdigest()
+    return f"candidate-{identity[:24]}"
+
+
+def _mutation_record(
+    *,
+    campaign_id: str,
+    parent: BitGraph,
+    child: BitGraph,
+    parent_candidate_id: str,
+    score_before: ScoreResult,
+    score_after: ScoreResult,
+    evaluation: int,
+    accepted: bool,
+    global_record: bool,
+) -> dict[str, Any]:
+    parent_edges = set(parent.edges())
+    child_edges = set(child.edges())
+    removed = sorted(parent_edges - child_edges)
+    added = sorted(child_edges - parent_edges)
+    mutated_vertices = sorted(
+        {vertex for edge in (*removed, *added) for vertex in edge}
+    )
+    if len(removed) == len(added) == 2:
+        operator = "two_edge_switch"
+    elif added and not removed:
+        operator = "edge_add"
+    elif removed and not added:
+        operator = "edge_remove"
+    else:
+        operator = "mixed_edge_edit"
+    return {
+        "candidate_id": _candidate_id(campaign_id, child),
+        "parent_candidate_id": parent_candidate_id,
+        "mutation_operator": operator,
+        "mutated_vertices": mutated_vertices,
+        "mutated_edges": {
+            "removed": [list(edge) for edge in removed],
+            "added": [list(edge) for edge in added],
+        },
+        "score_before": list(score_before.ordering_key),
+        "score_after": list(score_after.ordering_key),
+        "witness_counts_before": {
+            str(length): count
+            for length, count in score_before.witness_counts
+        },
+        "witness_counts_after": {
+            str(length): count
+            for length, count in score_after.witness_counts
+        },
+        "evaluation": evaluation,
+        "accepted": accepted,
+        "global_record": global_record,
+    }
+
+
+def _ancestry_payload(
+    *,
+    global_records: list[dict[str, Any]],
+    final_best_ancestry: list[dict[str, Any]],
+    current_accepted_ancestry: list[dict[str, Any]],
+    maximum_evaluations: int,
+) -> dict[str, Any]:
+    records = (
+        global_records
+        + final_best_ancestry
+        + current_accepted_ancestry
+    )
+    encoded_sizes = [
+        len(json.dumps(record, sort_keys=True, separators=(",", ":")))
+        for record in records
+    ]
+    maximum_record_bytes = max(encoded_sizes, default=0)
+    maximum_live_records = maximum_evaluations + 2 * ANCESTRY_LIMIT
+    return {
+        "limit_per_retained_candidate": ANCESTRY_LIMIT,
+        "global_record_improvements": global_records,
+        "final_best_ancestry": final_best_ancestry[-ANCESTRY_LIMIT:],
+        "global_record_count": len(global_records),
+        "final_best_ancestry_length": min(
+            len(final_best_ancestry), ANCESTRY_LIMIT
+        ),
+        "rejected_non_record_candidates_stored": 0,
+        "memory_estimate": {
+            "live_record_count": len(records),
+            "maximum_live_records": maximum_live_records,
+            "largest_observed_record_bytes": maximum_record_bytes,
+            "conservative_maximum_bytes": (
+                maximum_live_records * maximum_record_bytes * 2
+            ),
+            "note": (
+                "The factor of two covers Python container and object "
+                "overhead beyond compact JSON size."
+            ),
+        },
+    }
+
+
+def _timing_payload(
+    timings_ns: dict[str, int],
+    *,
+    search_loop_seconds: float,
+) -> dict[str, Any]:
+    counters = {
+        name: value / 1_000_000_000
+        for name, value in timings_ns.items()
+    }
+    search_names = (
+        "mutation_generation",
+        "graph_validation",
+        "witness_counting",
+        "score_calculation",
+        "duplicate_detection",
+        "tabu_bookkeeping",
+        "ancestry_construction",
+    )
+    accounted_search = sum(counters[name] for name in search_names)
+    return {
+        "enabled": True,
+        "counters_seconds": counters,
+        "search_loop_seconds": search_loop_seconds,
+        "accounted_search_seconds": accounted_search,
+        "unattributed_search_seconds": max(
+            0.0, search_loop_seconds - accounted_search
+        ),
+        "measured_total_seconds": (
+            search_loop_seconds
+            + counters["telemetry_construction"]
+            + counters["sqlite_persistence"]
+            + counters["exact_final_verification"]
+        ),
+    }
+
+
+def add_external_timing(
+    metrics: dict[str, Any],
+    name: str,
+    elapsed_seconds: float,
+) -> None:
+    timing = metrics.get("timing")
+    if not isinstance(timing, dict):
+        return
+    counters = timing["counters_seconds"]
+    counters[name] = float(counters.get(name, 0.0)) + elapsed_seconds
+    timing["measured_total_seconds"] = (
+        float(timing["search_loop_seconds"])
+        + float(counters["telemetry_construction"])
+        + float(counters["sqlite_persistence"])
+        + float(counters["exact_final_verification"])
+    )
 
 
 def _score_from_payload(payload: dict[str, Any]) -> ScoreResult:
@@ -1067,6 +1462,7 @@ def run_bounded_lane_batch(
     *,
     max_evaluations: int,
     max_wall_seconds: float,
+    instrumentation_enabled: bool = True,
 ) -> dict[str, Any]:
     """Run exactly one bounded batch in the coordinator process."""
 
@@ -1075,7 +1471,12 @@ def run_bounded_lane_batch(
     if not 0 < max_wall_seconds <= 120:
         raise ValueError("batch wall limit must be in (0, 120]")
     spec.validate()
-    kernel = _LaneKernel(spec, checkpoint=None, fork_seed=None)
+    kernel = _LaneKernel(
+        spec,
+        checkpoint=None,
+        fork_seed=None,
+        instrumentation_enabled=instrumentation_enabled,
+    )
     metrics = kernel.run_batch(
         _NeverStop(),
         max_evaluations=max_evaluations,
@@ -1084,7 +1485,18 @@ def run_bounded_lane_batch(
     checkpoint = kernel.checkpoint(spec.lane_version)
     graph6 = kernel.best_graph.to_graph6()
     graph_sha256 = hashlib.sha256(graph6.encode("ascii")).hexdigest()
+    verification_started = (
+        time.perf_counter()
+        if instrumentation_enabled
+        else 0.0
+    )
     verification = kernel.plugin.exact_verify(kernel.best_graph)
+    if instrumentation_enabled:
+        add_external_timing(
+            metrics,
+            "exact_final_verification",
+            time.perf_counter() - verification_started,
+        )
     return {
         "algorithm": spec.algorithm,
         "parameters": dict(spec.parameters),
@@ -1100,7 +1512,12 @@ def run_bounded_lane_batch(
         "best_score": _score_payload(kernel.best_score),
         "score_trajectory_summary": metrics["score_trajectory_summary"],
         "operator_statistics": metrics["operator_statistics"],
-        "best_candidate_identifier": f"candidate-{graph_sha256[:24]}",
+        "mutation_ancestry": metrics["mutation_ancestry"],
+        "timing": metrics.get(
+            "timing",
+            {"enabled": False, "counters_seconds": {}},
+        ),
+        "best_candidate_identifier": kernel.best_candidate_id,
         "best_graph6": graph6,
         "best_graph_sha256": graph_sha256,
         "verifier_result": dataclasses.asdict(verification),

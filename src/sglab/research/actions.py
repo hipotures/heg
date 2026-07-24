@@ -6,8 +6,9 @@ from pathlib import Path
 from typing import Any
 import hashlib
 import json
+import time
 
-from .lanes import LaneManager, LaneSpec
+from .lanes import LaneManager, LaneSpec, add_external_timing
 from .store import ResearchStore
 
 
@@ -261,10 +262,12 @@ class LaneActionDispatcher:
             metrics = dict(event["metrics"])
             end = int(metrics["end_high_water"])
             start = max(0, end - int(metrics["evaluated"]))
+            metric_window_id = _derived_id(
+                "metric", f"{lane_id}:{event['lane_version']}:{end}"
+            )
+            persistence_started = time.perf_counter()
             self.store.record_lane_metric_window(
-                metric_window_id=_derived_id(
-                    "metric", f"{lane_id}:{event['lane_version']}:{end}"
-                ),
+                metric_window_id=metric_window_id,
                 lane_id=lane_id,
                 campaign_id=self.campaign_id,
                 lane_version=int(event["lane_version"]),
@@ -274,6 +277,15 @@ class LaneActionDispatcher:
                 ended_at=str(event["at"]),
                 metrics=metrics,
                 retention=self.manager.telemetry_windows,
+            )
+            add_external_timing(
+                metrics,
+                "sqlite_persistence",
+                time.perf_counter() - persistence_started,
+            )
+            self.store.update_lane_metric_window_metrics(
+                metric_window_id=metric_window_id,
+                metrics=metrics,
             )
         elif kind == "ready":
             self._handle_ready(lane_id)

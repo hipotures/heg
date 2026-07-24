@@ -189,6 +189,27 @@ class OneBatchExperimentTests(unittest.TestCase):
                     outcome["termination_reason"], "evaluation_limit"
                 )
                 self.assertGreater(outcome["throughput"], 0)
+                self.assertGreater(
+                    outcome["timing"]["counters_seconds"][
+                        "sqlite_persistence"
+                    ],
+                    0,
+                )
+                persisted_metrics = json.loads(
+                    store.connection.execute(
+                        """
+                        SELECT metrics_json FROM lane_metric_windows
+                        WHERE metric_window_id=?
+                        """,
+                        (outcome["metric_window_id"],),
+                    ).fetchone()[0]
+                )
+                self.assertGreater(
+                    persisted_metrics["timing"]["counters_seconds"][
+                        "sqlite_persistence"
+                    ],
+                    0,
+                )
                 self.assertEqual(
                     outcome["decision_before_search"][
                         "first_graph_evaluation_count"

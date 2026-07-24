@@ -7,6 +7,7 @@ from typing import Any
 import asyncio
 import hashlib
 import json
+import time
 
 from ..state import atomic_write_json, utc_now
 from .app_server_client import AppServerClient, AppServerConfig
@@ -16,7 +17,12 @@ from .campaign import campaign_status, target_definition_sha256
 from .candidates import CandidateArchive
 from .catalog import EXPERIMENT_ALGORITHMS, action_catalog
 from .director import ActiveDirector
-from .lanes import LaneManager, LaneSpec, run_bounded_lane_batch
+from .lanes import (
+    LaneManager,
+    LaneSpec,
+    add_external_timing,
+    run_bounded_lane_batch,
+)
 from .protocol import MAX_SNAPSHOT_BYTES, canonical_json
 from .providers import (
     DecisionProvider,
@@ -183,6 +189,7 @@ class OneBatchExperiment:
             self.campaign_dir / relative_checkpoint,
             checkpoint,
         )
+        persistence_started = time.perf_counter()
         self.store.record_lane_checkpoint(
             lane_id=lane_id,
             lane_version=0,
@@ -217,6 +224,16 @@ class OneBatchExperiment:
         )
         if candidate_id is None:
             raise RuntimeError("bounded batch did not retain its best candidate")
+        add_external_timing(
+            result["metrics"],
+            "sqlite_persistence",
+            time.perf_counter() - persistence_started,
+        )
+        if not self.store.update_lane_metric_window_metrics(
+            metric_window_id=metric_window_id,
+            metrics=result["metrics"],
+        ):
+            raise RuntimeError("failed to persist bounded batch timing")
         result["best_candidate_identifier"] = candidate_id
         result["lane_id"] = lane_id
         result["decision_batch_id"] = committed.decision_batch_id

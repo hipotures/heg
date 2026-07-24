@@ -924,6 +924,27 @@ class ResearchStore:
             )
             return True
 
+    def update_lane_metric_window_metrics(
+        self,
+        *,
+        metric_window_id: str,
+        metrics: dict[str, Any],
+    ) -> bool:
+        """Replace one just-written metric payload from the single writer."""
+
+        with self.transaction() as database:
+            cursor = database.execute(
+                """
+                UPDATE lane_metric_windows SET metrics_json=?
+                WHERE metric_window_id=?
+                """,
+                (
+                    json.dumps(metrics, sort_keys=True),
+                    metric_window_id,
+                ),
+            )
+            return cursor.rowcount == 1
+
     def complete_lane_births(
         self,
         *,

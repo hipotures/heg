@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from random import Random
-from time import perf_counter
+from time import perf_counter, perf_counter_ns
 from typing import Any
 import math
 
@@ -243,6 +243,58 @@ class ErdosGyarfasPlugin:
             complete,
             simplicity=graph.size(),
         )
+
+    def cheap_score_profiled(
+        self, graph: BitGraph, cap: int
+    ) -> tuple[ScoreResult, dict[str, int]]:
+        """Return the ordinary score plus non-overlapping stage timings."""
+
+        started = perf_counter_ns()
+        validation = self.validate_graph(graph)
+        validation_done = perf_counter_ns()
+        witness_ns = 0
+        score_ns = 0
+        if not validation.valid:
+            score_started = perf_counter_ns()
+            score = ScoreResult(
+                False, (), 10**9, True, simplicity=graph.size()
+            )
+            score_ns += perf_counter_ns() - score_started
+        else:
+            counts: list[tuple[int, int]] = []
+            weighted = 0
+            complete = True
+            node_budget = max(4_096, min(50_000, cap * 1_024))
+            for length in self.forbidden_lengths(graph.n):
+                witness_started = perf_counter_ns()
+                witnesses, search_complete = find_cycles_of_length_bounded(
+                    graph,
+                    length,
+                    cap + 1,
+                    node_budget,
+                )
+                witness_ns += perf_counter_ns() - witness_started
+                score_started = perf_counter_ns()
+                count = min(len(witnesses), cap)
+                counts.append((length, count))
+                weighted += count * max(1, 64 // length)
+                if len(witnesses) > cap or not search_complete:
+                    complete = False
+                score_ns += perf_counter_ns() - score_started
+            score_started = perf_counter_ns()
+            score = ScoreResult(
+                True,
+                tuple(counts),
+                weighted,
+                complete,
+                simplicity=graph.size(),
+            )
+            score_ns += perf_counter_ns() - score_started
+        return score, {
+            "graph_validation_ns": validation_done - started,
+            "witness_counting_ns": witness_ns,
+            "score_calculation_ns": score_ns,
+        }
 
     def exact_verify(self, graph: BitGraph) -> VerifyResult:
         return verify_reference(graph)

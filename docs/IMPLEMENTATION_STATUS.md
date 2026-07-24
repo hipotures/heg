@@ -2,6 +2,35 @@
 
 Last implementation audit: **2026-07-24**.
 
+## Search timing and mutation ancestry — offline complete
+
+The authenticated order-20 ILS-tabu configuration was reproduced without
+auth or model inference. It again produced the same 18 global records, best
+score 3 at evaluation 921, final score 149, and exact-verifier rejection. An
+instrumented and uninstrumented replay produced the same graph and score for
+the same seed.
+
+Search telemetry now separates mutation generation, graph validation, witness
+counting, score calculation, duplicate detection, tabu bookkeeping, ancestry
+construction, telemetry construction, SQLite persistence, and exact final
+verification. The reproduced run spent 94.3% of its search-loop time counting
+cycle witnesses; persistence and telemetry were each about one millisecond.
+Controlled comparisons show that graph order and witness bound, not
+instrumentation or SQLite, explain nearly all of the previous 16.8x
+throughput difference.
+
+Every global record now carries its parent candidate, mutation operator,
+vertices and edge delta, before/after scores and witnesses, evaluation, and
+record flag. Checkpoints retain at most 64 accepted transitions for the
+current and best candidates, rejected non-records are not retained, and the
+reviewed `mutation_ancestry` diagnostic reads bounded durable telemetry. See
+`docs/reports/M6_SEARCH_MUTATION_ANCESTRY.md`.
+
+The larger checkpoint messages also exposed and fixed a shutdown queue race:
+the manager now drains complete worker events before joining or terminating a
+lane, while deferring those events for the coordinator's single SQLite writer.
+All 99 tests and the five repository gates pass.
+
 ## First AI-directed search experiment — live gate complete
 
 The no-model Phase A gate now exercises the complete decision-to-search

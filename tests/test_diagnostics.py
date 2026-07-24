@@ -89,6 +89,58 @@ class ScientificActionDispatcherTests(unittest.TestCase):
                 self.assertEqual(
                     observed["summary"]["graphs"][0]["minimum_degree"], 3
                 )
+                ancestry_record = {
+                    "candidate_id": candidate_id,
+                    "parent_candidate_id": "candidate-parent",
+                    "mutation_operator": "two_edge_switch",
+                    "mutated_vertices": [0, 1, 2, 3],
+                    "mutated_edges": {
+                        "removed": [[0, 1], [2, 3]],
+                        "added": [[0, 2], [1, 3]],
+                    },
+                    "score_before": [0, 2, 8, 0, 6],
+                    "score_after": [0, 1, 4, 0, 6],
+                    "witness_counts_before": {"4": 2},
+                    "witness_counts_after": {"4": 1},
+                    "evaluation": 9,
+                    "accepted": True,
+                    "global_record": True,
+                }
+                self.assertTrue(
+                    store.record_lane_metric_window(
+                        metric_window_id="metric-ancestry",
+                        lane_id="lane-1",
+                        campaign_id="campaign-1",
+                        lane_version=0,
+                        start_high_water=0,
+                        end_high_water=10,
+                        started_at="2026-07-24T00:00:00Z",
+                        ended_at="2026-07-24T00:00:01Z",
+                        metrics={
+                            "mutation_ancestry": {
+                                "global_record_improvements": [
+                                    ancestry_record
+                                ],
+                                "final_best_ancestry": [
+                                    ancestry_record
+                                ],
+                            }
+                        },
+                    )
+                )
+                ancestry = dispatcher._diagnostic(
+                    action_id="diagnose-ancestry",
+                    diagnostic_type="mutation_ancestry",
+                    subject_ids=[candidate_id],
+                )
+                lane_ancestry = ancestry["summary"]["lanes"][0]
+                self.assertEqual(lane_ancestry["lane_id"], "lane-1")
+                self.assertEqual(
+                    lane_ancestry["global_record_improvements"][0][
+                        "parent_candidate_id"
+                    ],
+                    "candidate-parent",
+                )
             finally:
                 store.close()
 
