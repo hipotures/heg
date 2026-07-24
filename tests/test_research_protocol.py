@@ -115,6 +115,66 @@ class ResearchProtocolTests(unittest.TestCase):
         self.assertIn('"expected_lane_version"', encoded)
         self.assertNotIn('"command"', encoded)
 
+    def test_structured_output_const_nodes_declare_their_type(self) -> None:
+        schema = director_decision_schema()
+        pending = [schema]
+        while pending:
+            node = pending.pop()
+            if isinstance(node, dict):
+                if "const" in node or "enum" in node:
+                    self.assertIn("type", node, node)
+                if node.get("type") == "object":
+                    self.assertEqual(
+                        set(node.get("properties", {})),
+                        set(node.get("required", [])),
+                        node,
+                    )
+                pending.extend(node.values())
+            elif isinstance(node, list):
+                pending.extend(node)
+        encoded = json.dumps(schema, sort_keys=True)
+        for unsupported in (
+            '"exclusiveMinimum"',
+            '"minProperties"',
+            '"oneOf"',
+            '"uniqueItems"',
+        ):
+            self.assertNotIn(unsupported, encoded)
+        self.assertIn('"anyOf"', encoded)
+
+    def test_nullable_transport_placeholders_are_normalized(self) -> None:
+        decision = valid_decision()
+        parameters = decision["actions"][0]["spec"]["parameters"]
+        parameters.update(
+            {
+                "restart_threshold": None,
+                "promotion_penalty": None,
+                "tabu_tenure": None,
+                "perturbation_interval": None,
+            }
+        )
+        decision["actions"][1]["patch"].update(
+            {
+                "cooling": None,
+                "restart_threshold": None,
+                "promotion_penalty": None,
+                "tabu_tenure": None,
+                "perturbation_interval": None,
+                "witness_cap": None,
+                "batch_candidates": None,
+            }
+        )
+        result = validate_decision(decision, context())
+        self.assertTrue(result.accepted, result.issues)
+        self.assertNotIn(
+            "tabu_tenure",
+            result.normalized["actions"][0]["spec"]["parameters"],
+        )
+        self.assertEqual(
+            result.normalized["actions"][1]["patch"],
+            {"temperature": 0.5},
+        )
+
     def test_stale_unknown_and_arbitrary_fields_are_rejected(self) -> None:
         stale = valid_decision()
         stale["actions"][1]["expected_lane_version"] = 2

@@ -50,19 +50,17 @@ def payload_sha256(value: Any, *, max_bytes: int) -> str:
 def _common_action_properties() -> dict[str, Any]:
     return {
         "action_id": {"type": "string", "minLength": 1, "maxLength": 128},
-        "type": {"enum": list(ACTION_TYPES)},
+        "type": {"type": "string", "enum": list(ACTION_TYPES)},
         "priority": {"type": "integer", "minimum": 0, "maximum": 100},
         "hypothesis_ids": {
             "type": "array",
             "maxItems": 16,
             "items": {"type": "string"},
-            "uniqueItems": True,
         },
         "evidence_ids": {
             "type": "array",
             "maxItems": 32,
             "items": {"type": "string"},
-            "uniqueItems": True,
         },
         "rationale": {"type": "string", "minLength": 1, "maxLength": 4000},
         "expected_effect": {
@@ -103,6 +101,7 @@ def _common_action_properties() -> dict[str, Any]:
             "required": ["on_precondition_failure"],
             "properties": {
                 "on_precondition_failure": {
+                    "type": "string",
                     "enum": ["reject", "replan"],
                 }
             },
@@ -125,11 +124,20 @@ def director_decision_schema() -> dict[str, Any]:
         "lease_seconds",
         "fallback",
     ]
+    required_parameter_names = {"order", "batch_candidates", "witness_cap"}
+    parameter_properties = {
+        name: (
+            dict(domain)
+            if name in required_parameter_names
+            else {**domain, "type": [domain["type"], "null"]}
+        )
+        for name, domain in PARAMETER_DOMAINS.items()
+    }
     parameter_schema = {
         "type": "object",
         "additionalProperties": False,
-        "properties": PARAMETER_DOMAINS,
-        "required": ["order", "batch_candidates", "witness_cap"],
+        "properties": parameter_properties,
+        "required": list(parameter_properties),
     }
 
     def variant(
@@ -143,7 +151,7 @@ def director_decision_schema() -> dict[str, Any]:
             "required": [*common_required, *required],
             "properties": {
                 **common,
-                "type": {"const": action_type},
+                "type": {"type": "string", "const": action_type},
                 **properties,
             },
         }
@@ -155,12 +163,11 @@ def director_decision_schema() -> dict[str, Any]:
     patch_parameter_schema = {
         **parameter_schema,
         "properties": {
-            name: domain
+            name: {**domain, "type": [domain["type"], "null"]}
             for name, domain in PARAMETER_DOMAINS.items()
             if name != "order"
         },
-        "required": [],
-        "minProperties": 1,
+        "required": [name for name in PARAMETER_DOMAINS if name != "order"],
     }
     action_variants = [
         variant(
@@ -178,8 +185,14 @@ def director_decision_schema() -> dict[str, Any]:
                         "resource_share",
                     ],
                     "properties": {
-                        "algorithm": {"enum": list(ALGORITHMS)},
-                        "graph_family": {"enum": list(GRAPH_FAMILIES)},
+                        "algorithm": {
+                            "type": "string",
+                            "enum": list(ALGORITHMS),
+                        },
+                        "graph_family": {
+                            "type": "string",
+                            "enum": list(GRAPH_FAMILIES),
+                        },
                         "seed": {
                             "type": "integer",
                             "minimum": 0,
@@ -188,7 +201,7 @@ def director_decision_schema() -> dict[str, Any]:
                         "parameters": parameter_schema,
                         "resource_share": {
                             "type": "number",
-                            "exclusiveMinimum": 0,
+                            "minimum": 0,
                             "maximum": 1,
                         },
                     },
@@ -222,7 +235,7 @@ def director_decision_schema() -> dict[str, Any]:
                             "patch": patch_parameter_schema,
                             "resource_share": {
                                 "type": "number",
-                                "exclusiveMinimum": 0,
+                                "minimum": 0,
                                 "maximum": 1,
                             },
                         },
@@ -238,9 +251,15 @@ def director_decision_schema() -> dict[str, Any]:
                 "restart_spec": {
                     "type": "object",
                     "additionalProperties": False,
-                    "required": ["source", "seed"],
+                    "required": [
+                        "source",
+                        "seed",
+                        "checkpoint_id",
+                        "candidate_id",
+                    ],
                     "properties": {
                         "source": {
+                            "type": "string",
                             "enum": ["new_seed", "checkpoint", "archive_elite"]
                         },
                         "seed": {
@@ -296,13 +315,15 @@ def director_decision_schema() -> dict[str, Any]:
             "request_diagnostic",
             ["diagnostic_type", "subject_ids"],
             {
-                "diagnostic_type": {"enum": list(DIAGNOSTICS)},
+                "diagnostic_type": {
+                    "type": "string",
+                    "enum": list(DIAGNOSTICS),
+                },
                 "subject_ids": {
                     "type": "array",
                     "minItems": 1,
                     "maxItems": 32,
                     "items": {"type": "string"},
-                    "uniqueItems": True,
                 },
             },
         ),
@@ -315,7 +336,6 @@ def director_decision_schema() -> dict[str, Any]:
                     "minItems": 1,
                     "maxItems": 32,
                     "items": {"type": "string"},
-                    "uniqueItems": True,
                 },
                 "verification_priority": {
                     "type": "integer",
@@ -344,7 +364,7 @@ def director_decision_schema() -> dict[str, Any]:
             "next_review",
         ],
         "properties": {
-            "schema_version": {"const": "1.0"},
+            "schema_version": {"type": "string", "const": "1.0"},
             "snapshot_id": {"type": "string"},
             "campaign_assessment": {
                 "type": "string",
@@ -368,6 +388,7 @@ def director_decision_schema() -> dict[str, Any]:
                     "properties": {
                         "hypothesis_id": {"type": "string"},
                         "operation": {
+                            "type": "string",
                             "enum": [
                                 "create",
                                 "confirm",
@@ -390,13 +411,11 @@ def director_decision_schema() -> dict[str, Any]:
                             "type": "array",
                             "maxItems": 32,
                             "items": {"type": "string"},
-                            "uniqueItems": True,
                         },
                         "evidence_against": {
                             "type": "array",
                             "maxItems": 32,
                             "items": {"type": "string"},
-                            "uniqueItems": True,
                         },
                     },
                 },
@@ -405,7 +424,7 @@ def director_decision_schema() -> dict[str, Any]:
                 "type": "array",
                 "minItems": 1,
                 "maxItems": 12,
-                "items": {"oneOf": action_variants},
+                "items": {"anyOf": action_variants},
             },
             "next_review": _review_schema(),
         },
@@ -441,8 +460,10 @@ def _review_schema() -> dict[str, Any]:
             "events": {
                 "type": "array",
                 "maxItems": 16,
-                "items": {"enum": list(REVIEW_EVENTS)},
-                "uniqueItems": True,
+                "items": {
+                    "type": "string",
+                    "enum": list(REVIEW_EVENTS),
+                },
             },
         },
     }

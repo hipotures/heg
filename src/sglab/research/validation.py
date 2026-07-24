@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Iterable
+import copy
 import math
 import re
 
@@ -104,6 +105,7 @@ def validate_decision(
     except (TypeError, ValueError) as error:
         issues.add("$", str(error))
         return DecisionValidation(False, tuple(issues.values))
+    value = _normalize_transport_nulls(value)
     top_fields = {
         "schema_version",
         "snapshot_id",
@@ -276,6 +278,47 @@ def validate_decision(
         tuple(issues.values),
         dict(value) if not issues.values else None,
     )
+
+
+def _normalize_transport_nulls(value: Any) -> Any:
+    """Remove nullable Structured Outputs placeholders before local validation."""
+
+    if not isinstance(value, dict):
+        return value
+    normalized = copy.deepcopy(value)
+    actions = normalized.get("actions")
+    if not isinstance(actions, list):
+        return normalized
+    for action in actions:
+        if not isinstance(action, dict):
+            continue
+        action_type = action.get("type")
+        if action_type == "start_lane":
+            spec = action.get("spec")
+            parameters = spec.get("parameters") if isinstance(spec, dict) else None
+            _drop_null_values(parameters)
+        elif action_type == "patch_lane":
+            _drop_null_values(action.get("patch"))
+        elif action_type == "fork_lane":
+            variants = action.get("variants")
+            if isinstance(variants, list):
+                for variant in variants:
+                    if isinstance(variant, dict):
+                        _drop_null_values(variant.get("patch"))
+        elif action_type == "restart_lane":
+            spec = action.get("restart_spec")
+            if isinstance(spec, dict):
+                for name in ("checkpoint_id", "candidate_id"):
+                    if spec.get(name) is None:
+                        spec.pop(name, None)
+    return normalized
+
+
+def _drop_null_values(value: Any) -> None:
+    if not isinstance(value, dict):
+        return
+    for name in [name for name, item in value.items() if item is None]:
+        value.pop(name)
 
 
 def _validate_hypotheses(

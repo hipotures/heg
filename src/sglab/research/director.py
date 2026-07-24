@@ -334,7 +334,11 @@ class ActiveDirector:
                 repair_allowed=False,
             )
         return DirectorEvidence(
-            decision=result.parsed,
+            decision=(
+                validation.normalized
+                if validation.accepted and validation.normalized is not None
+                else result.parsed
+            ),
             validation=validation,
             session_record_id=self.session_record_id,
             turn_record_ids=all_turns,
