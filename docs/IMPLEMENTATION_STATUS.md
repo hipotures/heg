@@ -2,7 +2,7 @@
 
 Last implementation audit: **2026-07-24**.
 
-## First AI-directed search experiment — deterministic gate complete
+## First AI-directed search experiment — live gate complete
 
 The no-model Phase A gate now exercises the complete decision-to-search
 boundary with the durable replay provider. It commits one validated
@@ -23,10 +23,25 @@ zero active skills and an empty failure list.
 
 The focused test additionally executes `random_restart`,
 `simulated_annealing`, and `iterated_local_search_tabu` through the same
-bounded one-batch primitive. The authenticated two-turn Phase B has not run:
-it remains gated on a new explicit authorization to copy only
-`/home/xai/.codex/auth.json` into a new private runtime home. No auth or model
-was used during Phase A.
+bounded one-batch primitive.
+
+After explicit authorization, Phase B copied only the selected `auth.json`
+into a new private home and completed exactly two app-server turns on one
+thread. The first selected a 10,000-evaluation
+`iterated_local_search_tabu` batch over order-20 connected cubic graphs. The
+validated decision and zero-evaluation application event were durable before
+the search kernel started. The bounded batch completed once, and its measured
+outcome appeared in the second snapshot. The second turn classified the
+result as `CHANGE_STRATEGY` and proposed a diagnostic; that decision was
+validated and persisted but not dispatched.
+
+There were no retry notifications, tool calls, unsupported server requests or
+third turn. Only one lane metric window exists, the second action has no
+outcome, app-server exited naturally, and SQLite integrity is `ok`. The best
+candidate reduced the cheap-score witness total from 192 to 3, but the exact
+reference verifier found a forbidden 4-cycle and rejected it; this is not a
+counterexample claim. See
+`docs/reports/M6_FIRST_AI_SEARCH_RUNTIME.md`.
 
 ## M6 Active Director — Phase 0 complete
 
