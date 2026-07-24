@@ -18,6 +18,7 @@ class BenchmarkTests(unittest.TestCase):
         self.assertIn("24_hour_candidates", report["forecast"])
         self.assertEqual(report["forecast"]["basis"], "n=32 frontier throughput only")
         self.assertIn("frontier_n32_throughput_quantiles", report)
+        self.assertIn("peak_rss_source", report)
         with tempfile.TemporaryDirectory() as directory:
             paths = write_report(report, Path(directory))
             self.assertTrue(all(path.is_file() for path in paths))

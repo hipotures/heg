@@ -253,6 +253,7 @@ def microbenchmark(
             "sat_scope": "built-in deterministic n=4 ground truth",
         },
         "peak_rss_bytes": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024,
+        "peak_rss_source": "resource.getrusage fallback before CLI hardware audit",
     }
 
 
@@ -435,6 +436,7 @@ def calibrate(
         "growth_factors": growth_factors,
         "forecast": forecast,
         "peak_rss_bytes": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024,
+        "peak_rss_source": "resource.getrusage fallback before CLI hardware audit",
     }
 
 

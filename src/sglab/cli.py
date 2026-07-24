@@ -332,7 +332,19 @@ def cmd_benchmark(args: Namespace) -> int:
     output.mkdir(parents=True, exist_ok=True)
     report["target"] = "erdos_gyarfas"
     report["reproduce_argv"] = ["sglab", *sys.argv[1:]]
-    report["hardware"] = hardware_metadata(output)
+    hardware = hardware_metadata(output)
+    report["hardware"] = hardware
+    cgroup_peak = hardware.get("cgroup_usage", {}).get("memory_peak")
+    if report["kind"] != "soak" and str(cgroup_peak).isdigit():
+        report["ru_maxrss_bytes"] = report["peak_rss_bytes"]
+        report["peak_rss_bytes"] = int(cgroup_peak)
+        report["peak_rss_source"] = "cgroup_v2 memory.peak"
+    else:
+        report["peak_rss_source"] = (
+            "sampled master-plus-worker RSS"
+            if report["kind"] == "soak"
+            else "resource.getrusage"
+        )
     paths = write_report(report, output)
     print(json.dumps({"json": str(paths[0]), "markdown": str(paths[1])}, indent=2))
     return 0
