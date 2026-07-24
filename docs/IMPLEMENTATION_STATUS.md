@@ -34,6 +34,21 @@ resume gates remain pending because the required explicit one-time auth import
 has not been authorized. See `docs/reports/M6_APP_SERVER_PREFLIGHT.md`; no
 credentials have been copied.
 
+### M6.2 durable Director contracts — offline milestone complete
+
+Schema v1 now migrates additively to schema v7 with campaign, app-server,
+snapshot, trigger, lane, action, hypothesis, verification-job, and terminal
+state while preserving all existing tables. A migration of an SQLite
+Online-Backup snapshot of the real workspace passed integrity checking and
+left the original database unchanged.
+
+The reviewed action catalog, exact output schema, strict semantic validator,
+private audit artifacts, one-repair-turn Director lifecycle, optimistic
+transactional decision commit, normalized usage, and replay provider are
+implemented. The full suite now has 52 passing tests. See
+`docs/reports/M6_DIRECTOR_CONTRACTS.md`. Live model acceptance remains coupled
+to the explicit M6.1 authentication gate; no live-completion claim is made.
+
 ## M0 — complete
 
 - installable standard `src/` package and CLI entry point;

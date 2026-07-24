@@ -1,0 +1,295 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from importlib.resources import files
+from pathlib import Path
+from time import perf_counter
+from typing import Any
+import hashlib
+import os
+
+from .app_server_client import (
+    AppServerClient,
+    AppServerSession,
+    AppServerTurnResult,
+)
+from .catalog import action_catalog
+from .protocol import (
+    DecisionValidation,
+    MAX_SNAPSHOT_BYTES,
+    canonical_json,
+    director_decision_schema,
+)
+from .store import ResearchStore, new_id
+from .validation import DecisionContext, validate_decision
+
+
+@dataclass(frozen=True, slots=True)
+class DirectorEvidence:
+    decision: dict[str, Any]
+    validation: DecisionValidation
+    session_record_id: str
+    turn_record_ids: tuple[str, ...]
+    thread_id: str
+    turn_id: str
+
+
+def base_instructions() -> str:
+    return (
+        files("sglab.research")
+        .joinpath("assets/director_base_instructions.txt")
+        .read_text(encoding="utf-8")
+        .strip()
+    )
+
+
+def build_director_prompt(snapshot: dict[str, Any]) -> str:
+    payload = {
+        "objective": (
+            "Actively manage the running concurrent search portfolio. "
+            "Search may change while this turn is processed; target explicit "
+            "lane versions from this committed snapshot."
+        ),
+        "immutable_target": snapshot.get("target"),
+        "campaign_stop_contract": snapshot.get("campaign"),
+        "available_action_and_parameter_catalog": action_catalog(),
+        "committed_research_snapshot": snapshot,
+        "admissible_evidence_ids": snapshot.get("available_evidence_ids", []),
+        "required_response": (
+            "Assess, update evidence-backed hypotheses, issue concrete typed "
+            "interventions with numeric parameters and expected observations, "
+            "and set bounded review triggers. Do not declare success."
+        ),
+    }
+    return canonical_json(payload, max_bytes=MAX_SNAPSHOT_BYTES).decode("ascii")
+
+
+class ActiveDirector:
+    def __init__(
+        self,
+        *,
+        client: AppServerClient,
+        store: ResearchStore,
+        campaign_id: str,
+        campaign_dir: Path,
+        codex_version: str,
+        executable_sha256: str,
+        protocol_schema_sha256: str,
+    ):
+        self.client = client
+        self.store = store
+        self.campaign_id = campaign_id
+        self.campaign_dir = campaign_dir.resolve()
+        self.codex_version = codex_version
+        self.executable_sha256 = executable_sha256
+        self.protocol_schema_sha256 = protocol_schema_sha256
+        self.session: AppServerSession | None = None
+        self.session_record_id: str | None = None
+        self.audit_dir = self.campaign_dir / "director"
+        for child in (
+            self.audit_dir,
+            self.audit_dir / "requests",
+            self.audit_dir / "responses",
+            self.audit_dir / "wire",
+        ):
+            child.mkdir(parents=True, exist_ok=True, mode=0o700)
+            child.chmod(0o700)
+
+    async def start(
+        self,
+        *,
+        resume_thread_id: str | None = None,
+        parent_thread_id: str | None = None,
+    ) -> AppServerSession:
+        await self.client.start()
+        if resume_thread_id is None:
+            session = await self.client.start_thread(base_instructions())
+        else:
+            session = await self.client.resume_thread(
+                resume_thread_id, base_instructions()
+            )
+        record_id = self.store.record_session(
+            record_id=new_id("app-session"),
+            campaign_id=self.campaign_id,
+            thread_id=session.thread_id,
+            session_id=session.session_id,
+            thread_path=session.thread_path,
+            parent_thread_id=parent_thread_id,
+            model=session.model,
+            effort=session.effort,
+            codex_version=self.codex_version,
+            executable_sha256=self.executable_sha256,
+            protocol_schema_sha256=self.protocol_schema_sha256,
+            resumed=resume_thread_id is not None,
+        )
+        self.session = session
+        self.session_record_id = record_id
+        return session
+
+    async def request_decision(
+        self,
+        *,
+        snapshot: dict[str, Any],
+        trigger_id: str,
+        context: DecisionContext,
+    ) -> DirectorEvidence:
+        prompt = build_director_prompt(snapshot)
+        return await self._request(
+            snapshot=snapshot,
+            trigger_id=trigger_id,
+            context=context,
+            prompt=prompt,
+            prior_turns=(),
+            repair_allowed=True,
+        )
+
+    async def _request(
+        self,
+        *,
+        snapshot: dict[str, Any],
+        trigger_id: str,
+        context: DecisionContext,
+        prompt: str,
+        prior_turns: tuple[str, ...],
+        repair_allowed: bool,
+    ) -> DirectorEvidence:
+        if self.session is None or self.session_record_id is None:
+            raise RuntimeError("Director session has not been started")
+        snapshot_id = str(snapshot["snapshot_id"])
+        turn_record_id = new_id("app-turn")
+        request_relative = Path("director") / "requests" / f"{turn_record_id}.json"
+        response_relative = Path("director") / "responses" / f"{turn_record_id}.json"
+        wire_relative = Path("director") / "wire" / f"{turn_record_id}.jsonl"
+        request_payload = {
+            "thread_id": self.session.thread_id,
+            "snapshot_id": snapshot_id,
+            "trigger_id": trigger_id,
+            "prompt": prompt,
+            "output_schema": director_decision_schema(),
+        }
+        request_bytes = canonical_json(request_payload, max_bytes=1024 * 1024)
+        _write_private(self.campaign_dir / request_relative, request_bytes + b"\n")
+        self.store.begin_turn(
+            turn_record_id=turn_record_id,
+            session_record_id=self.session_record_id,
+            campaign_id=self.campaign_id,
+            thread_id=self.session.thread_id,
+            snapshot_id=snapshot_id,
+            trigger_id=trigger_id,
+            request_artifact_ref=str(request_relative),
+            request_sha256=hashlib.sha256(request_bytes).hexdigest(),
+            wire_artifact_ref=str(wire_relative),
+        )
+        started = perf_counter()
+        try:
+            result = await self.client.turn(
+                self.session,
+                prompt,
+                output_schema=director_decision_schema(),
+            )
+            if not isinstance(result.parsed, dict):
+                raise RuntimeError("Director structured result is not an object")
+            response_bytes = canonical_json(result.parsed, max_bytes=128 * 1024)
+            _write_private(
+                self.campaign_dir / response_relative,
+                response_bytes + b"\n",
+            )
+            wire = self.client.wire_bytes
+            _write_private(self.campaign_dir / wire_relative, wire)
+            validation = validate_decision(result.parsed, context)
+            self.store.complete_turn(
+                turn_record_id,
+                turn_id=result.turn_id,
+                status=(
+                    "completed_valid" if validation.accepted else "completed_invalid"
+                ),
+                response_artifact_ref=str(response_relative),
+                response_sha256=hashlib.sha256(response_bytes).hexdigest(),
+                wire_sha256=hashlib.sha256(wire).hexdigest(),
+                usage=_usage_payload(result),
+                wall_seconds=perf_counter() - started,
+            )
+        except BaseException as error:
+            self.store.complete_turn(
+                turn_record_id,
+                turn_id=None,
+                status="failed",
+                wall_seconds=perf_counter() - started,
+                error_kind=type(error).__name__,
+                error_detail=str(error)[:4000],
+            )
+            raise
+        all_turns = (*prior_turns, turn_record_id)
+        if not validation.accepted and repair_allowed:
+            repair_payload = {
+                "repair": (
+                    "Return one corrected decision for the exact same committed "
+                    "snapshot. Do not change snapshot_id."
+                ),
+                "snapshot": snapshot,
+                "invalid_response": result.parsed,
+                "validation_errors": [
+                    {"path": issue.path, "message": issue.message}
+                    for issue in validation.issues
+                ],
+            }
+            repair_prompt = canonical_json(
+                repair_payload, max_bytes=MAX_SNAPSHOT_BYTES
+            ).decode("ascii")
+            return await self._request(
+                snapshot=snapshot,
+                trigger_id=trigger_id,
+                context=context,
+                prompt=repair_prompt,
+                prior_turns=all_turns,
+                repair_allowed=False,
+            )
+        return DirectorEvidence(
+            decision=result.parsed,
+            validation=validation,
+            session_record_id=self.session_record_id,
+            turn_record_ids=all_turns,
+            thread_id=self.session.thread_id,
+            turn_id=result.turn_id,
+        )
+
+    async def close(self) -> None:
+        await self.client.close()
+
+
+def _usage_payload(result: AppServerTurnResult) -> dict[str, Any] | None:
+    usage = result.usage
+    if usage is None:
+        return None
+    return {
+        "input_tokens": usage.input_tokens,
+        "cached_input_tokens": usage.cached_input_tokens,
+        "output_tokens": usage.output_tokens,
+        "reasoning_output_tokens": usage.reasoning_output_tokens,
+        "total_tokens": usage.total_tokens,
+        "raw": usage.raw,
+    }
+
+
+def _write_private(path: Path, payload: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path.parent.chmod(0o700)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    descriptor = os.open(
+        temporary,
+        os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+        0o600,
+    )
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except BaseException:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+    os.replace(temporary, path)
+    path.chmod(0o600)

@@ -4,7 +4,14 @@ import unittest
 from pathlib import Path
 
 from sglab.config import merge_config
-from sglab.db import SCHEMA_VERSION, connect, insert_metrics, insert_run, prune_metrics
+from sglab.db import (
+    BASE_SCHEMA_SQL,
+    SCHEMA_VERSION,
+    connect,
+    insert_metrics,
+    insert_run,
+    prune_metrics,
+)
 
 
 class ConfigAndDatabaseTests(unittest.TestCase):
@@ -47,3 +54,58 @@ class ConfigAndDatabaseTests(unittest.TestCase):
             raw.close()
             with self.assertRaises(RuntimeError):
                 connect(path)
+
+    def test_v1_migration_runs_only_on_online_backup_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            original = root / "original.sqlite3"
+            snapshot = root / "snapshot.sqlite3"
+            source = sqlite3.connect(original)
+            source.executescript(BASE_SCHEMA_SQL)
+            source.execute(
+                "INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?)",
+                ("legacy", "now", "erdos_gyarfas", "RUNNING", "{}", "{}"),
+            )
+            source.commit()
+            destination = sqlite3.connect(snapshot)
+            source.backup(destination)
+            destination.close()
+            source.close()
+
+            migrated = connect(snapshot)
+            self.assertEqual(
+                migrated.execute("PRAGMA user_version").fetchone()[0],
+                SCHEMA_VERSION,
+            )
+            self.assertEqual(
+                migrated.execute("PRAGMA integrity_check").fetchone()[0],
+                "ok",
+            )
+            self.assertEqual(
+                migrated.execute(
+                    "SELECT status FROM runs WHERE run_id='legacy'"
+                ).fetchone()[0],
+                "RUNNING",
+            )
+            tables = {
+                row[0]
+                for row in migrated.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                )
+            }
+            self.assertIn("research_campaigns", tables)
+            self.assertIn("director_actions", tables)
+            migrated.close()
+
+            untouched = sqlite3.connect(original)
+            self.assertEqual(untouched.execute("PRAGMA user_version").fetchone()[0], 1)
+            self.assertNotIn(
+                "research_campaigns",
+                {
+                    row[0]
+                    for row in untouched.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table'"
+                    )
+                },
+            )
+            untouched.close()

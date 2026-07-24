@@ -22,3 +22,19 @@ violate the generated protocol contract.
 Decision: retain exact byte hashes and canonical sorted-JSON hashes for
 generated protocol schemas. Rationale: repeated 0.145.0 generation preserves
 individual schema bytes but can reorder definitions in the v2 aggregate.
+
+## D-004 — 2026-07-24 — direct additive v1→v7 migration
+
+Decision: preserve every existing v1 table and migrate directly to user
+version 7, rather than inventing absent v2–v6 application history. Rationale:
+the planning package's schema v6 is not present in the authoritative
+repository; pretending otherwise would make recovery and audit claims false.
+
+## D-005 — 2026-07-24 — dependency-free semantic validation
+
+Decision: generate the model output schema from the reviewed Python catalog
+and independently enforce strict semantic validation with standard-library
+code. Rationale: this keeps the project dependency-free while adding checks
+that JSON Schema alone cannot express, including admissible evidence IDs,
+current lane versions, algorithm-specific parameters, and global resource
+shares.

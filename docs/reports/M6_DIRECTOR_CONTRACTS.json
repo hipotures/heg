@@ -1,0 +1,41 @@
+{
+  "report_version": "1.0",
+  "date": "2026-07-24",
+  "status": "offline_milestone_complete",
+  "migration": {
+    "from_user_version": 1,
+    "to_user_version": 7,
+    "existing_tables_preserved": 8,
+    "new_tables": 14,
+    "total_tables": 22,
+    "real_snapshot_method": "sqlite_dot_backup",
+    "real_snapshot_integrity_check": "ok",
+    "original_user_version_after_test": 1,
+    "unit_snapshot_method": "sqlite3.Connection.backup"
+  },
+  "contracts": {
+    "action_types": 10,
+    "algorithms": 2,
+    "graph_families": 3,
+    "unknown_fields_rejected": true,
+    "evidence_allowlist": true,
+    "optimistic_lane_versions": true,
+    "idempotency_keys": true,
+    "leases": true,
+    "max_repair_turns": 1,
+    "private_audit_artifacts": true,
+    "replay_without_model": true,
+    "sqlite_one_writer": true
+  },
+  "verification": {
+    "focused_tests": 10,
+    "full_tests": 52,
+    "full_test_seconds": 11.031,
+    "make_check": "pass"
+  },
+  "benchmark": {
+    "new_search_benchmark_required": false,
+    "reason": "candidate evaluation and search execution are unchanged"
+  },
+  "live_schema_acceptance": "pending_explicit_auth_import"
+}
