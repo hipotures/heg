@@ -16,7 +16,7 @@
     .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .7rem; }
     .metric { padding: .75rem; background: #111f2d; border-left: 3px solid #38bdf8; }
     .metric span { display: block; color: #7f96aa; font-size: .75rem; }
-    .metric strong { display: block; margin-top: .35rem; font-size: 1.05rem; }
+    .metric strong { display: block; margin-top: .35rem; font-size: 1.05rem; overflow-wrap: anywhere; }
     form { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .7rem; }
     label { display: grid; gap: .25rem; color: #9cb0c2; font-size: .8rem; }
     input, select, button { font: inherit; border: 1px solid #334a5f; border-radius: 4px; background: #09131d; color: #e7f1fa; padding: .55rem; }
@@ -85,22 +85,41 @@ async function refresh() {
       api('/api/status'), api('/api/logs?limit=50'), api('/api/candidates?limit=50'), api('/api/runs')
     ]);
     const values = [
-      ['Status', state.status], ['Run', state.run_id || '—'], ['Elapsed', `${Number(state.elapsed_seconds || 0).toFixed(1)} s`],
+      ['Status', state.status], ['Run', state.run_id || '—'], ['Target', state.target || '—'],
+      ['Order', state.configuration?.order ?? '—'], ['Algorithm', state.configuration?.algorithm || '—'],
+      ['Seed', state.configuration?.seed ?? '—'], ['Elapsed', `${Number(state.elapsed_seconds || 0).toFixed(1)} s`],
+      ['Remaining', `${Number(state.remaining_seconds || 0).toFixed(1)} s`],
       ['Candidates/s', Number(state.throughput?.candidates_per_second || 0).toFixed(1)],
-      ['Candidates', state.throughput?.candidates || 0], ['Workers', state.workers?.alive ?? 0],
-      ['RSS', `${((state.resources?.worker_rss_bytes || 0) / 1048576).toFixed(1)} MiB`],
-      ['DB size', `${((state.resources?.database_bytes || 0) / 1048576).toFixed(2)} MiB`]
+      ['Candidates', state.throughput?.candidates || 0],
+      ['Workers', `${state.workers?.alive ?? 0} / ${state.workers?.configured ?? 0}`],
+      ['Worker failures', state.workers?.failed ?? 0], ['Worker restarts', state.workers?.restarts ?? 0],
+      ['Aggregate RSS', `${((state.resources?.aggregate_rss_bytes || 0) / 1048576).toFixed(1)} MiB`],
+      ['Master / workers', `${((state.resources?.master_rss_bytes || 0) / 1048576).toFixed(1)} / ${((state.resources?.worker_rss_bytes || 0) / 1048576).toFixed(1)} MiB`],
+      ['Load (1m)', Number(state.resources?.load_average?.[0] || 0).toFixed(2)],
+      ['Disk free', `${((state.resources?.disk_free_bytes || 0) / 1073741824).toFixed(1)} GiB`],
+      ['DB size', `${((state.resources?.database_bytes || 0) / 1048576).toFixed(2)} MiB`],
+      ['Exact queue', state.exact_verification?.queued ?? 0],
+      ['Verified', state.exact_verification?.verified_candidates ?? 0],
+      ['Best score', JSON.stringify(state.best?.score?.ordering_key || [])]
     ];
     document.getElementById('metrics').innerHTML = values.map(([label, value]) => `<div class="metric"><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join('');
     document.getElementById('logs').textContent = (logs.lines || []).join('\n');
     document.getElementById('candidates').innerHTML = table(candidates.candidates || [], [
       ['ID', r => esc(r.candidate_id)], ['n / m', r => `${esc(r.order)} / ${esc(r.size)}`],
-      ['Score', r => esc(JSON.stringify(r.score?.ordering_key || []))],
+      ['Witness counts', r => esc(JSON.stringify(r.score?.witness_counts || {}))],
+      ['Weighted', r => esc(r.score?.weighted_penalty ?? '—')],
+      ['Novelty', r => Number(r.score?.novelty || 0).toFixed(3)],
+      ['Simplicity', r => esc(r.score?.simplicity ?? '—')],
+      ['Degrees', r => esc(JSON.stringify(r.degree_histogram || {}))],
       ['Verifier', r => esc(r.verification_status)],
       ['Files', r => ['graph6','json','svg'].map(kind => `<button data-artifact="${esc(r.artifacts[kind])}">${kind}</button>`).join(' ')]
     ]);
     document.getElementById('runs').innerHTML = table(runs.runs || [], [
-      ['Run ID', r => esc(r.run_id)], ['Created', r => esc(r.created_at)], ['Target', r => esc(r.target)], ['Status', r => esc(r.live_status)]
+      ['Run ID', r => esc(r.run_id)], ['Created', r => esc(r.created_at)], ['Target', r => esc(r.target)],
+      ['n / algorithm', r => `${esc(r.parameters?.order ?? '—')} / ${esc(r.parameters?.algorithm ?? '—')}`],
+      ['Status', r => esc(r.live_status)], ['Candidates', r => esc(r.candidates ?? 0)],
+      ['Candidates/s', r => Number(r.candidates_per_second || 0).toFixed(1)],
+      ['Best score', r => esc(JSON.stringify(r.best_score || []))]
     ]);
   } catch (error) { document.getElementById('notice').textContent = error.message; }
 }

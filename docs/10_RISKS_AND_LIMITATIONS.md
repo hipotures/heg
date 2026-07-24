@@ -124,8 +124,10 @@ Mitigation:
   early-witness smoke cases because startup dominates. It remains valuable as
   an independent verifier; hot-loop activation requires a harder-case profile.
 - PySAT 1.9.dev7 with `cadical195` was tested through an isolated optional
-  environment. nauty, SMS, and Glasgow were unavailable on the audited host;
-  their adapters fail closed and the lock file leaves commits unset.
+  environment. nauty is unavailable on the Manjaro host but its Debian package
+  and `n=4` overlap gate were tested in Bookworm; SMS and Glasgow remain
+  unavailable. Optional adapters fail closed and the lock file leaves
+  unpinned tool commits unset.
 - The built-in DPLL solver is deliberately restricted to tiny ground-truth
   tests and must not be used for frontier claims.
 - An unchecked SAT-solver UNSAT is preserved but reported as

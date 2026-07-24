@@ -39,9 +39,9 @@ Evidence: focused unit tests plus `make doctor`, `make test`, `make check`, and
 - one-coordinator workspace locking and bounded SQLite/event-log retention;
 - finalist submission to both exact verifier paths.
 
-A short automated soak exercised pause/resume and recycling. The production
-two-hour evidence gate is tracked separately from this software-completion
-statement.
+The production two-hour, 12-worker soak exercised pause/resume, post-resume
+progress, 180 controlled worker restarts, bounded queues, SQLite growth, and
+RSS plateau. It completed with zero worker failures and all gates passing.
 
 ## M3 — implemented and benchmark-gated
 
@@ -67,7 +67,10 @@ silently inserted into the heuristic loop.
 PySAT 1.9.dev7 with the `cadical195` backend was exercised on Python 3.12 at
 `n=4`, including proof preservation, and with a forced timeout at `n=8`.
 The UNSAT proof remains deliberately unchecked and therefore unclaimed.
-nauty is not installed on the host, so its live overlap gate remains external.
+nauty is not installed on the host, but Debian Bookworm's `nauty-geng`
+enumeration was run at `n=4`: it checked the sole connected minimum-degree-3
+class, found zero counterexamples, and agreed with the built-in CEGAR ground
+truth.
 
 ## M5 — complete
 
@@ -88,12 +91,11 @@ nauty is not installed on the host, so its live overlap gate remains external.
 - configurable soak runner that exercises pause/resume, recycling, RSS plateau,
   database growth, and bounded queues.
 
-The earlier 15-minute, 16-process calibration is preserved under
-`docs/benchmarks/`, but the scorer work-budget correction requires a fresh
-calibration before final acceptance. A short soak passed functional
-pause/resume and RSS checks; a failed 265-second attempt is retained as
-negative evidence. Neither substitutes for the separate two-hour production
-soak gate.
+The corrected 15-minute calibration completed all 16 cases under Python 3.12
+and bases forecasts only on the `n=32` frontier. The full two-hour soak passed
+all duration, control, progress, recycling, queue, database, dashboard, and
+RSS gates. Superseded calibrations, short smokes, and a failed 265-second soak
+attempt remain preserved as labeled evidence.
 
 ## M7 — optional adapters complete
 
@@ -104,6 +106,14 @@ soak gate.
 
 Installed external tools must receive exact commits and overlap tests before
 their lock entries are enabled.
+
+## Completion pilot
+
+The documented `n=8` integration pilot in `docs/20_PILOT_RUN.md` was started
+from the HTTP dashboard, observed in Chromium, paused with a stable candidate
+counter, resumed with renewed progress, stopped cleanly, and independently
+verified by both exact paths. As expected at this validation order, both
+verifiers found the same forbidden 4-cycle and rejected the candidate.
 
 Engineering completion is not a mathematical result. No counterexample or
 exhaustive nonexistence claim has been made.

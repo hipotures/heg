@@ -61,8 +61,8 @@ class ExternalTool:
         )
 
 
-NAUTY_GENG = ExternalTool("nauty-geng", ("geng",), ("-help",))
-NAUTY_LABELG = ExternalTool("nauty-labelg", ("labelg",), ("-help",))
+NAUTY_GENG = ExternalTool("nauty-geng", ("geng", "nauty-geng"), ("-help",))
+NAUTY_LABELG = ExternalTool("nauty-labelg", ("labelg", "nauty-labelg"), ("-help",))
 SMS = ExternalTool("sat-modulo-symmetries", ("sms",))
 GLASGOW = ExternalTool(
     "glasgow-subgraph-solver",

@@ -1,6 +1,7 @@
 # Source Ledger
 
-Checked on 2026-07-23 unless noted.
+Rechecked on 2026-07-24. Generated run metadata intentionally retains the
+research-status snapshot date `2026-07-23`.
 
 ## Mathematical status
 

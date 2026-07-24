@@ -2,7 +2,7 @@
 
 ## Core environment
 
-- Python 3.12+
+- Python 3.12
 - `uv` recommended, regular `venv` supported
 - GCC or Clang with C++17
 - CMake and Ninja
@@ -23,6 +23,10 @@ sudo apt install -y \
 
 Package names vary by distribution release. `doctor` must report missing executables rather than assuming installation succeeded.
 
+Debian packages prefix nauty programs as `nauty-geng` and `nauty-labelg`;
+Arch commonly exposes `geng` and `labelg`. The adapter accepts both naming
+conventions.
+
 ## Arch / Manjaro
 
 ```bash
@@ -33,13 +37,49 @@ sudo pacman -S --needed \
 ## Python
 
 ```bash
-uv venv
+uv python install 3.12
+uv venv --python 3.12
 source .venv/bin/activate
 uv pip install -e .
 uv pip install -e '.[sat,reference]'
 ```
 
 For `python-sat`, use the package named `python-sat`, not the unrelated space-physics package named `pysat`.
+
+## Installation audit
+
+The final wheel and source distribution were tested on 2026-07-24 in both
+supported distribution families.
+
+On the Manjaro host:
+
+- CPython 3.12.10;
+- GCC 16.1.1;
+- wheel installed into a fresh `uv` virtual environment outside the source
+  tree;
+- `sglab doctor` found the separately compiled C++17 verifier;
+- a four-worker run stopped at exactly 12 candidates with zero worker
+  failures and completed finalist verification.
+
+On an unmodified Debian 12 Bookworm userspace in an ephemeral container:
+
+- static `uv` 0.11.16 installed managed CPython 3.12.13;
+- `uv pip` installed the final wheel;
+- GCC 12.2 compiled `sglab-cyclecheck`;
+- `sglab doctor` found the compiled verifier plus Debian's
+  `/usr/bin/nauty-geng` and `/usr/bin/nauty-labelg`;
+- `nauty-geng` enumerated the sole connected minimum-degree-3 graph class at
+  `n=4`, found zero counterexamples, and agreed with built-in CEGAR ground
+  truth;
+- `sglab dashboard-smoke` passed;
+- a four-worker, 12-candidate search completed;
+- standalone Python DFS and C++17 bitset DFS found the same forbidden
+  4-cycle and returned `INVALID_CANDIDATE`.
+
+The first container harness attempted to mount the host's dynamically linked
+`uv`; Debian 12 correctly rejected it because the host binary required newer
+glibc symbols. The successful audit used the official static musl build of
+`uv`. This was a harness portability issue, not a project runtime failure.
 
 ## nauty / Traces
 

@@ -117,6 +117,10 @@ sglab resume --run ./workspace/runs/<run-id> --time-limit 2h
 For LAN exposure, explicitly pass `--host 0.0.0.0`, configure a firewall, and
 set `SGLAB_WEB_TOKEN`; when configured, the token protects every API request.
 
+A completed browser-driven `n=8` operational pilot, including a real
+pause/resume/stop sequence and independent rejection by both exact verifiers,
+is recorded in [the pilot report](docs/20_PILOT_RUN.md).
+
 ## Independent verification
 
 Verification is standalone and reads only the exported graph:
@@ -164,4 +168,6 @@ explicit detail field.
 See [the command reference](docs/18_COMMAND_REFERENCE.md), the
 [operations runbook](docs/15_OPERATIONS_RUNBOOK.md), and the
 [implementation status](docs/IMPLEMENTATION_STATUS.md) for exact usage and
-remaining scientific limitations.
+remaining scientific limitations. Current Python 3.12 microbenchmarks,
+frontier calibration, forecasts, and the passing two-hour 12-worker soak are
+summarized in [the benchmark report](docs/19_BENCHMARK_RESULTS.md).
