@@ -10,7 +10,13 @@ import tempfile
 import unittest
 
 from sglab.research.campaign import campaign_status, target_definition_sha256
-from sglab.research.experiment import OneBatchExperiment, run_phase_a_audit
+from sglab.research.experiment import (
+    OneBatchExperiment,
+    _campaign_counts,
+    _durable_feedback_proofs,
+    _durable_outcomes,
+    run_phase_a_audit,
+)
 from sglab.research.lanes import (
     LaneManager,
     LaneSpec,
@@ -108,7 +114,21 @@ class OneBatchExperimentTests(unittest.TestCase):
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            report = run_phase_a_audit(Path(directory))
+            root = Path(directory)
+            report = run_phase_a_audit(root)
+            store = ResearchStore(root / "results.sqlite3")
+            campaign_dir = (
+                root / "research-campaigns" / report["campaign_id"]
+            )
+            counts = _campaign_counts(store, report["campaign_id"])
+            outcomes = _durable_outcomes(store, report["campaign_id"])
+            proofs = _durable_feedback_proofs(
+                store,
+                campaign_dir,
+                report["campaign_id"],
+                outcomes,
+            )
+            store.close()
         self.assertTrue(report["ok"], report["failures"])
         self.assertEqual(
             report["counts"],
@@ -122,6 +142,11 @@ class OneBatchExperimentTests(unittest.TestCase):
             report["resume_safe_sequence_state"]["next_safe_transition"],
             "stop",
         )
+        self.assertEqual(
+            counts, {"turns": 4, "decisions": 4, "batches": 3}
+        )
+        self.assertEqual(len(outcomes), 3)
+        self.assertEqual(proofs, [True] * 6)
 
     def test_every_allowed_experiment_algorithm_runs_one_bounded_batch(
         self,

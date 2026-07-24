@@ -998,12 +998,14 @@ def run_authenticated_experiment(
     *,
     codex: str = "codex",
     evaluation_cap: int,
+    resume: bool = False,
 ) -> dict[str, Any]:
     return asyncio.run(
         _run_authenticated_experiment(
             workspace.resolve(),
             codex=codex,
             evaluation_cap=evaluation_cap,
+            resume=resume,
         )
     )
 
@@ -1013,6 +1015,7 @@ async def _run_authenticated_experiment(
     *,
     codex: str,
     evaluation_cap: int,
+    resume: bool,
 ) -> dict[str, Any]:
     application_data = root / ".sglab"
     if not auth_is_imported(application_data):
@@ -1021,33 +1024,80 @@ async def _run_authenticated_experiment(
     if any(work.iterdir()):
         raise RuntimeError("private runtime workspace must be empty")
     database_path = root / "results.sqlite3"
-    if database_path.exists():
-        raise RuntimeError("authenticated experiment requires a new session workspace")
+    if database_path.exists() != resume:
+        requirement = "existing" if resume else "new"
+        raise RuntimeError(
+            f"authenticated experiment requires an {requirement} session workspace"
+        )
     preflight = generate_protocol_preflight(codex)
     atomic_write_json(
         application_data / "director" / "preflight.json",
         preflight,
     )
     store = ResearchStore(database_path)
-    campaign_id = new_id("ai-experiment")
-    campaign_dir = root / "research-campaigns" / campaign_id
-    campaign_dir.mkdir(parents=True)
+    resume_thread_id: str | None = None
+    prior_session_closed = False
+    if resume:
+        active = json.loads(
+            (root / "active-research-campaign.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        campaign_id = str(active["campaign_id"])
+        campaign_dir = Path(str(active["campaign_dir"])).resolve()
+        campaign_dir.relative_to(root)
+        counts = _campaign_counts(store, campaign_id)
+        total_turns = int(
+            store.connection.execute(
+                """
+                SELECT count(*) FROM app_server_turns WHERE campaign_id=?
+                """,
+                (campaign_id,),
+            ).fetchone()[0]
+        )
+        if total_turns != counts["turns"]:
+            raise RuntimeError(
+                "campaign has a non-successful turn and cannot be resumed"
+            )
+        if not (
+            1 <= counts["turns"] <= 3
+            and counts["turns"] == counts["decisions"] == counts["batches"]
+        ):
+            raise RuntimeError(
+                f"campaign is not at a resumable post-batch boundary: {counts}"
+            )
+        session = store.connection.execute(
+            """
+            SELECT thread_id, state FROM app_server_sessions
+            WHERE campaign_id=? ORDER BY started_at, rowid LIMIT 1
+            """,
+            (campaign_id,),
+        ).fetchone()
+        if session is None or session["state"] != "closed":
+            raise RuntimeError("resumed campaign requires one closed thread")
+        resume_thread_id = str(session["thread_id"])
+        prior_session_closed = True
+    else:
+        campaign_id = new_id("ai-experiment")
+        campaign_dir = root / "research-campaigns" / campaign_id
+        campaign_dir.mkdir(parents=True)
+        deadline = datetime.now(UTC) + timedelta(minutes=10)
+        store.create_campaign(
+            campaign_id=campaign_id,
+            target="erdos_gyarfas",
+            target_definition_sha256=target_definition_sha256(),
+            stop_mode="time_limit",
+            deadline_at=deadline.isoformat().replace("+00:00", "Z"),
+        )
+        atomic_write_json(
+            root / "active-research-campaign.json",
+            {
+                "campaign_id": campaign_id,
+                "campaign_dir": str(campaign_dir),
+            },
+        )
     manager = LaneManager(campaign_dir, max_active_lanes=1)
-    deadline = datetime.now(UTC) + timedelta(minutes=10)
-    store.create_campaign(
-        campaign_id=campaign_id,
-        target="erdos_gyarfas",
-        target_definition_sha256=target_definition_sha256(),
-        stop_mode="time_limit",
-        deadline_at=deadline.isoformat().replace("+00:00", "Z"),
-    )
-    atomic_write_json(
-        root / "active-research-campaign.json",
-        {
-            "campaign_id": campaign_id,
-            "campaign_dir": str(campaign_dir),
-        },
-    )
+    existing_counts = _campaign_counts(store, campaign_id)
     protocol_hash = hashlib.sha256(
         json.dumps(
             preflight["canonical_schema_hashes"],
@@ -1077,6 +1127,7 @@ async def _run_authenticated_experiment(
             index,
             evaluation_cap=evaluation_cap,
         ),
+        turn_index=existing_counts["turns"],
     )
     experiment = OneBatchExperiment(
         store=store,
@@ -1086,18 +1137,14 @@ async def _run_authenticated_experiment(
         campaign_dir=campaign_dir,
         evaluation_cap=evaluation_cap,
     )
-    decisions: list[CommittedExperimentDecision] = []
-    outcomes: list[dict[str, Any]] = []
     shutdown_mode: str | None = None
     try:
-        await director.start()
-        for batch_index in (1, 2, 3):
+        await director.start(resume_thread_id=resume_thread_id)
+        for batch_index in range(existing_counts["batches"] + 1, 4):
             decision = await experiment.request_batch_decision(batch_index)
-            decisions.append(decision)
-            outcomes.append(experiment.execute_one_batch(decision))
-        decisions.append(await experiment.request_final_analysis())
-        if len({decision.thread_id for decision in decisions}) != 1:
-            raise RuntimeError("Director decisions used different threads")
+            experiment.execute_one_batch(decision)
+        if _campaign_counts(store, campaign_id)["turns"] == 3:
+            await experiment.request_final_analysis()
         store.finish_campaign(
             campaign_id,
             terminal_kind="stopped_by_operator",
@@ -1107,12 +1154,17 @@ async def _run_authenticated_experiment(
         manager.shutdown()
         await director.close()
         shutdown_mode = client.last_shutdown_mode
-        stderr_relative = Path("director") / "app-server.stderr.log"
+        stderr_relative = Path("director") / (
+            "app-server-resume.stderr.log"
+            if resume
+            else "app-server.stderr.log"
+        )
         stderr_path = campaign_dir / stderr_relative
         stderr_path.parent.mkdir(parents=True, exist_ok=True)
         stderr_path.write_text(client.stderr_text, encoding="utf-8")
         stderr_path.chmod(0o600)
-    if len(decisions) != 4 or len(outcomes) != 3:
+    final_counts = _campaign_counts(store, campaign_id)
+    if final_counts != {"turns": 4, "decisions": 4, "batches": 3}:
         store.close()
         raise RuntimeError("authenticated adaptive campaign did not complete")
     turns = [
@@ -1125,37 +1177,18 @@ async def _run_authenticated_experiment(
             (campaign_id,),
         )
     ]
-    decision_count = int(
-        store.connection.execute(
-            """
-            SELECT count(*) FROM director_action_batches WHERE campaign_id=?
-            """,
-            (campaign_id,),
-        ).fetchone()[0]
-    )
-    search_batch_count = int(
-        store.connection.execute(
-            "SELECT count(*) FROM lane_metric_windows WHERE campaign_id=?",
-            (campaign_id,),
-        ).fetchone()[0]
-    )
+    decision_count = final_counts["decisions"]
+    search_batch_count = final_counts["batches"]
     integrity = str(
         store.connection.execute("PRAGMA integrity_check").fetchone()[0]
     )
-    feedback_proofs = []
-    for decision_index, decision in enumerate(decisions[1:], start=1):
-        expected_outcomes = outcomes[:decision_index]
-        available = {
-            str(item["action_id"]): item
-            for item in decision.snapshot["recent_actions"]
-        }
-        feedback_proofs.extend(
-            available[str(outcome["action_id"])]["observed_effect"][
-                "outcome_artifact_sha256"
-            ]
-            == outcome["outcome_artifact_sha256"]
-            for outcome in expected_outcomes
-        )
+    raw_decisions, validated_decisions, decision_batch_ids = (
+        _durable_decisions(store, campaign_dir, campaign_id)
+    )
+    outcomes = _durable_outcomes(store, campaign_id)
+    feedback_proofs = _durable_feedback_proofs(
+        store, campaign_dir, campaign_id, outcomes
+    )
     correlations, protocol_observations = _wire_correlations(
         campaign_dir, turns
     )
@@ -1167,29 +1200,28 @@ async def _run_authenticated_experiment(
     report = {
         "campaign_id": campaign_id,
         "codex_version": preflight["codex_version_output"],
-        "thread_id": decisions[0].thread_id,
-        "turn_ids": [decision.turn_id for decision in decisions],
-        "turn_record_ids": [
-            decision.turn_record_id for decision in decisions
-        ],
+        "thread_id": turns[0]["thread_id"],
+        "turn_ids": [turn["turn_id"] for turn in turns],
+        "turn_record_ids": [turn["turn_record_id"] for turn in turns],
         "final_agent_item_ids": [
             turn["final_agent_item_id"] for turn in turns
         ],
         "request_turn_item_correlations": correlations,
-        "raw_decisions": [decision.raw_decision for decision in decisions],
-        "validated_decisions": [
-            decision.validated_decision for decision in decisions
-        ],
-        "decision_batch_ids": [
-            decision.decision_batch_id for decision in decisions
-        ],
+        "raw_decisions": raw_decisions,
+        "validated_decisions": validated_decisions,
+        "decision_batch_ids": decision_batch_ids,
         "batch_outcomes": outcomes,
         "outcome_comparisons": _outcome_comparisons(outcomes),
         "usage": [_turn_usage(turn) for turn in turns],
+        "total_server_reported_tokens": sum(
+            int(turn["total_tokens"] or 0) for turn in turns
+        ),
         "model_inferences": len(turns),
         "decision_batches": decision_count,
         "search_batches": search_batch_count,
         "resume_safe_sequence_state": sequence_state,
+        "resumed_after_durable_boundary": resume,
+        "prior_session_closed_before_resume": prior_session_closed,
         "unsupported_server_requests": client.unsupported_server_requests,
         "tool_calls": protocol_observations["tool_calls"],
         "retrying_errors": protocol_observations["retrying_errors"],
@@ -1210,6 +1242,7 @@ async def _run_authenticated_experiment(
     required = (
         report["model_inferences"] == 4
         and all(turn["status"] == "completed_valid" for turn in turns)
+        and len({turn["thread_id"] for turn in turns}) == 1
         and report["decision_batches"] == 4
         and report["search_batches"] == 3
         and report["unsupported_server_requests"] == 0
@@ -1224,10 +1257,42 @@ async def _run_authenticated_experiment(
         and report["outcomes_fed_back_to_llm"]
         and report["fourth_batch_not_executed"]
         and sequence_state["next_safe_transition"] == "stop"
+        and (not resume or prior_session_closed)
     )
     report["ok"] = required
     if not required:
         report["failures"].append("one or more authenticated experiment gates failed")
+    proven = "proven" if required else "not_proven"
+    report["status"] = {
+        "protocol_configuration_compliance": (
+            "proven"
+            if report["skills_isolated"]
+            and report["unsupported_server_requests"] == 0
+            and not report["tool_calls"]
+            else "not_proven"
+        ),
+        "semantically_valid_decision_space": proven,
+        "mutation_operator_choice": proven,
+        "decision_before_each_batch": (
+            "proven" if report["decision_before_each_batch"] else "not_proven"
+        ),
+        "three_bounded_batches_executed": (
+            "proven" if report["search_batches"] == 3 else "not_proven"
+        ),
+        "outcomes_fed_back_to_llm": (
+            "proven" if report["outcomes_fed_back_to_llm"] else "not_proven"
+        ),
+        "fourth_decision_persisted": (
+            "proven" if report["decision_batches"] == 4 else "not_proven"
+        ),
+        "fourth_batch_not_executed": (
+            "proven" if report["fourth_batch_not_executed"] else "not_proven"
+        ),
+        "exactly_four_model_turns": (
+            "proven" if report["model_inferences"] == 4 else "not_proven"
+        ),
+        "adaptive_ai_campaign_loop": proven,
+    }
     report["artifact_sha256"] = {
         **_artifact_hashes(campaign_dir),
         **_runtime_audit_hashes(application_data),
@@ -1236,6 +1301,146 @@ async def _run_authenticated_experiment(
     atomic_write_json(output, report)
     store.close()
     return {**report, "report_path": str(output)}
+
+
+def _campaign_counts(
+    store: ResearchStore, campaign_id: str
+) -> dict[str, int]:
+    return {
+        "turns": int(
+            store.connection.execute(
+                """
+                SELECT count(*) FROM app_server_turns
+                WHERE campaign_id=? AND status='completed_valid'
+                """,
+                (campaign_id,),
+            ).fetchone()[0]
+        ),
+        "decisions": int(
+            store.connection.execute(
+                """
+                SELECT count(*) FROM director_action_batches
+                WHERE campaign_id=? AND validation_status='accepted'
+                """,
+                (campaign_id,),
+            ).fetchone()[0]
+        ),
+        "batches": int(
+            store.connection.execute(
+                """
+                SELECT count(*) FROM lane_metric_windows
+                WHERE campaign_id=?
+                """,
+                (campaign_id,),
+            ).fetchone()[0]
+        ),
+    }
+
+
+def _durable_decisions(
+    store: ResearchStore,
+    campaign_dir: Path,
+    campaign_id: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
+    rows = store.connection.execute(
+        """
+        SELECT b.decision_batch_id, t.response_artifact_ref
+        FROM director_action_batches b
+        JOIN app_server_turns t ON t.turn_record_id=b.turn_record_id
+        WHERE b.campaign_id=?
+        ORDER BY t.started_at, t.rowid
+        """,
+        (campaign_id,),
+    ).fetchall()
+    raw_values = []
+    validated_values = []
+    batch_ids = []
+    for row in rows:
+        response = (campaign_dir / str(row["response_artifact_ref"])).resolve()
+        response.relative_to(campaign_dir)
+        raw = json.loads(response.read_text(encoding="utf-8"))
+        validated = json.loads(json.dumps(raw))
+        for action in validated["actions"]:
+            stored = store.connection.execute(
+                """
+                SELECT parameters_json FROM director_actions
+                WHERE decision_batch_id=? AND action_id=?
+                """,
+                (row["decision_batch_id"], action["action_id"]),
+            ).fetchone()
+            if stored is None:
+                raise RuntimeError("durable decision action is missing")
+            action.update(json.loads(stored["parameters_json"]))
+        raw_values.append(raw)
+        validated_values.append(validated)
+        batch_ids.append(str(row["decision_batch_id"]))
+    return raw_values, validated_values, batch_ids
+
+
+def _durable_outcomes(
+    store: ResearchStore, campaign_id: str
+) -> list[dict[str, Any]]:
+    rows = store.connection.execute(
+        """
+        SELECT o.observed_effect_json
+        FROM director_action_outcomes o
+        JOIN director_actions a ON a.action_id=o.action_id
+        JOIN director_action_batches b
+          ON b.decision_batch_id=a.decision_batch_id
+        JOIN app_server_turns t ON t.turn_record_id=b.turn_record_id
+        WHERE o.campaign_id=? AND o.observed_effect_json IS NOT NULL
+        ORDER BY t.started_at, t.rowid
+        """,
+        (campaign_id,),
+    ).fetchall()
+    return [
+        value
+        for row in rows
+        if isinstance(
+            value := json.loads(row["observed_effect_json"]), dict
+        )
+        and "evaluation_count" in value
+    ]
+
+
+def _durable_feedback_proofs(
+    store: ResearchStore,
+    campaign_dir: Path,
+    campaign_id: str,
+    outcomes: list[dict[str, Any]],
+) -> list[bool]:
+    rows = store.connection.execute(
+        """
+        SELECT s.artifact_ref
+        FROM director_action_batches b
+        JOIN app_server_turns t ON t.turn_record_id=b.turn_record_id
+        JOIN director_snapshots s ON s.snapshot_id=b.snapshot_id
+        WHERE b.campaign_id=?
+        ORDER BY t.started_at, t.rowid
+        """,
+        (campaign_id,),
+    ).fetchall()
+    proofs = []
+    for decision_index, row in enumerate(rows):
+        if decision_index == 0:
+            continue
+        path = (campaign_dir / str(row["artifact_ref"])).resolve()
+        path.relative_to(campaign_dir)
+        snapshot = json.loads(path.read_text(encoding="utf-8"))
+        available = {
+            str(item["action_id"]): item
+            for item in snapshot["recent_actions"]
+        }
+        for outcome in outcomes[:decision_index]:
+            observed = available.get(str(outcome["action_id"]), {}).get(
+                "observed_effect"
+            )
+            proofs.append(
+                isinstance(observed, dict)
+                and observed.get("outcome_artifact_sha256")
+                == outcome["outcome_artifact_sha256"]
+            )
+    return proofs
 
 
 def _outcome_comparisons(

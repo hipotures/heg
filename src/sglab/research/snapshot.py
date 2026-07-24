@@ -219,14 +219,19 @@ class SnapshotBuilder:
             (self.campaign_id, self.maximum_actions),
         ).fetchall()
         values = []
+        full_ancestry_retained = False
         for row in rows:
             evidence_id = f"action:{row['action_id']}"
             evidence.add(evidence_id)
-            observed_effect = (
-                _compact_observed_effect(json.loads(row["observed_effect_json"]))
-                if row["observed_effect_json"]
-                else None
-            )
+            observed_effect = None
+            if row["observed_effect_json"]:
+                raw_effect = json.loads(row["observed_effect_json"])
+                is_batch = "evaluation_count" in raw_effect
+                observed_effect = _compact_observed_effect(
+                    raw_effect,
+                    full_ancestry=not full_ancestry_retained,
+                )
+                full_ancestry_retained = full_ancestry_retained or is_batch
             values.append(
                 {
                     "evidence_id": evidence_id,
@@ -450,7 +455,9 @@ def _checkpoint_id_from_ref(value: Any) -> str | None:
     return Path(str(value)).stem
 
 
-def _compact_observed_effect(value: dict[str, Any]) -> dict[str, Any]:
+def _compact_observed_effect(
+    value: dict[str, Any], *, full_ancestry: bool = True
+) -> dict[str, Any]:
     """Remove graph bodies, checkpoints and duplicated raw metrics from prompts."""
 
     allowed = {
@@ -482,6 +489,40 @@ def _compact_observed_effect(value: dict[str, Any]) -> dict[str, Any]:
         "checkpoint_id",
     }
     compact = {key: value[key] for key in allowed if key in value}
+    ancestry = compact.get("mutation_ancestry")
+    if isinstance(ancestry, dict):
+        global_records = list(
+            ancestry.get("global_record_improvements", [])
+        )
+        final_best = list(ancestry.get("final_best_ancestry", []))
+        compact["mutation_ancestry"] = {
+            "global_record_count": len(global_records),
+            "global_record_samples": global_records[
+                -16 if full_ancestry else -4:
+            ],
+            "global_record_samples_truncated": len(global_records)
+            > (16 if full_ancestry else 4),
+            "final_best_ancestry": final_best[
+                -64 if full_ancestry else -8:
+            ],
+            "final_best_ancestry_truncated": len(final_best)
+            > (64 if full_ancestry else 8),
+            "ancestry_detail": (
+                "latest_outcome" if full_ancestry else "historical_summary"
+            ),
+            "limit_per_retained_candidate": ancestry.get(
+                "limit_per_retained_candidate", 64
+            ),
+            "rejected_non_record_candidates_stored": ancestry.get(
+                "rejected_non_record_candidates_stored", 0
+            ),
+            "full_outcome_artifact_ref": value.get(
+                "outcome_artifact_ref"
+            ),
+            "full_outcome_artifact_sha256": value.get(
+                "outcome_artifact_sha256"
+            ),
+        }
     metrics = value.get("metrics")
     if isinstance(metrics, dict):
         for key in (

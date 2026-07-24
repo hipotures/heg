@@ -473,6 +473,7 @@ def cmd_ai_experiment(args: Namespace) -> int:
             workspace,
             codex=args.codex,
             evaluation_cap=args.evaluation_cap,
+            resume=args.resume,
         )
     print(json.dumps(report, indent=2, sort_keys=True))
     return 0 if report["ok"] else 1
@@ -681,6 +682,7 @@ def build_parser() -> ArgumentParser:
     experiment_run.add_argument(
         "--evaluation-cap", type=int, required=True
     )
+    experiment_run.add_argument("--resume", action="store_true")
     experiment_run.set_defaults(func=cmd_ai_experiment)
 
     research_campaign = subparsers.add_parser("research-campaign")

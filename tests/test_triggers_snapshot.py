@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from sglab.research.lanes import LaneManager
-from sglab.research.snapshot import SnapshotBuilder
+from sglab.research.snapshot import SnapshotBuilder, _compact_observed_effect
 from sglab.research.store import ResearchStore
 from sglab.research.triggers import TriggerEngine
 
@@ -48,6 +48,46 @@ class TriggerEngineTests(unittest.TestCase):
 
 
 class SnapshotBuilderTests(unittest.TestCase):
+    def test_snapshot_ancestry_is_bounded_without_changing_full_outcome(
+        self,
+    ) -> None:
+        records = [
+            {"evaluation": index, "candidate_id": f"candidate-{index}"}
+            for index in range(200)
+        ]
+        source = {
+            "outcome_artifact_ref": "experiment/outcome.json",
+            "outcome_artifact_sha256": "a" * 64,
+            "mutation_ancestry": {
+                "global_record_improvements": records,
+                "final_best_ancestry": records,
+                "limit_per_retained_candidate": 64,
+                "rejected_non_record_candidates_stored": 0,
+            },
+        }
+        compact = _compact_observed_effect(source)
+        ancestry = compact["mutation_ancestry"]
+        self.assertEqual(ancestry["global_record_count"], 200)
+        self.assertEqual(len(ancestry["global_record_samples"]), 16)
+        self.assertEqual(len(ancestry["final_best_ancestry"]), 64)
+        self.assertTrue(ancestry["global_record_samples_truncated"])
+        self.assertEqual(
+            len(
+                source["mutation_ancestry"][
+                    "global_record_improvements"
+                ]
+            ),
+            200,
+        )
+        historical = _compact_observed_effect(
+            source, full_ancestry=False
+        )["mutation_ancestry"]
+        self.assertEqual(len(historical["global_record_samples"]), 4)
+        self.assertEqual(len(historical["final_best_ancestry"]), 8)
+        self.assertEqual(
+            historical["ancestry_detail"], "historical_summary"
+        )
+
     def test_bounded_snapshot_has_exact_context_and_hashed_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
