@@ -2,6 +2,31 @@
 
 Last implementation audit: **2026-07-24**.
 
+## Adaptive multi-batch Director — authenticated Phase B complete
+
+After explicit authorization, the bounded runtime campaign completed exactly
+four authenticated turns on one persisted app-server thread and exactly three
+10,000-evaluation search batches. O1 informed A2, O1/O2 informed A3, and
+O1/O2/O3 informed the accepted final A4 decision. A4 stopped without creating
+B4. Every search batch has a durable decision-committed event at evaluation
+zero, stayed below 120 seconds, and ended with complete reference-verifier
+rejection because a forbidden 4-cycle remained.
+
+The Director changed from order-20 ILS-tabu to exact-score order-22 simulated
+annealing, then to faster cap-64 order-22 ILS-tabu with adjusted mutation
+weights and perturbation cadence. B3 improved the recorded lexicographic score
+from `[0,3,48,0,30]` to `[0,3,40,0,33]`; this is a heuristic improvement, not
+a counterexample or statistical-superiority claim.
+
+One local 256 KiB snapshot-bound defect stopped the first app-server after B2
+and before A3 inference. Historical snapshot ancestry is now compact while
+complete outcome artifacts remain hashed and retained, and authenticated
+execution can resume only from a verified durable boundary. The same thread
+then completed the remaining two turns and one batch without another auth
+copy. Both strict app-server processes shut down gracefully, no tool calls or
+inference retries occurred, zero skills were active, and SQLite integrity is
+`ok`. See `docs/reports/M6_ADAPTIVE_CAMPAIGN_RUNTIME.md`.
+
 ## Adaptive multi-batch Director — deterministic Phase A complete
 
 The Director action space is now semantically enforced: ILS-tabu rejects
@@ -21,9 +46,10 @@ The no-model adaptive replay completed four decisions and exactly three
 300-evaluation order-20 batches on one replay thread. Each decision was
 durable before its batch, every measured prior outcome appeared in the next
 snapshot, A4 received all three outcomes, no B4 was created, the dashboard
-exposed the state, and SQLite integrity was `ok`. The authenticated runner is
-prepared with the same four-turn/three-batch hard gates but has not been run.
-See `docs/reports/M6_ADAPTIVE_CAMPAIGN_PHASE_A.md`.
+exposed the state, and SQLite integrity was `ok`. The authenticated runner
+subsequently passed the same four-turn/three-batch hard gates. See
+`docs/reports/M6_ADAPTIVE_CAMPAIGN_PHASE_A.md` and
+`docs/reports/M6_ADAPTIVE_CAMPAIGN_RUNTIME.md`.
 
 ## Search timing and mutation ancestry — offline complete
 
