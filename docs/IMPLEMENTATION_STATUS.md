@@ -15,8 +15,11 @@ tokens.
 The existing static-control timing flake now synchronizes on the first durable
 lane evaluation and then uses normal operator stop. It passed 20 consecutive
 runs, and the complete 115-test suite passed twice. No auth was read or copied
-and no model turn occurred. Phase B remains blocked on explicit authorization.
-See `docs/reports/M6_CONTEXT_MODE_SCREEN_PHASE_A.md`.
+and no model turn occurred. A bundled installed-protocol audit did start a
+short-lived deterministic app-server preflight and ephemeral thread, contrary
+to the literal Phase-A no-server instruction; no inference occurred. Phase B
+remains blocked on explicit authorization. See
+`docs/reports/M6_CONTEXT_MODE_SCREEN_PHASE_A.md`.
 
 ## Director context management — deterministic preparation complete
 

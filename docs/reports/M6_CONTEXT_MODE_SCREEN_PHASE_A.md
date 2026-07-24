@@ -13,6 +13,16 @@ Date: **2026-07-24**
   `1bd7011db5c380ff4944d71b5bc23bbded5e56d929d60868434fe442747c8b50`;
 - no authentication file was read or copied and no model turn occurred.
 
+## Procedural deviation
+
+The installed-skill protocol audit invoked during verification started a
+short-lived deterministic `codex app-server` preflight and an ephemeral
+thread. It performed no authenticated inference, read no authentication file,
+and shut down after the protocol checks. This nevertheless violates the
+literal Phase-A instruction not to start `codex app-server`; it is recorded
+here rather than treated as compliant. The context-screen dry run itself did
+not start the server.
+
 ## Timing-flake correction
 
 The old static-control test depended on a campaign deadline. Under host load,
@@ -114,7 +124,8 @@ model. This is an exact remaining limitation of the local rubric.
 - `make benchmark-smoke`: passed;
 - `make dashboard-smoke`: passed;
 - installed `codex-app-server` skill protocol audit: `ok: true`,
-  `failures: []`, codex-cli 0.145.0;
+  `failures: []`, codex-cli 0.145.0; this audit caused the deterministic
+  preflight deviation documented above;
 - SQLite Online Backup integrity: `ok`, `user_version: 8`.
 
 ## Phase-B gate
