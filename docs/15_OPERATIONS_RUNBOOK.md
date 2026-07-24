@@ -14,6 +14,12 @@
 
 ### Active AI research campaign
 
+Before importing credentials, run the no-model protocol/configuration audit:
+
+```bash
+sglab ai-director compliance-audit --workspace ./workspace
+```
+
 Import an existing Codex login only after explicit authorization:
 
 ```bash

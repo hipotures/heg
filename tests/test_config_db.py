@@ -6,6 +6,7 @@ from pathlib import Path
 from sglab.config import merge_config
 from sglab.db import (
     ACTIVE_DIRECTOR_SCHEMA_SQL,
+    APP_SERVER_COMPLIANCE_SCHEMA_SQL,
     BASE_SCHEMA_SQL,
     SCHEMA_VERSION,
     connect,
@@ -33,6 +34,15 @@ class ConfigAndDatabaseTests(unittest.TestCase):
         self.assertEqual(
             normalize(reviewed),
             normalize(ACTIVE_DIRECTOR_SCHEMA_SQL),
+        )
+        compliance = (
+            Path(__file__).parents[1]
+            / "sql"
+            / "008_app_server_compliance.sql"
+        ).read_text(encoding="utf-8")
+        self.assertEqual(
+            normalize(compliance),
+            normalize(APP_SERVER_COMPLIANCE_SCHEMA_SQL),
         )
 
     def test_recursive_config_merge(self) -> None:
@@ -155,6 +165,14 @@ class ConfigAndDatabaseTests(unittest.TestCase):
             }
             self.assertIn("research_campaigns", tables)
             self.assertIn("director_actions", tables)
+            turn_columns = {
+                row[1]
+                for row in migrated.execute(
+                    "PRAGMA table_info(app_server_turns)"
+                )
+            }
+            self.assertIn("cache_write_input_tokens", turn_columns)
+            self.assertIn("final_agent_item_id", turn_columns)
             migrated.close()
 
             untouched = sqlite3.connect(original)

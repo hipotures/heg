@@ -19,24 +19,31 @@ boundary. All five existing completion gates passed before implementation.
 This is an implementation status only; no M6 Active Director completion claim
 has been made.
 
-### M6.1 app-server integration — in progress
+### M6.1 app-server integration — deterministic compliance complete
 
-The installed Codex 0.145.0 schemas have been generated and hashed, including
-documented compatibility differences from the package examples. A direct
-asynchronous stdio JSON-RPC client now implements private-home isolation,
-dynamic skill disabling, persisted start/resume, structured turns, event
-correlation, usage accounting, bounded diagnostics, unsupported-request
-rejection, and process-group cleanup. Five focused tests and a real isolated
-app-server initialization pass.
+The installed Codex 0.145.0 experimental schemas have been generated with
+`--experimental` and hashed. The direct stdio JSON-RPC client now uses strict
+configuration, distinct private Codex/config and SQLite homes, complete
+two-pass skill disabling, explicit empty experimental isolation fields,
+request/thread/turn/item correlation, schema-v8 cache-write token persistence,
+opaque SQLite-backed rollout inspection, bounded final-usage collection, and
+stdin-first graceful shutdown.
+
+The deterministic no-model acceptance command passes every required condition
+with zero active skills after reload and an empty failure list. See
+`docs/reports/M6_APP_SERVER_PREFLIGHT.md` and
+`docs/reports/M6_APP_SERVER_COMPLIANCE.json`.
 
 The authenticated live-turn, saved-rollout isolation, and process-restart
 resume gates remain pending because the required explicit one-time auth import
-has not been authorized. See `docs/reports/M6_APP_SERVER_PREFLIGHT.md`; no
-credentials have been copied.
+has not been authorized. No authenticated model turn was performed and no
+credentials were copied. The focused 25-test compliance set, full 91-test
+suite, no-model installed-protocol audit, and all five repository completion
+commands pass.
 
 ### M6.2 durable Director contracts — offline milestone complete
 
-Schema v1 now migrates additively to schema v7 with campaign, app-server,
+Schema v1 now migrates additively to schema v8 with campaign, app-server,
 snapshot, trigger, lane, action, hypothesis, verification-job, and terminal
 state while preserving all existing tables. A migration of an SQLite
 Online-Backup snapshot of the real workspace passed integrity checking and

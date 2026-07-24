@@ -7,6 +7,7 @@ All commands accept `--help`. Durations accept seconds or a suffix `s`, `m`,
 
 ```bash
 sglab ai-director preflight --workspace ./workspace
+sglab ai-director compliance-audit --workspace ./workspace
 sglab ai-director auth-import --workspace ./workspace \
   --from-codex-home /explicit/authorized/codex/home
 sglab ai-director inspect-session --workspace ./workspace

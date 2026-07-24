@@ -75,3 +75,12 @@ authoritative baseline had none. The comparison harness now labels and
 implements a compatibility arm using the same app-server Director while
 pausing search lanes during inference. It is confined to control studies and
 cannot replace the production Active Director.
+
+## I-011 — resolved — non-experimental app-server audit assumptions
+
+The earlier schema preflight omitted `--experimental`, hiding installed
+isolation and cache-write fields. The client also carried one unknown config
+key and incomplete skill, usage, shutdown, rollout-inspection, and item
+correlation checks. Schema v8 and the deterministic no-model compliance
+command now cover the installed 0.145.0 contract. The authenticated live
+rollout remains separately open as I-001.

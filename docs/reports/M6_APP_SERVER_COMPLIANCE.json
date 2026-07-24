@@ -1,0 +1,22 @@
+{
+  "all_skill_paths_absolute": true,
+  "all_skills_disabled": true,
+  "codex_version_output": "codex-cli 0.145.0",
+  "experimental_schema_discovery": true,
+  "failures": [],
+  "graceful_shutdown_tested": true,
+  "invalid_config_rejected": true,
+  "ok": true,
+  "post_reload_active_skills": 0,
+  "private_codex_home": true,
+  "separate_codex_sqlite_home": true,
+  "skill_audit_artifacts": {
+    "post_disable": "/home/xai/DEV/heg/workspace/app-server-compliance-accepted/.sglab/no-model-compliance/director/audit/skills-after.json",
+    "pre_disable": "/home/xai/DEV/heg/workspace/app-server-compliance-accepted/.sglab/no-model-compliance/director/audit/skills-before.json"
+  },
+  "skill_list_errors_empty": true,
+  "strict_config_startup": true,
+  "target_version": true,
+  "thread_path_is_opaque": true,
+  "usage_schema_complete": true
+}

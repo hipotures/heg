@@ -98,10 +98,12 @@ workspace/research-campaigns/<campaign-id>/
   exports/
 ```
 
-The shared `results.sqlite3` schema v7 records campaigns, persistent sessions
+The shared `results.sqlite3` schema v8 records campaigns, persistent sessions
 and turns, snapshots and triggers, lanes/revisions/windows, action
 batches/outcomes, hypotheses, retained candidates, verification jobs, and
-terminal events. Only the campaign supervisor writes these records.
+terminal events. App-server turns retain cache-read, cache-write, output,
+reasoning, server-authoritative total-token counts, raw usage, and the final
+agent item ID. Only the campaign supervisor writes these records.
 
 ## Candidate record
 

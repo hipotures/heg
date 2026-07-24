@@ -9,17 +9,26 @@ def director_home(application_data: Path) -> Path:
     return application_data.resolve() / "director" / "codex-home"
 
 
+def director_sqlite_home(application_data: Path) -> Path:
+    return application_data.resolve() / "director" / "codex-sqlite-home"
+
+
 def director_work(application_data: Path) -> Path:
     return application_data.resolve() / "director" / "codex-work"
 
 
-def prepare_private_directories(application_data: Path) -> tuple[Path, Path]:
+def prepare_private_directories(application_data: Path) -> tuple[Path, Path, Path]:
     home = director_home(application_data)
+    sqlite_home = director_sqlite_home(application_data)
     work = director_work(application_data)
-    for directory in (home, work):
+    if not all(path.is_absolute() for path in (home, sqlite_home, work)):
+        raise ValueError("Codex private directories must be absolute")
+    if len({home, sqlite_home, work}) != 3:
+        raise ValueError("Codex private directories must be distinct")
+    for directory in (home, sqlite_home, work):
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         directory.chmod(0o700)
-    return home, work
+    return home, sqlite_home, work
 
 
 def import_authorized_auth(source_codex_home: Path, application_data: Path) -> Path:
@@ -29,7 +38,7 @@ def import_authorized_auth(source_codex_home: Path, application_data: Path) -> P
     source = source_home / "auth.json"
     if source.is_symlink() or not source.is_file():
         raise ValueError(f"authorized source has no regular auth.json: {source_home}")
-    home, _ = prepare_private_directories(application_data)
+    home, _, _ = prepare_private_directories(application_data)
     destination = home / "auth.json"
     temporary = home / "auth.json.importing"
     with source.open("rb") as reader, temporary.open("wb") as writer:

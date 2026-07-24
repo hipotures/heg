@@ -20,9 +20,12 @@ REQUIRED_SCHEMA_FILES = (
     "v1/InitializeParams.json",
     "v2/SkillsListParams.json",
     "v2/SkillsConfigWriteParams.json",
+    "v2/SkillsListResponse.json",
     "v2/ThreadStartParams.json",
     "v2/ThreadResumeParams.json",
     "v2/TurnStartParams.json",
+    "v2/AgentMessageDeltaNotification.json",
+    "v2/ItemStartedNotification.json",
     "v2/ItemCompletedNotification.json",
     "v2/TurnCompletedNotification.json",
     "v2/ThreadTokenUsageUpdatedNotification.json",
@@ -75,6 +78,7 @@ def generate_protocol_preflight(codex: str = "codex") -> dict[str, Any]:
                 codex,
                 "app-server",
                 "generate-json-schema",
+                "--experimental",
                 "--out",
                 str(schema_dir),
             ],
@@ -94,6 +98,19 @@ def generate_protocol_preflight(codex: str = "codex") -> dict[str, Any]:
         turn_start = json.loads(
             (schema_dir / "v2/TurnStartParams.json").read_text(encoding="utf-8")
         )
+        thread_resume = json.loads(
+            (schema_dir / "v2/ThreadResumeParams.json").read_text(encoding="utf-8")
+        )
+        usage = json.loads(
+            (schema_dir / "v2/ThreadTokenUsageUpdatedNotification.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        usage_fields = sorted(
+            usage.get("definitions", {})
+            .get("TokenUsageBreakdown", {})
+            .get("properties", {})
+        )
     features = []
     for line in features_output.splitlines():
         fields = line.split()
@@ -110,5 +127,20 @@ def generate_protocol_preflight(codex: str = "codex") -> dict[str, Any]:
         "schema_hashes": schema_hashes,
         "canonical_schema_hashes": canonical_schema_hashes,
         "thread_start_fields": sorted(thread_start.get("properties", {})),
+        "thread_resume_fields": sorted(thread_resume.get("properties", {})),
         "turn_start_fields": sorted(turn_start.get("properties", {})),
+        "usage_fields": usage_fields,
+        "experimental_schema_discovery": all(
+            field in thread_start.get("properties", {})
+            for field in (
+                "environments",
+                "dynamicTools",
+                "selectedCapabilityRoots",
+                "runtimeWorkspaceRoots",
+            )
+        )
+        and all(
+            field in turn_start.get("properties", {})
+            for field in ("environments", "runtimeWorkspaceRoots")
+        ),
     }

@@ -295,6 +295,7 @@ class ActiveDirector:
                 response_sha256=hashlib.sha256(response_bytes).hexdigest(),
                 wire_sha256=hashlib.sha256(wire).hexdigest(),
                 usage=_usage_payload(result),
+                final_agent_item_id=result.final_agent_item_id,
                 wall_seconds=perf_counter() - started,
             )
         except BaseException as error:
@@ -417,6 +418,7 @@ def _usage_payload(result: AppServerTurnResult) -> dict[str, Any] | None:
     return {
         "input_tokens": usage.input_tokens,
         "cached_input_tokens": usage.cached_input_tokens,
+        "cache_write_input_tokens": usage.cache_write_input_tokens,
         "output_tokens": usage.output_tokens,
         "reasoning_output_tokens": usage.reasoning_output_tokens,
         "total_tokens": usage.total_tokens,

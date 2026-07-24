@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from subprocess import Popen, TimeoutExpired
-from typing import Sequence
+from typing import Mapping, Sequence
 import os
 import math
 import resource
@@ -67,6 +67,7 @@ def run_bounded(
     output_limit_bytes: int = 1024 * 1024,
     memory_limit_bytes: int | None = None,
     cwd: str | Path | None = None,
+    environment: Mapping[str, str] | None = None,
 ) -> ProcessResult:
     """Run an external tool in its own process group with hard output bounds."""
 
@@ -90,6 +91,7 @@ def run_bounded(
             process = Popen(
                 list(command),
                 cwd=cwd,
+                env=environment,
                 stdout=stdout_file,
                 stderr=stderr_file,
                 start_new_session=True,

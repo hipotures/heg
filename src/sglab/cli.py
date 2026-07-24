@@ -5,6 +5,7 @@ from pathlib import Path
 from shutil import which
 from threading import Thread
 from urllib.request import urlopen
+import asyncio
 import json
 import platform
 import sys
@@ -29,8 +30,10 @@ from .research.campaign import (
     parse_duration,
     request_campaign_control,
 )
+from .research.compliance import run_no_model_compliance_audit
 from .research.control_study import ControlStudyBudget, ControlStudyRunner
 from .research.export import export_campaign
+from .research.inspection import inspect_persisted_sessions
 from .research.store import ResearchStore
 from .search import ALGORITHMS, MODES, SearchConfig, config_from_run, run_search
 from .sat import run_pysat_cegar
@@ -393,10 +396,35 @@ def cmd_ai_director(args: Namespace) -> int:
     application_data = workspace / ".sglab"
     if args.ai_director_command == "preflight":
         report = generate_protocol_preflight(args.codex)
-        output = application_data / "director" / "preflight.json"
+        output = (
+            Path(args.output).expanduser().resolve()
+            if args.output
+            else application_data / "director" / "preflight.json"
+        )
         atomic_write_json(output, report)
         print(json.dumps({**report, "report_path": str(output)}, indent=2, sort_keys=True))
         return 0
+    if args.ai_director_command == "compliance-audit":
+        report = asyncio.run(
+            run_no_model_compliance_audit(
+                codex=args.codex,
+                application_data=application_data / "no-model-compliance",
+            )
+        )
+        output = (
+            Path(args.output).expanduser().resolve()
+            if args.output
+            else application_data / "director" / "no-model-compliance.json"
+        )
+        atomic_write_json(output, report)
+        print(
+            json.dumps(
+                {**report, "report_path": str(output)},
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0 if report["ok"] else 1
     if args.ai_director_command == "auth-import":
         destination = import_authorized_auth(
             Path(args.from_codex_home),
@@ -414,20 +442,10 @@ def cmd_ai_director(args: Namespace) -> int:
         )
         return 0
     home = director_home(application_data)
-    sessions = []
-    if home.is_dir():
-        for path in sorted(
-            home.glob("sessions/*/*/*/rollout-*.jsonl"),
-            key=lambda candidate: candidate.stat().st_mtime,
-            reverse=True,
-        )[:50]:
-            sessions.append(
-                {
-                    "path": str(path),
-                    "bytes": path.stat().st_size,
-                    "mode": oct(path.stat().st_mode & 0o777),
-                }
-            )
+    sessions = inspect_persisted_sessions(
+        workspace / "results.sqlite3",
+        home,
+    )
     print(
         json.dumps(
             {
@@ -617,7 +635,13 @@ def build_parser() -> ArgumentParser:
     director_preflight = ai_director_commands.add_parser("preflight")
     director_preflight.add_argument("--workspace", required=True)
     director_preflight.add_argument("--codex", default="codex")
+    director_preflight.add_argument("--output")
     director_preflight.set_defaults(func=cmd_ai_director)
+    director_compliance = ai_director_commands.add_parser("compliance-audit")
+    director_compliance.add_argument("--workspace", required=True)
+    director_compliance.add_argument("--codex", default="codex")
+    director_compliance.add_argument("--output")
+    director_compliance.set_defaults(func=cmd_ai_director)
     director_auth = ai_director_commands.add_parser("auth-import")
     director_auth.add_argument("--workspace", required=True)
     director_auth.add_argument("--from-codex-home", required=True)

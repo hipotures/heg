@@ -8,18 +8,19 @@ import asyncio
 import json
 import os
 import signal
+import tempfile
 
 from .auth import prepare_private_directories
 
 
 DISABLED_FEATURES = (
     "apps",
-    "auth_elicitation",
     "browser_use",
     "browser_use_external",
     "browser_use_full_cdp_access",
     "computer_use",
     "in_app_browser",
+    "image_generation",
     "multi_agent",
     "multi_agent_v2",
     "plugins",
@@ -30,15 +31,12 @@ DISABLED_FEATURES = (
     "shell_tool",
     "shell_snapshot",
     "unified_exec",
-    "code_mode",
     "code_mode_host",
     "goals",
-    "guardian_approval",
     "hooks",
-    "workspace_dependencies",
-    "image_generation",
-    "tool_call_mcp_elicitation",
+    "memories",
     "tool_suggest",
+    "workspace_dependencies",
 )
 
 
@@ -55,6 +53,8 @@ class AppServerConfig:
     request_timeout_seconds: float = 30.0
     turn_timeout_seconds: float = 900.0
     usage_wait_seconds: float = 3.0
+    graceful_shutdown_seconds: float = 2.0
+    termination_timeout_seconds: float = 2.0
     stderr_limit_bytes: int = 256 * 1024
     wire_limit_bytes: int = 8 * 1024 * 1024
     max_jsonl_bytes: int = 2 * 1024 * 1024
@@ -68,6 +68,8 @@ class AppServerConfig:
             self.request_timeout_seconds,
             self.turn_timeout_seconds,
             self.usage_wait_seconds,
+            self.graceful_shutdown_seconds,
+            self.termination_timeout_seconds,
         ):
             if value < 0:
                 raise ValueError("timeouts cannot be negative")
@@ -87,6 +89,7 @@ class AppServerUsage:
     reasoning_output_tokens: int
     total_tokens: int
     raw: dict[str, Any]
+    cache_write_input_tokens: int = 0
 
     @classmethod
     def from_notification(cls, payload: dict[str, Any]) -> AppServerUsage:
@@ -95,6 +98,7 @@ class AppServerUsage:
         return cls(
             input_tokens=int(last.get("inputTokens", 0)),
             cached_input_tokens=int(last.get("cachedInputTokens", 0)),
+            cache_write_input_tokens=int(last.get("cacheWriteInputTokens", 0)),
             output_tokens=int(last.get("outputTokens", 0)),
             reasoning_output_tokens=int(last.get("reasoningOutputTokens", 0)),
             total_tokens=int(last.get("totalTokens", 0)),
@@ -124,6 +128,7 @@ class AppServerTurnResult:
     deltas: tuple[str, ...]
     retrying_errors: tuple[dict[str, Any], ...]
     raw_completed_turn: dict[str, Any]
+    final_agent_item_id: str | None = None
 
 
 class _BoundedBytes:
@@ -160,7 +165,9 @@ class AppServerClient:
     def __init__(self, config: AppServerConfig):
         config.validate()
         self.config = config
-        self.home, self.work = prepare_private_directories(config.application_data)
+        self.home, self.sqlite_home, self.work = prepare_private_directories(
+            config.application_data
+        )
         self.process: asyncio.subprocess.Process | None = None
         self._reader_task: asyncio.Task[None] | None = None
         self._stderr_task: asyncio.Task[None] | None = None
@@ -175,10 +182,19 @@ class AppServerClient:
         self._stderr = _BoundedBytes(config.stderr_limit_bytes)
         self._wire = _BoundedBytes(config.wire_limit_bytes)
         self.disabled_skill_paths: tuple[str, ...] = ()
+        self.skill_list_before: dict[str, Any] | None = None
+        self.skill_list_after: dict[str, Any] | None = None
+        self.skills_isolated = False
         self.unsupported_server_requests = 0
+        self.last_shutdown_mode: str | None = None
 
     def _command(self) -> list[str]:
-        command = [*self.config.launcher, "app-server", "--stdio"]
+        command = [
+            *self.config.launcher,
+            "app-server",
+            "--stdio",
+            "--strict-config",
+        ]
         for feature in self.config.disabled_features:
             command.extend(("--disable", feature))
         for override in (
@@ -186,8 +202,6 @@ class AppServerClient:
             "project_doc_fallback_filenames=[]",
             'web_search="disabled"',
             "mcp_servers={}",
-            "tools.view_image=false",
-            "analytics.enabled=false",
         ):
             command.extend(("-c", override))
         return command
@@ -198,7 +212,7 @@ class AppServerClient:
         environment = os.environ.copy()
         environment.update(self.config.environment)
         environment["CODEX_HOME"] = str(self.home)
-        environment["CODEX_SQLITE_HOME"] = str(self.home)
+        environment["CODEX_SQLITE_HOME"] = str(self.sqlite_home)
         self.process = await asyncio.create_subprocess_exec(
             *self._command(),
             cwd=self.work,
@@ -226,15 +240,35 @@ class AppServerClient:
         await self._disable_all_skills()
 
     async def _disable_all_skills(self) -> None:
-        result = await self._rpc(
+        before = await self._rpc(
             "skills/list",
             {"cwds": [str(self.work)], "forceReload": True},
         )
+        if not isinstance(before, dict):
+            raise AppServerError("skills/list returned a non-object result")
+        self.skill_list_before = before
+        self._persist_skill_audit("skills-before.json", before)
         paths: set[str] = set()
-        for entry in result.get("data", []):
-            for skill in entry.get("skills", []):
-                if skill.get("enabled") is True and isinstance(skill.get("path"), str):
-                    paths.add(skill["path"])
+        data = before.get("data")
+        if not isinstance(data, list):
+            raise AppServerError("skills/list omitted data array")
+        for entry in data:
+            if not isinstance(entry, dict) or not isinstance(entry.get("skills"), list):
+                raise AppServerError("skills/list returned malformed data")
+            errors = entry.get("errors")
+            if not isinstance(errors, list):
+                raise AppServerError("skills/list entry omitted errors array")
+            if errors:
+                raise AppServerError(f"skills/list returned errors: {errors}")
+            for skill in entry["skills"]:
+                if not isinstance(skill, dict) or not isinstance(
+                    skill.get("path"), str
+                ):
+                    raise AppServerError("skills/list returned a skill without path")
+                path = skill["path"]
+                if not Path(path).is_absolute():
+                    raise AppServerError(f"skill path is not absolute: {path}")
+                paths.add(path)
         for path in sorted(paths):
             response = await self._rpc(
                 "skills/config/write",
@@ -243,6 +277,49 @@ class AppServerClient:
             if response.get("effectiveEnabled") is not False:
                 raise AppServerError(f"skill remained enabled: {path}")
         self.disabled_skill_paths = tuple(sorted(paths))
+        after = await self._rpc(
+            "skills/list",
+            {"cwds": [str(self.work)], "forceReload": True},
+        )
+        if not isinstance(after, dict):
+            raise AppServerError("post-disable skills/list returned a non-object")
+        self.skill_list_after = after
+        self._persist_skill_audit("skills-after.json", after)
+        active: list[str] = []
+        for entry in after.get("data", []):
+            if not isinstance(entry, dict) or not isinstance(entry.get("skills"), list):
+                raise AppServerError("post-disable skills/list returned malformed data")
+            errors = entry.get("errors")
+            if not isinstance(errors, list) or errors:
+                raise AppServerError(f"post-disable skills/list errors: {errors}")
+            for skill in entry["skills"]:
+                path = skill.get("path") if isinstance(skill, dict) else None
+                if not isinstance(path, str) or not Path(path).is_absolute():
+                    raise AppServerError("post-disable skill path is not absolute")
+                if skill.get("enabled") is True:
+                    active.append(path)
+        if active:
+            raise AppServerError(f"skills remained active after reload: {active}")
+        self.skills_isolated = True
+
+    def _persist_skill_audit(self, name: str, payload: dict[str, Any]) -> None:
+        audit_dir = self.config.application_data.resolve() / "director" / "audit"
+        audit_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        audit_dir.chmod(0o700)
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{name}.", dir=audit_dir
+        )
+        temporary = Path(temporary_name)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle, sort_keys=True, indent=2)
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            temporary.chmod(0o600)
+            os.replace(temporary, audit_dir / name)
+        finally:
+            temporary.unlink(missing_ok=True)
 
     def _thread_params(self, base_instructions: str) -> dict[str, Any]:
         params: dict[str, Any] = {
@@ -259,16 +336,29 @@ class AppServerClient:
         return params
 
     async def start_thread(self, base_instructions: str) -> AppServerSession:
+        if not self.skills_isolated:
+            raise AppServerError("refusing thread/start before skill isolation proof")
         params = self._thread_params(base_instructions)
-        params["ephemeral"] = False
+        params.update(
+            {
+                "ephemeral": False,
+                "environments": [],
+                "dynamicTools": [],
+                "selectedCapabilityRoots": [],
+                "runtimeWorkspaceRoots": [],
+            }
+        )
         result = await self._rpc("thread/start", params)
         return self._session(result, resumed=False)
 
     async def resume_thread(
         self, thread_id: str, base_instructions: str
     ) -> AppServerSession:
+        if not self.skills_isolated:
+            raise AppServerError("refusing thread/resume before skill isolation proof")
         params = self._thread_params(base_instructions)
         params["threadId"] = thread_id
+        params["runtimeWorkspaceRoots"] = []
         result = await self._rpc("thread/resume", params)
         return self._session(result, resumed=True)
 
@@ -316,6 +406,8 @@ class AppServerClient:
             "input": [{"type": "text", "text": text}],
             "cwd": str(self.work),
             "effort": self.config.effort,
+            "environments": [],
+            "runtimeWorkspaceRoots": [],
         }
         if self.config.model:
             params["model"] = self.config.model
@@ -326,10 +418,24 @@ class AppServerClient:
         if not isinstance(turn, dict) or not isinstance(turn.get("id"), str):
             raise AppServerError("turn/start omitted turn.id")
         turn_id = turn["id"]
+        turn_items = turn.get("items", [])
+        if not isinstance(turn_items, list):
+            raise AppServerError("turn/start returned malformed items")
         final_messages: list[str] = []
         fallback_messages: list[str] = []
         deltas: list[str] = []
         retrying_errors: list[dict[str, Any]] = []
+        started_item_ids: set[str] = set()
+        for item in turn_items:
+            item_id = item.get("id") if isinstance(item, dict) else None
+            if not isinstance(item_id, str) or not item_id:
+                raise AppServerError("turn/start item omitted id")
+            if item_id in started_item_ids:
+                raise AppServerError(f"duplicate turn/start itemId: {item_id}")
+            started_item_ids.add(item_id)
+        delta_item_ids: set[str] = set()
+        completed_item_ids: set[str] = set()
+        final_agent_item_id: str | None = None
         usage: AppServerUsage | None = None
         completed_turn: dict[str, Any] | None = None
         while completed_turn is None:
@@ -346,18 +452,45 @@ class AppServerClient:
             if correlated_turn not in (None, turn_id):
                 continue
             if method == "item/agentMessage/delta":
+                item_id = payload.get("itemId")
+                if not isinstance(item_id, str) or not item_id:
+                    raise AppServerError("agent message delta omitted itemId")
+                if started_item_ids and item_id not in started_item_ids:
+                    raise AppServerError(f"delta references unknown itemId: {item_id}")
+                delta_item_ids.add(item_id)
                 delta = payload.get("delta")
                 if isinstance(delta, str):
                     deltas.append(delta)
                     if on_delta is not None:
                         on_delta(delta)
+            elif method == "item/started":
+                item = payload.get("item")
+                item_id = item.get("id") if isinstance(item, dict) else None
+                if not isinstance(item_id, str) or not item_id:
+                    raise AppServerError("item/started omitted item.id")
+                if item_id in completed_item_ids:
+                    raise AppServerError(f"item restarted after completion: {item_id}")
+                started_item_ids.add(item_id)
             elif method == "item/completed":
                 item = payload.get("item")
+                item_id = item.get("id") if isinstance(item, dict) else None
+                if not isinstance(item_id, str) or not item_id:
+                    raise AppServerError("item/completed omitted item.id")
+                if item_id in completed_item_ids:
+                    raise AppServerError(f"duplicate item completion: {item_id}")
+                if started_item_ids and item_id not in started_item_ids:
+                    raise AppServerError(f"completion references unknown itemId: {item_id}")
+                completed_item_ids.add(item_id)
                 if isinstance(item, dict) and item.get("type") == "agentMessage":
+                    if delta_item_ids and item_id not in delta_item_ids:
+                        raise AppServerError(
+                            f"agent completion does not match delta itemId: {item_id}"
+                        )
                     value = item.get("text")
                     if isinstance(value, str):
                         if item.get("phase") == "final_answer":
                             final_messages.append(value)
+                            final_agent_item_id = item_id
                         else:
                             fallback_messages.append(value)
             elif method == "thread/tokenUsage/updated":
@@ -377,9 +510,27 @@ class AppServerClient:
             raise AppServerError(
                 f"turn ended with status {completed_turn.get('status')}"
             )
-        if usage is None and self.config.usage_wait_seconds > 0:
+        completed_items = completed_turn.get("items", [])
+        if not isinstance(completed_items, list):
+            raise AppServerError("turn/completed returned malformed items")
+        completed_turn_item_ids: set[str] = set()
+        for item in completed_items:
+            item_id = item.get("id") if isinstance(item, dict) else None
+            if not isinstance(item_id, str) or not item_id:
+                raise AppServerError("turn/completed item omitted id")
+            if item_id in completed_turn_item_ids:
+                raise AppServerError(
+                    f"duplicate turn/completed itemId: {item_id}"
+                )
+            completed_turn_item_ids.add(item_id)
+        if final_agent_item_id is not None and completed_turn_item_ids:
+            if final_agent_item_id not in completed_turn_item_ids:
+                raise AppServerError(
+                    "final agent itemId is absent from completed turn"
+                )
+        if self.config.usage_wait_seconds > 0:
             deadline = asyncio.get_running_loop().time() + self.config.usage_wait_seconds
-            while usage is None and asyncio.get_running_loop().time() < deadline:
+            while asyncio.get_running_loop().time() < deadline:
                 timeout = deadline - asyncio.get_running_loop().time()
                 try:
                     message = await asyncio.wait_for(
@@ -394,6 +545,12 @@ class AppServerClient:
                     and message.get("params", {}).get("turnId") == turn_id
                 ):
                     usage = AppServerUsage.from_notification(message["params"])
+                elif message.get("method") == "error":
+                    payload = message.get("params")
+                    if isinstance(payload, dict) and payload.get("willRetry") is not True:
+                        raise AppServerError(
+                            f"terminal app-server error after completion: {payload}"
+                        )
         if final_messages:
             final_text = final_messages[-1]
         elif fallback_messages:
@@ -416,6 +573,7 @@ class AppServerClient:
             deltas=tuple(deltas),
             retrying_errors=tuple(retrying_errors),
             raw_completed_turn=completed_turn,
+            final_agent_item_id=final_agent_item_id,
         )
 
     async def _rpc(self, method: str, params: dict[str, Any]) -> Any:
@@ -535,29 +693,50 @@ class AppServerClient:
             return
         if process.stdin is not None:
             process.stdin.close()
+            try:
+                await process.stdin.wait_closed()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
         if process.returncode is None:
             try:
-                os.killpg(
-                    process.pid,
-                    signal.SIGKILL if force else signal.SIGTERM,
+                await asyncio.wait_for(
+                    process.wait(), timeout=self.config.graceful_shutdown_seconds
                 )
-            except ProcessLookupError:
-                pass
-            try:
-                await asyncio.wait_for(process.wait(), timeout=2)
             except TimeoutError:
                 try:
-                    os.killpg(process.pid, signal.SIGKILL)
+                    os.killpg(process.pid, signal.SIGTERM)
                 except ProcessLookupError:
                     pass
-                await process.wait()
-        for task in (self._reader_task, self._stderr_task):
-            if task is not None and not task.done():
+                try:
+                    await asyncio.wait_for(
+                        process.wait(),
+                        timeout=self.config.termination_timeout_seconds,
+                    )
+                    self.last_shutdown_mode = "sigterm"
+                except TimeoutError:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    await process.wait()
+                    self.last_shutdown_mode = "sigkill"
+            else:
+                self.last_shutdown_mode = "graceful"
+        else:
+            self.last_shutdown_mode = "graceful"
+        drain_tasks = [
+            task
+            for task in (self._reader_task, self._stderr_task)
+            if task is not None
+        ]
+        if drain_tasks:
+            _, pending = await asyncio.wait(
+                drain_tasks,
+                timeout=self.config.termination_timeout_seconds,
+            )
+            for task in pending:
                 task.cancel()
-        await asyncio.gather(
-            *(task for task in (self._reader_task, self._stderr_task) if task),
-            return_exceptions=True,
-        )
+            await asyncio.gather(*drain_tasks, return_exceptions=True)
         self.process = None
 
     async def __aenter__(self) -> AppServerClient:

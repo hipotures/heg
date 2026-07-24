@@ -5,7 +5,7 @@ from typing import Any, Iterable
 import json
 import sqlite3
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 MAX_METRIC_ROWS = 100_000
 
 BASE_SCHEMA_SQL = """
@@ -374,6 +374,14 @@ CREATE TABLE IF NOT EXISTS campaign_terminal_events (
 PRAGMA user_version=7;
 """
 
+APP_SERVER_COMPLIANCE_SCHEMA_SQL = """
+ALTER TABLE app_server_turns
+    ADD COLUMN cache_write_input_tokens INTEGER;
+ALTER TABLE app_server_turns
+    ADD COLUMN final_agent_item_id TEXT;
+PRAGMA user_version=8;
+"""
+
 
 def connect(path: str | Path) -> sqlite3.Connection:
     target = Path(path)
@@ -404,8 +412,10 @@ def migrate(connection: sqlite3.Connection) -> None:
     if version < 7:
         connection.executescript(ACTIVE_DIRECTOR_SCHEMA_SQL)
         connection.commit()
+        version = 7
     _ensure_m6_lane_columns(connection)
     _ensure_m6_candidate_table(connection)
+    _ensure_app_server_compliance_columns(connection)
 
 
 def _ensure_m6_lane_columns(connection: sqlite3.Connection) -> None:
@@ -473,6 +483,39 @@ def _ensure_m6_candidate_table(connection: sqlite3.Connection) -> None:
             ON campaign_candidates(campaign_id, state, created_at);
         """
     )
+    connection.commit()
+
+
+def _ensure_app_server_compliance_columns(
+    connection: sqlite3.Connection,
+) -> None:
+    exists = connection.execute(
+        """
+        SELECT 1 FROM sqlite_master
+        WHERE type='table' AND name='app_server_turns'
+        """
+    ).fetchone()
+    if exists is not None:
+        columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(app_server_turns)")
+        }
+        missing = {
+            "cache_write_input_tokens",
+            "final_agent_item_id",
+        } - columns
+        if missing == {"cache_write_input_tokens", "final_agent_item_id"}:
+            connection.executescript(APP_SERVER_COMPLIANCE_SCHEMA_SQL)
+        elif "cache_write_input_tokens" in missing:
+            connection.execute(
+                "ALTER TABLE app_server_turns "
+                "ADD COLUMN cache_write_input_tokens INTEGER"
+            )
+        elif "final_agent_item_id" in missing:
+            connection.execute(
+                "ALTER TABLE app_server_turns ADD COLUMN final_agent_item_id TEXT"
+            )
+    connection.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
     connection.commit()
 
 

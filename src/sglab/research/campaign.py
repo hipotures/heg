@@ -173,9 +173,10 @@ def campaign_status(workspace: Path, campaign_id: str | None = None) -> dict[str
             for row in connection.execute(
                 """
                 SELECT turn_record_id, thread_id, turn_id, status, wall_seconds,
-                       input_tokens, cached_input_tokens, output_tokens,
+                       input_tokens, cached_input_tokens,
+                       cache_write_input_tokens, output_tokens,
                        reasoning_output_tokens, total_tokens, started_at,
-                       completed_at, error_kind
+                       completed_at, error_kind, final_agent_item_id
                 FROM app_server_turns WHERE campaign_id=?
                 ORDER BY started_at DESC, rowid DESC LIMIT 10
                 """,

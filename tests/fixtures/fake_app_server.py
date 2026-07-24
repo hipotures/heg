@@ -21,6 +21,33 @@ def send(value: dict) -> None:
 
 thread_id = "thread-test"
 turn_id = "turn-test"
+skills_enabled = True
+
+
+def usage_notification(
+    *,
+    input_tokens: int = 10,
+    cache_write_input_tokens: int = 4,
+    total_tokens: int = 15,
+) -> dict:
+    breakdown = {
+        "inputTokens": input_tokens,
+        "cachedInputTokens": 3,
+        "cacheWriteInputTokens": cache_write_input_tokens,
+        "outputTokens": 5,
+        "reasoningOutputTokens": 2,
+        "totalTokens": total_tokens,
+    }
+    return {
+        "method": "thread/tokenUsage/updated",
+        "params": {
+            "threadId": thread_id,
+            "turnId": turn_id,
+            "tokenUsage": {"last": breakdown, "total": breakdown},
+        },
+    }
+
+
 for line in sys.stdin:
     request = json.loads(line)
     method = request.get("method")
@@ -45,12 +72,20 @@ for line in sys.stdin:
                     "data": [
                         {
                             "cwd": "/fake",
-                            "errors": [],
+                            "errors": (
+                                [{"path": "/fake/bad", "message": "bad skill"}]
+                                if MODE == "skill-errors"
+                                else []
+                            ),
                             "skills": [
                                 {
                                     "name": "bundled",
-                                    "path": "/fake/SKILL.md",
-                                    "enabled": True,
+                                    "path": (
+                                        "relative/SKILL.md"
+                                        if MODE == "relative-skill"
+                                        else "/fake/SKILL.md"
+                                    ),
+                                    "enabled": skills_enabled,
                                 }
                             ],
                         }
@@ -59,8 +94,30 @@ for line in sys.stdin:
             }
         )
     elif method == "skills/config/write":
+        skills_enabled = False
         send({"id": request_id, "result": {"effectiveEnabled": False}})
     elif method in {"thread/start", "thread/resume"}:
+        params = request.get("params", {})
+        required = {"runtimeWorkspaceRoots"}
+        if method == "thread/start":
+            required.update(
+                {
+                    "environments",
+                    "dynamicTools",
+                    "selectedCapabilityRoots",
+                }
+            )
+        if any(params.get(field) != [] for field in required):
+            send(
+                {
+                    "id": request_id,
+                    "error": {
+                        "code": -32602,
+                        "message": "missing isolation fields",
+                    },
+                }
+            )
+            continue
         send(
             {
                 "id": request_id,
@@ -76,6 +133,20 @@ for line in sys.stdin:
             }
         )
     elif method == "turn/start":
+        params = request.get("params", {})
+        if params.get("environments") != [] or params.get(
+            "runtimeWorkspaceRoots"
+        ) != []:
+            send(
+                {
+                    "id": request_id,
+                    "error": {
+                        "code": -32602,
+                        "message": "missing turn isolation fields",
+                    },
+                }
+            )
+            continue
         send(
             {
                 "id": request_id,
@@ -89,13 +160,42 @@ for line in sys.stdin:
             continue
         if MODE == "timeout":
             continue
+        if MODE == "partial-final-usage":
+            send(
+                usage_notification(
+                    input_tokens=1,
+                    cache_write_input_tokens=0,
+                    total_tokens=1,
+                )
+            )
         send({"id": "server-1", "method": "unknown/request", "params": {}})
+        send(
+            {
+                "method": "item/started",
+                "params": {
+                    "threadId": thread_id,
+                    "turnId": turn_id,
+                    "startedAtMs": 1,
+                    "item": {
+                        "id": "item-1",
+                        "type": "agentMessage",
+                        "phase": "final_answer",
+                        "text": "",
+                    },
+                },
+            }
+        )
         send(
             {
                 "method": "item/agentMessage/delta",
                 "params": {
                     "threadId": thread_id,
                     "turnId": turn_id,
+                    "itemId": (
+                        "unknown-item"
+                        if MODE == "bad-item-correlation"
+                        else "item-1"
+                    ),
                     "delta": '{"ok":',
                 },
             }
@@ -124,34 +224,27 @@ for line in sys.stdin:
                     "turn": {
                         "id": turn_id,
                         "status": "completed",
-                        "items": [],
+                        "items": [
+                            {
+                                "id": "item-1",
+                                "type": "agentMessage",
+                                "phase": "final_answer",
+                                "text": '{"ok":true}',
+                            }
+                        ],
                     },
                 },
             }
         )
-        time.sleep(0.02)
-        send(
-            {
-                "method": "thread/tokenUsage/updated",
-                "params": {
-                    "threadId": thread_id,
-                    "turnId": turn_id,
-                    "tokenUsage": {
-                        "last": {
-                            "inputTokens": 10,
-                            "cachedInputTokens": 3,
-                            "outputTokens": 5,
-                            "reasoningOutputTokens": 2,
-                            "totalTokens": 15,
-                        },
-                        "total": {
-                            "inputTokens": 10,
-                            "cachedInputTokens": 3,
-                            "outputTokens": 5,
-                            "reasoningOutputTokens": 2,
-                            "totalTokens": 15,
-                        },
-                    },
-                },
-            }
-        )
+        if MODE != "no-usage":
+            time.sleep(0.02)
+            send(usage_notification())
+        if MODE == "duplicate-usage":
+            time.sleep(0.02)
+            send(
+                usage_notification(
+                    input_tokens=11,
+                    cache_write_input_tokens=6,
+                    total_tokens=16,
+                )
+            )

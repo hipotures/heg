@@ -415,6 +415,7 @@ class ResearchStore:
         *,
         turn_id: str | None,
         status: str,
+        final_agent_item_id: str | None = None,
         response_artifact_ref: str | None = None,
         response_sha256: str | None = None,
         wire_sha256: str | None = None,
@@ -430,10 +431,11 @@ class ResearchStore:
                 UPDATE app_server_turns
                 SET turn_id=?, status=?, response_artifact_ref=?,
                     response_sha256=?, wire_log_sha256=?,
-                    input_tokens=?, cached_input_tokens=?, output_tokens=?,
+                    input_tokens=?, cached_input_tokens=?,
+                    cache_write_input_tokens=?, output_tokens=?,
                     reasoning_output_tokens=?, total_tokens=?,
                     raw_usage_json=?, wall_seconds=?, error_kind=?,
-                    error_detail=?, completed_at=?
+                    error_detail=?, final_agent_item_id=?, completed_at=?
                 WHERE turn_record_id=? AND status='in_progress'
                 """,
                 (
@@ -444,6 +446,7 @@ class ResearchStore:
                     wire_sha256,
                     normalized.get("input_tokens"),
                     normalized.get("cached_input_tokens"),
+                    normalized.get("cache_write_input_tokens"),
                     normalized.get("output_tokens"),
                     normalized.get("reasoning_output_tokens"),
                     normalized.get("total_tokens"),
@@ -453,6 +456,7 @@ class ResearchStore:
                     wall_seconds,
                     error_kind,
                     error_detail,
+                    final_agent_item_id,
                     utc_now(),
                     turn_record_id,
                 ),

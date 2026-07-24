@@ -131,7 +131,8 @@ async function refresh() {
     document.getElementById('turns').innerHTML = table(campaign.turns || [], [
       ['Thread / turn', r => `${esc(r.thread_id)} / ${esc(r.turn_id || 'pending')}`],
       ['Status', r => esc(r.status)], ['Latency', r => `${Number(r.wall_seconds || 0).toFixed(2)} s`],
-      ['Input / cached', r => `${esc(r.input_tokens || 0)} / ${esc(r.cached_input_tokens || 0)}`],
+      ['Input / cache read / cache write', r =>
+        `${esc(r.input_tokens || 0)} / ${esc(r.cached_input_tokens || 0)} / ${esc(r.cache_write_input_tokens || 0)}`],
       ['Output / reasoning', r => `${esc(r.output_tokens || 0)} / ${esc(r.reasoning_output_tokens || 0)}`],
       ['Total', r => esc(r.total_tokens || 0)], ['Fault', r => esc(r.error_kind || '—')]
     ]);

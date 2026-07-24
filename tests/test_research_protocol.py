@@ -267,17 +267,21 @@ class ResearchStoreTests(unittest.TestCase):
                     usage={
                         "input_tokens": 10,
                         "cached_input_tokens": 3,
+                        "cache_write_input_tokens": 4,
                         "output_tokens": 5,
                         "reasoning_output_tokens": 2,
                         "total_tokens": 15,
                         "raw": {"totalTokens": 15},
                     },
+                    final_agent_item_id="item-1",
                     wall_seconds=1.25,
                 )
                 row = store.connection.execute(
                     "SELECT * FROM app_server_turns"
                 ).fetchone()
                 self.assertEqual(row["total_tokens"], 15)
+                self.assertEqual(row["cache_write_input_tokens"], 4)
+                self.assertEqual(row["final_agent_item_id"], "item-1")
                 self.assertEqual(row["status"], "completed")
                 with self.assertRaisesRegex(RuntimeError, "duplicated"):
                     store.complete_turn(
@@ -333,10 +337,19 @@ class StubDecisionClient:
             status="completed",
             text=json.dumps(decision),
             parsed=decision,
-            usage=AppServerUsage(10, 3, 5, 2, 15, {"totalTokens": 15}),
+            usage=AppServerUsage(
+                10,
+                3,
+                5,
+                2,
+                15,
+                {"totalTokens": 15},
+                cache_write_input_tokens=4,
+            ),
             deltas=(),
             retrying_errors=(),
             raw_completed_turn={"status": "completed"},
+            final_agent_item_id="item-1",
         )
 
     async def close(self) -> None:
