@@ -10,6 +10,8 @@ from unittest.mock import AsyncMock, patch
 from sglab.cli import build_parser
 from sglab.research.context import prepare_director_state_v2
 from sglab.research.context_screen import (
+    SCREEN_EFFORT,
+    SCREEN_MODEL,
     _run_screen_arms,
     build_context_screen_prompt,
     decision_context_for_snapshot,
@@ -198,6 +200,16 @@ class ContextScreenTests(unittest.TestCase):
             )
             self.assertTrue(report["ok"])
             self.assertEqual(report["inference_slots"], ["S2", "P1", "P2"])
+            self.assertEqual(SCREEN_MODEL, "gpt-5.6-luna")
+            self.assertEqual(SCREEN_EFFORT, "xhigh")
+            self.assertEqual(
+                report["runtime_contract"]["expected_model"],
+                "gpt-5.6-luna",
+            )
+            self.assertEqual(
+                report["runtime_contract"]["expected_reasoning_effort"],
+                "xhigh",
+            )
             self.assertEqual(report["inference_slot_count"], 3)
             self.assertFalse(report["fourth_inference_slot_exists"])
             self.assertEqual(report["search_batch_slots"], 0)
@@ -518,6 +530,42 @@ class ContextScreenFailureTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(stateless["completed"])
         self.assertEqual(
             [turn["slot"] for turn in stateless["turns"]], ["S2"]
+        )
+        self.assertEqual(persistent["failure"]["kind"], "not_started")
+
+    async def test_model_contract_mismatch_stops_before_s2_inference(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            states = {
+                "A1": source_snapshot("snapshot-a1", outcome=False),
+                "A4": source_snapshot("snapshot-a4", outcome=True),
+            }
+            stateless, persistent = await _run_screen_arms(
+                arm_roots={
+                    "persistent_thread": root / "persistent",
+                    "stateless_turns": root / "stateless",
+                },
+                states=states,
+                codex=(
+                    sys.executable,
+                    str(FAKE),
+                    "director-screen-model-mismatch",
+                ),
+                preflight={
+                    "codex_version_output": "fake-codex 0",
+                    "codex_executable_sha256": "a" * 64,
+                },
+                protocol_hash="b" * 64,
+                turn_timeout_seconds=1,
+                usage_wait_seconds=0.01,
+                timeout_drain_seconds=0.05,
+            )
+        self.assertFalse(stateless["completed"])
+        self.assertEqual(stateless["turns"], [])
+        self.assertEqual(
+            stateless["model_contract"]["model_contract_matched"], False
         )
         self.assertEqual(persistent["failure"]["kind"], "not_started")
         self.assertEqual(persistent["turns"], [])

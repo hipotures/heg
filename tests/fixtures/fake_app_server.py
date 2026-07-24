@@ -195,11 +195,19 @@ for line in sys.stdin:
                 "id": request_id,
                 "result": {
                     "model": (
-                        params.get("model")
+                        "wrong-model"
+                        if MODE == "director-screen-model-mismatch"
+                        else params.get("model")
                         if DIRECTOR_SCREEN and params.get("model")
                         else "fake-model"
                     ),
-                    "reasoningEffort": "high",
+                    "reasoningEffort": (
+                        params.get("config", {}).get(
+                            "model_reasoning_effort", "high"
+                        )
+                        if DIRECTOR_SCREEN
+                        else "high"
+                    ),
                     "thread": {
                         "id": thread_id,
                         "sessionId": "session-test",

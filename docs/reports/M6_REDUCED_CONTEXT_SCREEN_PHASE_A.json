@@ -55,6 +55,11 @@
   ],
   "fourth_slot_exists": false,
   "turn_timeout_seconds": 300,
+  "model_contract": {
+    "expected_model": "gpt-5.6-luna",
+    "expected_reasoning_effort": "xhigh",
+    "must_match_before_inference": true
+  },
   "s2_p2_equivalence": {
     "all_equal": true,
     "director_state_sha256": "cb714203abc8ead33c746704a1f9ed01c67f19c6d1c08217ee74b4c8da77fe0b",

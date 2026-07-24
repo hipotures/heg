@@ -51,7 +51,10 @@ All slots use the same model, reasoning effort, base instructions, empty
 developer instructions, `personality: none`, output schema, serializer,
 semantic validator, action space, read-only sandbox, `approvalPolicy: never`,
 and empty environments, dynamic tools, capability roots, and workspace roots.
-The hard timeout is 300 seconds.
+The authorized model contract is exactly `gpt-5.6-luna` with reasoning effort
+`xhigh`; the hard timeout is 300 seconds. Before inference the runtime persists
+the expected and server-reported effective model and effort. A mismatch aborts
+before `turn/start`.
 
 The screen contains no `LaneManager`, search kernel, candidate evaluator,
 action dispatcher, graph verifier, search worker, or batch executor. Every
@@ -93,7 +96,8 @@ stable through JSON round-trip and SQLite reopen.
 ## Deterministic verification
 
 - focused evidence-registry, incomplete-turn, timeout, late-abort,
-  nullable-usage, restart-inspection, and no-continuation tests: passed;
+  nullable-usage, restart-inspection, no-continuation, and model-contract
+  mismatch tests: passed;
 - complete safe suite: 125 tests, passed twice;
 - installed app-server compliance test: deliberately omitted because Phase A
   forbids starting the installed App Server;

@@ -121,6 +121,8 @@ class AppServerSession:
     effort: str
     resumed: bool
     raw_thread: dict[str, Any]
+    server_reported_model: str | None = None
+    server_reported_effort: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -418,14 +420,30 @@ class AppServerClient:
         thread = result.get("thread")
         if not isinstance(thread, dict) or not isinstance(thread.get("id"), str):
             raise AppServerError("thread response omitted thread.id")
+        reported_model = result.get("model")
+        reported_effort = result.get("reasoningEffort")
         return AppServerSession(
             thread_id=thread["id"],
             session_id=thread.get("sessionId"),
             thread_path=thread.get("path"),
-            model=result.get("model"),
-            effort=str(result.get("reasoningEffort") or self.config.effort),
+            model=(
+                str(reported_model)
+                if reported_model is not None
+                else None
+            ),
+            effort=str(reported_effort or self.config.effort),
             resumed=resumed,
             raw_thread=thread,
+            server_reported_model=(
+                str(reported_model)
+                if reported_model is not None
+                else None
+            ),
+            server_reported_effort=(
+                str(reported_effort)
+                if reported_effort is not None
+                else None
+            ),
         )
 
     async def turn(

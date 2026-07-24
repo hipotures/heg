@@ -25,8 +25,8 @@ from .store import ResearchStore
 from .validation import DecisionContext, validate_decision
 
 
-SCREEN_MODEL = "gpt-5.6-sol"
-SCREEN_EFFORT = "high"
+SCREEN_MODEL = "gpt-5.6-luna"
+SCREEN_EFFORT = "xhigh"
 SCREEN_TURN_TIMEOUT_SECONDS = 300.0
 SCREEN_SLOTS = (
     ("S2", DirectorContextMode.STATELESS_TURNS, "A4"),
@@ -202,6 +202,8 @@ def prepare_context_screen_phase_a(
     runtime_contract = {
         "model": SCREEN_MODEL,
         "reasoning_effort": SCREEN_EFFORT,
+        "expected_model": SCREEN_MODEL,
+        "expected_reasoning_effort": SCREEN_EFFORT,
         "base_instructions_sha256": hashlib.sha256(
             base_bytes
         ).hexdigest(),
@@ -669,7 +671,17 @@ async def _run_screen_arm(
     turns: list[dict[str, Any]] = []
     failure: dict[str, Any] | None = None
     try:
-        await director.start()
+        session = await director.start()
+        model_contract = _model_contract(session)
+        atomic_write_json(
+            campaign_dir / "director" / "model-contract.json",
+            model_contract,
+        )
+        if not model_contract["model_contract_matched"]:
+            raise RuntimeError(
+                "effective app-server model contract does not match "
+                f"{SCREEN_MODEL}:{SCREEN_EFFORT}"
+            )
         for label, state_label in slots:
             snapshot = states[state_label]
             trigger_id = _record_screen_snapshot(
@@ -701,6 +713,7 @@ async def _run_screen_arm(
                     f"{label} used a tool or reached an inference retry"
                 )
             turns.append(turn)
+            turn["model_contract"] = model_contract
             store.mark_trigger_status(trigger_id, "measurement_only")
             if not turn["schema_validity"]:
                 raise RuntimeError(f"{label} response failed schema validation")
@@ -831,6 +844,9 @@ async def _run_screen_arm(
         "turns": turns,
         "thread_ids": thread_ids,
         "sessions": session_rows,
+        "model_contract": (
+            model_contract if "model_contract" in locals() else None
+        ),
         "search_batches": counts["metric_windows"],
         "search_lanes": counts["lanes"],
         "persisted_decision_batches": counts["decision_batches"],
@@ -1584,6 +1600,25 @@ def _not_started_arm(mode: DirectorContextMode) -> dict[str, Any]:
 
 def _nullable_int(value: Any) -> int | None:
     return int(value) if value is not None else None
+
+
+def _model_contract(session: Any) -> dict[str, Any]:
+    effective_model = session.server_reported_model
+    effective_effort = session.server_reported_effort
+    matched = bool(
+        effective_model == SCREEN_MODEL
+        and effective_effort == SCREEN_EFFORT
+    )
+    return {
+        "schema_version": "1.0",
+        "checked_at": utc_now(),
+        "checked_before_inference": True,
+        "expected_model": SCREEN_MODEL,
+        "expected_reasoning_effort": SCREEN_EFFORT,
+        "effective_model": effective_model,
+        "effective_reasoning_effort": effective_effort,
+        "model_contract_matched": matched,
+    }
 
 
 def _value_sha256(value: Any) -> str:

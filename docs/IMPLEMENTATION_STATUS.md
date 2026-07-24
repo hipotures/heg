@@ -12,6 +12,12 @@ search lane, batch, candidate evaluation, or action dispatch. Decisions remain
 persists incomplete correlation, uses `turn/interrupt`, drains late events, and
 prevents every later slot after a failure.
 
+The authorized runtime contract is now exactly `gpt-5.6-luna` with reasoning
+effort `xhigh`. Before each arm's first inference, the client persists the
+expected and server-reported effective values and refuses `turn/start` unless
+both match. A deterministic mismatch test proves S2 is not submitted when the
+server reports another model.
+
 S2 and P2 use byte-identical A4 scientific state, prompt, output schema,
 canonical evidence registry, action space, target, budget, artifact references,
 and complete request template. Their only intended difference is P1 history
