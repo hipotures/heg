@@ -417,6 +417,69 @@ class StubDecisionClient:
 
 
 class ActiveDirectorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_single_turn_request_never_spends_a_repair_turn(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = ResearchStore(root / "campaign.sqlite3")
+            store.create_campaign(
+                campaign_id="campaign-once",
+                target="erdos_gyarfas",
+                target_definition_sha256="a" * 64,
+                stop_mode="time_limit",
+                deadline_at="2026-07-25T00:00:00Z",
+            )
+            snapshot = {
+                "schema_version": "3.0",
+                "snapshot_id": "snapshot-once",
+                "campaign": {"stop_mode": "time_limit"},
+                "target": {"target_id": "erdos_gyarfas"},
+                "available_evidence_ids": ["evidence-1"],
+            }
+            store.record_snapshot(
+                snapshot_id="snapshot-once",
+                campaign_id="campaign-once",
+                campaign_state_version=0,
+                high_water={},
+                artifact_ref="snapshots/snapshot-once.json",
+                artifact_sha256="b" * 64,
+                payload_bytes=100,
+            )
+            store.record_trigger(
+                trigger_id="trigger-once",
+                campaign_id="campaign-once",
+                campaign_state_version=0,
+                reasons=["bootstrap"],
+                first_event_at="2026-07-24T00:00:00Z",
+                snapshot_id="snapshot-once",
+            )
+            client = StubDecisionClient([{"invalid": True}, valid_decision()])
+            director = ActiveDirector(
+                client=client,  # type: ignore[arg-type]
+                store=store,
+                campaign_id="campaign-once",
+                campaign_dir=root,
+                codex_version="0.145.0",
+                executable_sha256="c" * 64,
+                protocol_schema_sha256="d" * 64,
+            )
+            await director.start()
+            evidence = await director.request_decision_once(
+                snapshot=snapshot,
+                trigger_id="trigger-once",
+                context=context(),
+            )
+            self.assertFalse(evidence.validation.accepted)
+            self.assertEqual(len(evidence.turn_record_ids), 1)
+            self.assertEqual(len(client.decisions), 1)
+            rows = store.connection.execute(
+                "SELECT status FROM app_server_turns"
+            ).fetchall()
+            self.assertEqual(
+                [row["status"] for row in rows], ["completed_invalid"]
+            )
+            await director.close()
+            store.close()
+
     async def test_one_repair_turn_uses_same_snapshot_and_private_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

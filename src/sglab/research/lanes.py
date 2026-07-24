@@ -8,9 +8,11 @@ from queue import Empty, Full
 from random import Random
 from typing import Any
 import ast
+import dataclasses
 import hashlib
 import json
 import math
+import resource
 import time
 
 from ..model import BitGraph
@@ -198,12 +200,36 @@ class _LaneKernel:
             maxlen=int(self.parameters.get("tabu_tenure", 128)),
         )
 
-    def run_batch(self, stop_event: Any) -> dict[str, Any]:
-        target = int(self.parameters["batch_candidates"])
+    def run_batch(
+        self,
+        stop_event: Any,
+        *,
+        max_evaluations: int | None = None,
+        max_wall_seconds: float | None = None,
+    ) -> dict[str, Any]:
+        target = min(
+            int(self.parameters["batch_candidates"]),
+            max_evaluations
+            if max_evaluations is not None
+            else int(self.parameters["batch_candidates"]),
+        )
+        if target < 1:
+            raise ValueError("batch evaluation limit must be positive")
+        if max_wall_seconds is not None and max_wall_seconds <= 0:
+            raise ValueError("batch wall limit must be positive")
         started = time.perf_counter()
+        deadline = (
+            started + max_wall_seconds
+            if max_wall_seconds is not None
+            else None
+        )
+        initial_score = self.score
+        trajectory: list[dict[str, Any]] = []
         evaluated = accepted = legal = improvements = duplicates = 0
         for _ in range(target):
             if stop_event.is_set():
+                break
+            if deadline is not None and time.perf_counter() >= deadline:
                 break
             if (
                 self.algorithm == "simulated_annealing"
@@ -213,10 +239,20 @@ class _LaneKernel:
                 == 0
             ):
                 self._new_seed(self.rng.randrange(2**63))
-            candidate = self.plugin.mutate(
-                self.graph,
-                self.rng,
-                {"mode": self.mode},
+            candidate = (
+                self.plugin.generate_seed(
+                    self.rng,
+                    {
+                        "order": int(self.parameters["order"]),
+                        "mode": self.mode,
+                    },
+                )
+                if self.algorithm == "random_restart"
+                else self.plugin.mutate(
+                    self.graph,
+                    self.rng,
+                    {"mode": self.mode},
+                )
             )
             evaluated += 1
             self.algorithm_evaluated += 1
@@ -230,7 +266,11 @@ class _LaneKernel:
             candidate_score = self.plugin.cheap_score(
                 candidate, int(self.parameters["witness_cap"])
             )
-            accept = self._accept(candidate_score, key)
+            accept = (
+                True
+                if self.algorithm == "random_restart"
+                else self._accept(candidate_score, key)
+            )
             if accept:
                 self.graph = candidate
                 self.score = candidate_score
@@ -242,10 +282,28 @@ class _LaneKernel:
                 improvements += 1
                 self.total_improvements += 1
                 self.stagnation = 0
+                if len(trajectory) < 64:
+                    trajectory.append(
+                        {
+                            "evaluation": evaluated,
+                            "score": list(candidate_score.ordering_key),
+                        }
+                    )
             else:
                 self.stagnation += 1
         self.high_water += evaluated
         elapsed = max(time.perf_counter() - started, 1e-9)
+        termination_reason = (
+            "stop_requested"
+            if stop_event.is_set()
+            else (
+                "wall_time_limit"
+                if deadline is not None
+                and evaluated < target
+                and time.perf_counter() >= deadline
+                else "evaluation_limit"
+            )
+        )
         return {
             "evaluated": evaluated,
             "accepted": accepted,
@@ -260,6 +318,26 @@ class _LaneKernel:
             "operator_yield": improvements / max(1, legal),
             "best_score": list(self.best_score.ordering_key),
             "best_scalar": _score_scalar(self.best_score),
+            "initial_score": _score_payload(initial_score),
+            "final_score": _score_payload(self.score),
+            "score_trajectory_summary": {
+                "initial": list(initial_score.ordering_key),
+                "final": list(self.score.ordering_key),
+                "best": list(self.best_score.ordering_key),
+                "improvement_count": improvements,
+                "improvement_samples": trajectory,
+                "samples_truncated": improvements > len(trajectory),
+            },
+            "operator_statistics": {
+                "accepted": accepted,
+                "legal": legal,
+                "improvements": improvements,
+                "duplicates": duplicates,
+                "acceptance_rate": accepted / max(1, legal),
+                "duplicate_rate": duplicates / max(1, legal),
+                "operator_yield": improvements / max(1, legal),
+            },
+            "termination_reason": termination_reason,
             "end_high_water": self.high_water,
         }
 
@@ -981,4 +1059,52 @@ def replay_micro_batches(
     return {
         "metrics": metrics,
         "checkpoint": kernel.checkpoint(spec.lane_version),
+    }
+
+
+def run_bounded_lane_batch(
+    spec: LaneSpec,
+    *,
+    max_evaluations: int,
+    max_wall_seconds: float,
+) -> dict[str, Any]:
+    """Run exactly one bounded batch in the coordinator process."""
+
+    if not 1 <= max_evaluations <= 1_000_000:
+        raise ValueError("evaluation limit must be between 1 and 1,000,000")
+    if not 0 < max_wall_seconds <= 120:
+        raise ValueError("batch wall limit must be in (0, 120]")
+    spec.validate()
+    kernel = _LaneKernel(spec, checkpoint=None, fork_seed=None)
+    metrics = kernel.run_batch(
+        _NeverStop(),
+        max_evaluations=max_evaluations,
+        max_wall_seconds=max_wall_seconds,
+    )
+    checkpoint = kernel.checkpoint(spec.lane_version)
+    graph6 = kernel.best_graph.to_graph6()
+    graph_sha256 = hashlib.sha256(graph6.encode("ascii")).hexdigest()
+    verification = kernel.plugin.exact_verify(kernel.best_graph)
+    return {
+        "algorithm": spec.algorithm,
+        "parameters": dict(spec.parameters),
+        "seed": spec.seed,
+        "graph_family": spec.graph_family,
+        "graph_order": kernel.best_graph.n,
+        "evaluation_count": int(metrics["evaluated"]),
+        "throughput": float(metrics["candidates_per_second"]),
+        "elapsed_seconds": float(metrics["elapsed_seconds"]),
+        "peak_rss_bytes": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        * 1024,
+        "initial_score": metrics["initial_score"],
+        "best_score": _score_payload(kernel.best_score),
+        "score_trajectory_summary": metrics["score_trajectory_summary"],
+        "operator_statistics": metrics["operator_statistics"],
+        "best_candidate_identifier": f"candidate-{graph_sha256[:24]}",
+        "best_graph6": graph6,
+        "best_graph_sha256": graph_sha256,
+        "verifier_result": dataclasses.asdict(verification),
+        "termination_reason": metrics["termination_reason"],
+        "metrics": metrics,
+        "checkpoint": checkpoint,
     }

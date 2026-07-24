@@ -2,6 +2,32 @@
 
 Last implementation audit: **2026-07-24**.
 
+## First AI-directed search experiment — deterministic gate complete
+
+The no-model Phase A gate now exercises the complete decision-to-search
+boundary with the durable replay provider. It commits one validated
+`start_lane` decision and a zero-evaluation application event before creating
+the search kernel, runs exactly one wall/evaluation-bounded batch, persists
+the checkpoint, candidate, telemetry, resource use, score trajectory,
+operator statistics and reference-verifier result, publishes those measured
+facts in the next Director snapshot, and persists a second validated decision
+without dispatching it.
+
+The preserved Phase A run used 300 simulated-annealing evaluations and ended
+at its evaluation limit. SQLite integrity was `ok`; the database contained
+two Director turns, two decision batches, one lane metric window and one
+search lane. The campaign status API exposed the Director decision, selected
+parameters, batch progress and measured outcome. The post-integration
+Codex app-server no-model compliance audit also passed with `ok: true`,
+zero active skills and an empty failure list.
+
+The focused test additionally executes `random_restart`,
+`simulated_annealing`, and `iterated_local_search_tabu` through the same
+bounded one-batch primitive. The authenticated two-turn Phase B has not run:
+it remains gated on a new explicit authorization to copy only
+`/home/xai/.codex/auth.json` into a new private runtime home. No auth or model
+was used during Phase A.
+
 ## M6 Active Director — Phase 0 complete
 
 The separately specified Active AI Research Director initiative has completed

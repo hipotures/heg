@@ -3,7 +3,12 @@ from __future__ import annotations
 from typing import Any
 
 
-ALGORITHMS = ("simulated_annealing", "iterated_local_search")
+EXPERIMENT_ALGORITHMS = (
+    "random_restart",
+    "simulated_annealing",
+    "iterated_local_search_tabu",
+)
+ALGORITHMS = (*EXPERIMENT_ALGORITHMS, "iterated_local_search")
 GRAPH_FAMILIES = {
     "connected_cubic": "cubic_first",
     "predominantly_cubic": "minimal_structure_mixed_degree",
@@ -69,6 +74,12 @@ PARAMETER_DOMAINS: dict[str, dict[str, Any]] = {
 }
 
 ALGORITHM_PARAMETERS = {
+    "random_restart": {
+        "order",
+        "batch_candidates",
+        "witness_cap",
+        "promotion_penalty",
+    },
     "simulated_annealing": {
         "order",
         "batch_candidates",
@@ -79,6 +90,15 @@ ALGORITHM_PARAMETERS = {
         "promotion_penalty",
     },
     "iterated_local_search": {
+        "order",
+        "batch_candidates",
+        "witness_cap",
+        "tabu_tenure",
+        "perturbation_interval",
+        "restart_threshold",
+        "promotion_penalty",
+    },
+    "iterated_local_search_tabu": {
         "order",
         "batch_candidates",
         "witness_cap",

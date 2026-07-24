@@ -12,6 +12,10 @@ sglab ai-director auth-import --workspace ./workspace \
   --from-codex-home /explicit/authorized/codex/home
 sglab ai-director inspect-session --workspace ./workspace
 
+sglab ai-experiment phase-a --workspace ./phase-a-workspace
+sglab ai-experiment run --workspace ./new-private-workspace \
+  --evaluation-cap <cap-from-phase-a>
+
 sglab research-campaign start --workspace ./workspace --time-limit 24h
 sglab research-campaign start --workspace ./workspace --until-success
 sglab research-campaign status --workspace ./workspace
@@ -23,6 +27,12 @@ sglab research-campaign resume --workspace ./workspace \
 sglab research-campaign export --workspace ./workspace \
   --campaign-id <campaign-id> --output ./campaign.zip
 ```
+
+`ai-experiment phase-a` is deterministic and never imports auth or calls a
+model. `ai-experiment run` requires auth to have been imported explicitly
+into that new workspace, makes exactly two non-repair app-server turns on one
+thread, executes one bounded search batch between them, and stops after
+persisting the second decision.
 
 Normal campaign start exposes no scientific tuning flags. The installed target
 is read-only, and the AI Director chooses algorithms, graph sizes, lane count,

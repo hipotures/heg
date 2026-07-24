@@ -33,6 +33,10 @@ from .research.campaign import (
 from .research.compliance import run_no_model_compliance_audit
 from .research.control_study import ControlStudyBudget, ControlStudyRunner
 from .research.export import export_campaign
+from .research.experiment import (
+    run_authenticated_experiment,
+    run_phase_a_audit,
+)
 from .research.inspection import inspect_persisted_sessions
 from .research.store import ResearchStore
 from .search import ALGORITHMS, MODES, SearchConfig, config_from_run, run_search
@@ -460,6 +464,20 @@ def cmd_ai_director(args: Namespace) -> int:
     return 0
 
 
+def cmd_ai_experiment(args: Namespace) -> int:
+    workspace = _workspace(args.workspace)
+    if args.ai_experiment_command == "phase-a":
+        report = run_phase_a_audit(workspace)
+    else:
+        report = run_authenticated_experiment(
+            workspace,
+            codex=args.codex,
+            evaluation_cap=args.evaluation_cap,
+        )
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0 if report["ok"] else 1
+
+
 def cmd_research_campaign(args: Namespace) -> int:
     workspace = _workspace(args.workspace)
     command = args.research_campaign_command
@@ -649,6 +667,21 @@ def build_parser() -> ArgumentParser:
     director_inspect = ai_director_commands.add_parser("inspect-session")
     director_inspect.add_argument("--workspace", required=True)
     director_inspect.set_defaults(func=cmd_ai_director)
+
+    ai_experiment = subparsers.add_parser("ai-experiment")
+    ai_experiment_commands = ai_experiment.add_subparsers(
+        dest="ai_experiment_command", required=True
+    )
+    experiment_phase_a = ai_experiment_commands.add_parser("phase-a")
+    experiment_phase_a.add_argument("--workspace", required=True)
+    experiment_phase_a.set_defaults(func=cmd_ai_experiment)
+    experiment_run = ai_experiment_commands.add_parser("run")
+    experiment_run.add_argument("--workspace", required=True)
+    experiment_run.add_argument("--codex", default="codex")
+    experiment_run.add_argument(
+        "--evaluation-cap", type=int, required=True
+    )
+    experiment_run.set_defaults(func=cmd_ai_experiment)
 
     research_campaign = subparsers.add_parser("research-campaign")
     campaign_commands = research_campaign.add_subparsers(

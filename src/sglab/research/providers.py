@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from random import Random
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 import copy
 
 from .director import ActiveDirector, DirectorEvidence
@@ -64,6 +64,31 @@ class SerialAppServerDecisionProvider:
             )
         finally:
             self.manager.resume_all()
+
+
+@dataclass(slots=True)
+class SingleTurnAppServerDecisionProvider:
+    """App-server provider that never spends a turn on automatic repair."""
+
+    director: ActiveDirector
+    prompt_builder: Callable[[dict[str, Any], int], str]
+    turn_index: int = 0
+
+    async def decide(
+        self,
+        *,
+        snapshot: dict[str, Any],
+        trigger_id: str,
+        context: DecisionContext,
+    ) -> DirectorEvidence:
+        prompt = self.prompt_builder(snapshot, self.turn_index)
+        self.turn_index += 1
+        return await self.director.request_decision_once(
+            snapshot=snapshot,
+            trigger_id=trigger_id,
+            context=context,
+            prompt=prompt,
+        )
 
 
 class SyntheticControlProvider:

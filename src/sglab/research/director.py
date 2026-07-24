@@ -229,6 +229,25 @@ class ActiveDirector:
             repair_allowed=True,
         )
 
+    async def request_decision_once(
+        self,
+        *,
+        snapshot: dict[str, Any],
+        trigger_id: str,
+        context: DecisionContext,
+        prompt: str | None = None,
+    ) -> DirectorEvidence:
+        """Request one structured inference with no model-side repair retry."""
+
+        return await self._request(
+            snapshot=snapshot,
+            trigger_id=trigger_id,
+            context=context,
+            prompt=prompt if prompt is not None else build_director_prompt(snapshot),
+            prior_turns=(),
+            repair_allowed=False,
+        )
+
     async def _request(
         self,
         *,
