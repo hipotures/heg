@@ -1,9 +1,16 @@
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
+from queue import Queue
 
 from sglab.cli import build_parser
-from sglab.research.campaign import ResearchCampaignRunner, campaign_status
+from sglab.research.campaign import (
+    ResearchCampaignRunner,
+    campaign_status,
+    request_campaign_control,
+)
 from sglab.research.control_study import (
     ControlStudyBudget,
     ControlStudyRunner,
@@ -60,21 +67,69 @@ class ControlStudyTests(unittest.TestCase):
     def test_static_control_runs_in_real_lanes_and_retains_metrics(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            status = ResearchCampaignRunner(
-                workspace=root,
-                stop_mode="time_limit",
-                duration_seconds=1,
-                target="m6_hidden_witness_control_v1",
-                controller_mode="static",
-                controller_seed=41,
-                poll_seconds=0.01,
-            ).run()
+            outcome: Queue[tuple[str, object]] = Queue(maxsize=1)
+
+            def run_campaign() -> None:
+                try:
+                    result = ResearchCampaignRunner(
+                        workspace=root,
+                        stop_mode="until_success",
+                        target="m6_hidden_witness_control_v1",
+                        controller_mode="static",
+                        controller_seed=41,
+                        poll_seconds=0.01,
+                    ).run()
+                except BaseException as error:
+                    outcome.put(("error", error))
+                else:
+                    outcome.put(("ok", result))
+
+            started = time.monotonic()
+            worker = threading.Thread(target=run_campaign, daemon=True)
+            worker.start()
+            deadline = started + 8.0
+            observed = None
+            while time.monotonic() < deadline:
+                current = campaign_status(root)
+                if any(
+                    int(lane["telemetry_high_water"]) > 0
+                    for lane in current.get("lanes", [])
+                ):
+                    observed = current
+                    break
+                if not worker.is_alive():
+                    break
+                time.sleep(0.01)
+            try:
+                self.assertIsNotNone(
+                    observed,
+                    "real lane did not publish a first evaluation",
+                )
+            finally:
+                if worker.is_alive():
+                    request_campaign_control(root, "STOP")
+                worker.join(timeout=5)
+            self.assertFalse(worker.is_alive(), "campaign did not stop")
+            result_kind, result = outcome.get_nowait()
+            if result_kind == "error":
+                if not isinstance(result, BaseException):
+                    raise AssertionError("campaign returned a malformed error")
+                raise result
+            if not isinstance(result, dict):
+                raise AssertionError("campaign returned a malformed result")
+            status = result
             campaign_id = str(status["campaign_id"])
             final = campaign_status(root, campaign_id)
-            self.assertEqual(final["state"], "completed_deadline_reached")
+            self.assertEqual(final["state"], "stopped_by_operator")
             self.assertTrue(final["lanes"])
             self.assertTrue(
                 all(lane["state"] == "stopped" for lane in final["lanes"])
+            )
+            self.assertTrue(
+                any(
+                    int(lane["telemetry_high_water"]) > 0
+                    for lane in final["lanes"]
+                )
             )
             metrics = _trial_metrics(
                 root / "results.sqlite3",
@@ -85,6 +140,7 @@ class ControlStudyTests(unittest.TestCase):
             self.assertGreater(metrics["candidate_evaluations"], 0)
             self.assertEqual(metrics["provider"]["total_tokens"], 0)
             self.assertFalse(metrics["certified_witness"])
+            self.assertLess(time.monotonic() - started, 8.0)
 
 
 if __name__ == "__main__":

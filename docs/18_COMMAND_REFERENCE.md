@@ -13,6 +13,12 @@ sglab ai-director auth-import --workspace ./workspace \
 sglab ai-director inspect-session --workspace ./workspace
 
 sglab ai-experiment phase-a --workspace ./phase-a-workspace
+sglab ai-experiment context-screen-phase-a \
+  --workspace ./context-screen \
+  --source-workspace ./preserved-phase-b
+sglab ai-experiment context-screen-run \
+  --workspace ./context-screen \
+  --source-workspace ./preserved-phase-b
 sglab ai-experiment run --workspace ./new-private-workspace \
   --evaluation-cap <cap-from-phase-a> \
   --context-mode persistent_thread
@@ -39,6 +45,11 @@ The experimental context modes are `persistent_thread`, `compacted_thread`
 and `stateless_turns`. They submit the same bounded DirectorStateV2 scientific
 state. The normal `research-campaign start` interface deliberately does not
 expose this A/B-test setting.
+
+`context-screen-phase-a` is deterministic and performs no authentication or
+model turn. `context-screen-run` is a separate four-turn, zero-search
+measurement command. It refuses to start unless the persistent and stateless
+arm workspaces each contain an independently authorized private auth import.
 
 Normal campaign start exposes no scientific tuning flags. The installed target
 is read-only, and the AI Director chooses algorithms, graph sizes, lane count,

@@ -2,6 +2,22 @@
 
 Last implementation audit: **2026-07-24**.
 
+## Low-cost context-mode screen — deterministic Phase A complete
+
+A measurement-only A/B harness is prepared for `persistent_thread` versus
+`stateless_turns`. It reconstructs preserved A1 and A4 through
+DirectorStateV2, schedules exactly P1/P2/S1/S2, and contains no fifth turn,
+search lane, search batch, decision dispatcher or compaction operation.
+Corresponding P/S prompts are byte-identical. A1 is 3,033 bytes and A4 is
+16,655 bytes; conservative complete-input estimates are 6,336 and 9,742
+tokens.
+
+The existing static-control timing flake now synchronizes on the first durable
+lane evaluation and then uses normal operator stop. It passed 20 consecutive
+runs, and the complete 115-test suite passed twice. No auth was read or copied
+and no model turn occurred. Phase B remains blocked on explicit authorization.
+See `docs/reports/M6_CONTEXT_MODE_SCREEN_PHASE_A.md`.
+
 ## Director context management — deterministic preparation complete
 
 The proven adaptive-loop baseline is preserved by annotated tag

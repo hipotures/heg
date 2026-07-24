@@ -32,6 +32,10 @@ from .research.campaign import (
 )
 from .research.compliance import run_no_model_compliance_audit
 from .research.control_study import ControlStudyBudget, ControlStudyRunner
+from .research.context_screen import (
+    prepare_context_screen_phase_a,
+    run_authenticated_context_screen,
+)
 from .research.export import export_campaign
 from .research.experiment import (
     run_authenticated_experiment,
@@ -468,6 +472,17 @@ def cmd_ai_experiment(args: Namespace) -> int:
     workspace = _workspace(args.workspace)
     if args.ai_experiment_command == "phase-a":
         report = run_phase_a_audit(workspace)
+    elif args.ai_experiment_command == "context-screen-phase-a":
+        report = prepare_context_screen_phase_a(
+            workspace,
+            source_workspace=Path(args.source_workspace),
+        )
+    elif args.ai_experiment_command == "context-screen-run":
+        report = run_authenticated_context_screen(
+            workspace,
+            source_workspace=Path(args.source_workspace),
+            codex=args.codex,
+        )
     else:
         report = run_authenticated_experiment(
             workspace,
@@ -677,6 +692,21 @@ def build_parser() -> ArgumentParser:
     experiment_phase_a = ai_experiment_commands.add_parser("phase-a")
     experiment_phase_a.add_argument("--workspace", required=True)
     experiment_phase_a.set_defaults(func=cmd_ai_experiment)
+    context_screen_phase_a = ai_experiment_commands.add_parser(
+        "context-screen-phase-a"
+    )
+    context_screen_phase_a.add_argument("--workspace", required=True)
+    context_screen_phase_a.add_argument(
+        "--source-workspace", required=True
+    )
+    context_screen_phase_a.set_defaults(func=cmd_ai_experiment)
+    context_screen_run = ai_experiment_commands.add_parser(
+        "context-screen-run"
+    )
+    context_screen_run.add_argument("--workspace", required=True)
+    context_screen_run.add_argument("--source-workspace", required=True)
+    context_screen_run.add_argument("--codex", default="codex")
+    context_screen_run.set_defaults(func=cmd_ai_experiment)
     experiment_run = ai_experiment_commands.add_parser("run")
     experiment_run.add_argument("--workspace", required=True)
     experiment_run.add_argument("--codex", default="codex")
