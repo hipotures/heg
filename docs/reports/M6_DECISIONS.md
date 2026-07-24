@@ -38,3 +38,19 @@ code. Rationale: this keeps the project dependency-free while adding checks
 that JSON Schema alone cannot express, including admissible evidence IDs,
 current lane versions, algorithm-specific parameters, and global resource
 shares.
+
+## D-006 — 2026-07-24 — one bounded process per active lane
+
+Decision: represent each scientific lane as one long-lived spawned Python
+process and map its reviewed resource share to bounded duty-cycle time, under
+a global active-lane limit and a per-process address-space limit. Rationale:
+this supplies real concurrent stateful control without adding a distributed
+framework or obscuring deterministic checkpoint boundaries. More internal
+workers may only be added after profiling and a benchmark gate.
+
+## D-007 — 2026-07-24 — immutable order within a lane
+
+Decision: exclude graph order from hot patches and forks while allowing the
+Director to choose order when starting a new lane. Rationale: changing order
+cannot preserve the current graph state; requiring a new lane keeps patch
+semantics honest and checkpoint replay exact.

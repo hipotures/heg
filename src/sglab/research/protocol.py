@@ -152,6 +152,16 @@ def director_decision_schema() -> dict[str, Any]:
         "lane_id": {"type": "string", "minLength": 1, "maxLength": 128},
         "expected_lane_version": {"type": "integer", "minimum": 0},
     }
+    patch_parameter_schema = {
+        **parameter_schema,
+        "properties": {
+            name: domain
+            for name, domain in PARAMETER_DOMAINS.items()
+            if name != "order"
+        },
+        "required": [],
+        "minProperties": 1,
+    }
     action_variants = [
         variant(
             "start_lane",
@@ -190,11 +200,7 @@ def director_decision_schema() -> dict[str, Any]:
             ["lane_id", "expected_lane_version", "patch"],
             {
                 **lane_target,
-                "patch": {
-                    **parameter_schema,
-                    "minProperties": 1,
-                    "required": [],
-                },
+                "patch": patch_parameter_schema,
             },
         ),
         variant(
@@ -213,11 +219,7 @@ def director_decision_schema() -> dict[str, Any]:
                         "required": ["name", "patch", "resource_share"],
                         "properties": {
                             "name": {"type": "string"},
-                            "patch": {
-                                **parameter_schema,
-                                "minProperties": 1,
-                                "required": [],
-                            },
+                            "patch": patch_parameter_schema,
                             "resource_share": {
                                 "type": "number",
                                 "exclusiveMinimum": 0,

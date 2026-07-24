@@ -1,0 +1,55 @@
+{
+  "schema_version": "1.0",
+  "milestone": "M6.3",
+  "status": "offline_complete",
+  "date": "2026-07-24",
+  "legacy_run_path_changed": false,
+  "lane_algorithms": [
+    "simulated_annealing",
+    "iterated_local_search"
+  ],
+  "implemented_actions": [
+    "start_lane",
+    "patch_lane",
+    "fork_lane",
+    "restart_lane",
+    "stop_lane",
+    "reallocate_resources"
+  ],
+  "limits": {
+    "default_max_active_lanes": 8,
+    "default_memory_bytes_per_lane": 536870912,
+    "default_event_queue_items": 512,
+    "default_command_queue_items_per_lane": 32,
+    "default_telemetry_windows_per_lane": 120,
+    "default_checkpoints_per_lane": 8,
+    "default_pinned_checkpoints": 128
+  },
+  "focused_gate": {
+    "command": "uv run python -m unittest tests.test_lane_actions -v",
+    "tests": 1,
+    "status": "passed",
+    "unittest_seconds": 0.248,
+    "wall_seconds": 0.34,
+    "user_seconds": 0.41,
+    "system_seconds": 0.08,
+    "aggregate_cpu_percent": 146
+  },
+  "full_suite": {
+    "command": "make test",
+    "tests": 58,
+    "status": "passed",
+    "seconds": 11.692
+  },
+  "static_check": "passed",
+  "m6_complete": false,
+  "pending": [
+    "event_driven_orchestrator",
+    "candidate_and_m4_broker",
+    "crash_resume",
+    "campaign_cli_http_dashboard",
+    "authenticated_live_app_server_turns",
+    "live_acceptance_campaign",
+    "two_hour_soak"
+  ]
+}

@@ -5,6 +5,7 @@ from pathlib import Path
 
 from sglab.config import merge_config
 from sglab.db import (
+    ACTIVE_DIRECTOR_SCHEMA_SQL,
     BASE_SCHEMA_SQL,
     SCHEMA_VERSION,
     connect,
@@ -15,6 +16,25 @@ from sglab.db import (
 
 
 class ConfigAndDatabaseTests(unittest.TestCase):
+    def test_reviewed_m6_migration_matches_runtime_sql(self) -> None:
+        reviewed = (
+            Path(__file__).parents[1]
+            / "sql"
+            / "007_active_director.sql"
+        ).read_text(encoding="utf-8")
+
+        def normalize(value: str) -> str:
+            return " ".join(
+                line.strip()
+                for line in value.splitlines()
+                if line.strip() and not line.lstrip().startswith("--")
+            )
+
+        self.assertEqual(
+            normalize(reviewed),
+            normalize(ACTIVE_DIRECTOR_SCHEMA_SQL),
+        )
+
     def test_recursive_config_merge(self) -> None:
         base = {"runtime": {"workers": 2, "queue": 4}, "name": "base"}
         merged = merge_config(base, {"runtime": {"workers": 3}})
@@ -54,6 +74,46 @@ class ConfigAndDatabaseTests(unittest.TestCase):
             raw.close()
             with self.assertRaises(RuntimeError):
                 connect(path)
+
+    def test_schema_v7_lane_shape_is_forward_completed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "legacy-v7.sqlite3"
+            database = sqlite3.connect(path)
+            database.executescript(
+                """
+                CREATE TABLE research_campaigns (
+                    campaign_id TEXT PRIMARY KEY,
+                    target TEXT NOT NULL
+                );
+                CREATE TABLE research_lanes (
+                    lane_id TEXT PRIMARY KEY,
+                    campaign_id TEXT NOT NULL,
+                    state TEXT NOT NULL
+                );
+                INSERT INTO research_campaigns VALUES
+                    ('campaign-1', 'hidden_witness');
+                INSERT INTO research_lanes VALUES
+                    ('lane-1', 'campaign-1', 'running');
+                PRAGMA user_version=7;
+                """
+            )
+            database.close()
+            migrated = connect(path)
+            columns = {
+                row[1]
+                for row in migrated.execute(
+                    "PRAGMA table_info(research_lanes)"
+                )
+            }
+            self.assertIn("target", columns)
+            self.assertIn("parent_checkpoint_ref", columns)
+            self.assertEqual(
+                migrated.execute(
+                    "SELECT target FROM research_lanes WHERE lane_id='lane-1'"
+                ).fetchone()[0],
+                "hidden_witness",
+            )
+            migrated.close()
 
     def test_v1_migration_runs_only_on_online_backup_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

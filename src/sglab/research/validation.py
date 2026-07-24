@@ -12,6 +12,7 @@ from .catalog import (
     DIAGNOSTICS,
     GRAPH_FAMILIES,
     PARAMETER_DOMAINS,
+    PATCHABLE_PARAMETERS,
     REVIEW_EVENTS,
 )
 from .protocol import (
@@ -483,7 +484,8 @@ def _parameters(
         return
     if partial and not value:
         issues.add(path, "must not be empty")
-    allowed = ALGORITHM_PARAMETERS.get(algorithm, set(PARAMETER_DOMAINS))
+    domains = PATCHABLE_PARAMETERS if partial else ALGORITHM_PARAMETERS
+    allowed = domains.get(algorithm, set(PARAMETER_DOMAINS))
     for name in value:
         if name not in allowed:
             issues.add(f"{path}.{name}", "is not valid for this algorithm")

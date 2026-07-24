@@ -20,3 +20,11 @@ remained stable. Reports now retain both exact and canonical hashes.
 The package assumed schema v6 and an AI serial orchestrator. The baseline audit
 mapped the work onto schema v1 and the real static-worker coordinator without
 claiming preservation of nonexistent behavior.
+
+## I-004 — resolved — schema-v7 lane provenance completion
+
+M6.2 committed the additive schema before the executable lane shape proved it
+needed explicit target and parent-checkpoint fields. The reviewed v7 SQL now
+contains both fields, and `migrate()` forward-completes databases created from
+the earlier M6.2 checkout without changing their user version. A compatibility
+test preserves a non-default campaign target.

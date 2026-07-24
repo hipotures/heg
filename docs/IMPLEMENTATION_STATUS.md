@@ -49,6 +49,32 @@ implemented. The full suite now has 52 passing tests. See
 `docs/reports/M6_DIRECTOR_CONTRACTS.md`. Live model acceptance remains coupled
 to the explicit M6.1 authentication gate; no live-completion claim is made.
 
+### M6.3 concurrent stateful lanes — offline milestone complete
+
+The Active Director execution layer now exposes simulated annealing and
+iterated local search as independent, long-lived spawned lane processes.
+Every lane has an installed target, graph family, deterministic seed lineage,
+immutable parent/checkpoint provenance, monotonically increasing version,
+bounded mailbox and telemetry, retained hashed checkpoints, and a per-process
+address-space limit. Actions are applied only between micro-batches.
+
+Accepted actions are committed before delivery. The durable dispatcher covers
+start, patch, fork, restart, stop, and atomic multi-lane resource allocation;
+worker outcomes and lane revisions are then committed transactionally through
+the single-writer store. Forking leaves the parent running. Database telemetry
+and in-memory/file checkpoints have explicit retention limits.
+
+The integration gate starts two concurrent lanes, patches one, forks the
+other, reallocates all three, restarts one, and stops one. It also verifies
+that candidate progress continues during a simulated Director inference
+window. The measured focused gate completed in 0.34 seconds at 146% aggregate
+CPU on this host. See `docs/reports/M6_CONCURRENT_LANES.md`.
+
+This is not M6 completion. Event-triggered orchestration, candidate/M4
+brokering, crash-resume campaign recovery, dashboard/API work, authenticated
+live Director turns, the live intervention campaign, and the two-hour soak
+remain pending.
+
 ## M0 — complete
 
 - installable standard `src/` package and CLI entry point;

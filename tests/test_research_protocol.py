@@ -133,6 +133,13 @@ class ResearchProtocolTests(unittest.TestCase):
             any(issue.path.endswith(".shell") for issue in result.issues),
             result.issues,
         )
+        order_patch = valid_decision()
+        order_patch["actions"][1]["patch"] = {"order": 34}
+        result = validate_decision(order_patch, context())
+        self.assertFalse(result.accepted)
+        self.assertTrue(
+            any(issue.path.endswith(".order") for issue in result.issues)
+        )
 
     def test_evidence_id_and_resource_envelope_are_strict(self) -> None:
         unknown = valid_decision()

@@ -89,6 +89,11 @@ ALGORITHM_PARAMETERS = {
     },
 }
 
+PATCHABLE_PARAMETERS = {
+    algorithm: parameters - {"order"}
+    for algorithm, parameters in ALGORITHM_PARAMETERS.items()
+}
+
 
 def action_catalog() -> dict[str, Any]:
     return {
@@ -105,6 +110,10 @@ def action_catalog() -> dict[str, Any]:
         "algorithm_parameters": {
             algorithm: sorted(parameters)
             for algorithm, parameters in ALGORITHM_PARAMETERS.items()
+        },
+        "patchable_parameters": {
+            algorithm: sorted(parameters)
+            for algorithm, parameters in PATCHABLE_PARAMETERS.items()
         },
         "forbidden_model_fields": [
             "shell",

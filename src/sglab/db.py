@@ -175,7 +175,9 @@ CREATE INDEX IF NOT EXISTS idx_app_server_turns_campaign_time
 CREATE TABLE IF NOT EXISTS research_lanes (
     lane_id TEXT PRIMARY KEY,
     campaign_id TEXT NOT NULL REFERENCES research_campaigns(campaign_id),
+    target TEXT NOT NULL,
     parent_lane_id TEXT REFERENCES research_lanes(lane_id),
+    parent_checkpoint_ref TEXT,
     created_by_action_id TEXT,
     state TEXT NOT NULL,
     lane_version INTEGER NOT NULL,
@@ -379,6 +381,49 @@ def migrate(connection: sqlite3.Connection) -> None:
         version = 1
     if version < 7:
         connection.executescript(ACTIVE_DIRECTOR_SCHEMA_SQL)
+        connection.commit()
+    _ensure_m6_lane_columns(connection)
+
+
+def _ensure_m6_lane_columns(connection: sqlite3.Connection) -> None:
+    """Complete the schema-v7 lane shape from pre-lane M6.2 checkouts."""
+
+    exists = connection.execute(
+        """
+        SELECT 1 FROM sqlite_master
+        WHERE type='table' AND name='research_lanes'
+        """
+    ).fetchone()
+    if exists is None:
+        return
+    columns = {
+        str(row[1])
+        for row in connection.execute("PRAGMA table_info(research_lanes)")
+    }
+    changed = False
+    if "target" not in columns:
+        connection.execute(
+            """
+            ALTER TABLE research_lanes
+            ADD COLUMN target TEXT NOT NULL DEFAULT 'erdos_gyarfas'
+            """
+        )
+        connection.execute(
+            """
+            UPDATE research_lanes
+            SET target=(
+                SELECT target FROM research_campaigns
+                WHERE research_campaigns.campaign_id=research_lanes.campaign_id
+            )
+            """
+        )
+        changed = True
+    if "parent_checkpoint_ref" not in columns:
+        connection.execute(
+            "ALTER TABLE research_lanes ADD COLUMN parent_checkpoint_ref TEXT"
+        )
+        changed = True
+    if changed:
         connection.commit()
 
 

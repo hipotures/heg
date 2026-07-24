@@ -560,6 +560,661 @@ class ResearchStore:
             )
         return statuses
 
+    def create_lane(
+        self,
+        *,
+        lane_id: str,
+        campaign_id: str,
+        target: str,
+        parent_lane_id: str | None,
+        parent_checkpoint_ref: str | None,
+        action_id: str,
+        algorithm: str,
+        graph_family: str,
+        parameters: dict[str, Any],
+        seed_lineage: list[int],
+        resource_share: float,
+        lease_expires_at: str | None,
+    ) -> None:
+        now = utc_now()
+        with self.transaction() as database:
+            database.execute(
+                """
+                INSERT INTO research_lanes
+                (lane_id, campaign_id, target, parent_lane_id,
+                 parent_checkpoint_ref, created_by_action_id, state,
+                 lane_version, algorithm, graph_family,
+                 current_parameters_json, seed_lineage_json, checkpoint_ref,
+                 checkpoint_sha256, telemetry_high_water, resource_share,
+                 lease_expires_at, process_generation, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, 'starting', 0, ?, ?, ?, ?, NULL,
+                        NULL, 0, ?, ?, 0, ?, ?)
+                """,
+                (
+                    lane_id,
+                    campaign_id,
+                    target,
+                    parent_lane_id,
+                    parent_checkpoint_ref,
+                    action_id,
+                    algorithm,
+                    graph_family,
+                    json.dumps(parameters, sort_keys=True),
+                    json.dumps(seed_lineage),
+                    resource_share,
+                    lease_expires_at,
+                    now,
+                    now,
+                ),
+            )
+
+    def mark_lane_running(self, lane_id: str) -> None:
+        with self.transaction() as database:
+            cursor = database.execute(
+                """
+                UPDATE research_lanes SET state='running', updated_at=?
+                WHERE lane_id=? AND state='starting'
+                """,
+                (utc_now(), lane_id),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("lane start completion is stale")
+
+    def record_lane_checkpoint(
+        self,
+        *,
+        lane_id: str,
+        lane_version: int,
+        checkpoint_ref: str,
+        checkpoint_sha256: str,
+        high_water: int,
+    ) -> bool:
+        with self.transaction() as database:
+            cursor = database.execute(
+                """
+                UPDATE research_lanes
+                SET checkpoint_ref=?, checkpoint_sha256=?,
+                    telemetry_high_water=MAX(telemetry_high_water, ?),
+                    updated_at=?
+                WHERE lane_id=? AND lane_version=?
+                """,
+                (
+                    checkpoint_ref,
+                    checkpoint_sha256,
+                    high_water,
+                    utc_now(),
+                    lane_id,
+                    lane_version,
+                ),
+            )
+            return cursor.rowcount == 1
+
+    def mark_lane_birth_failed(self, action_id: str, detail: str) -> int:
+        with self.transaction() as database:
+            rows = database.execute(
+                """
+                SELECT campaign_id FROM research_lanes
+                WHERE created_by_action_id=? AND state='starting'
+                """,
+                (action_id,),
+            ).fetchall()
+            cursor = database.execute(
+                """
+                UPDATE research_lanes
+                SET state='failed', updated_at=?, stopped_at=?
+                WHERE created_by_action_id=? AND state='starting'
+                """,
+                (utc_now(), utc_now(), action_id),
+            )
+            if rows:
+                database.execute(
+                    """
+                    UPDATE research_campaigns
+                    SET state_version=state_version+1, updated_at=?,
+                        fault_kind='lane_start_failure', fault_detail=?
+                    WHERE campaign_id=?
+                    """,
+                    (utc_now(), detail[:2000], rows[0]["campaign_id"]),
+                )
+            return cursor.rowcount
+
+    def record_lane_exit(
+        self,
+        *,
+        lane_id: str,
+        lane_version: int,
+        failed: bool,
+        detail: str | None,
+    ) -> bool:
+        state = "failed" if failed else "stopped"
+        with self.transaction() as database:
+            lane = database.execute(
+                "SELECT campaign_id, state FROM research_lanes WHERE lane_id=?",
+                (lane_id,),
+            ).fetchone()
+            if lane is None:
+                return False
+            cursor = database.execute(
+                """
+                UPDATE research_lanes
+                SET state=?, updated_at=?, stopped_at=?
+                WHERE lane_id=? AND lane_version=?
+                  AND state NOT IN ('failed', 'stopped')
+                """,
+                (state, utc_now(), utc_now(), lane_id, lane_version),
+            )
+            if cursor.rowcount and failed:
+                database.execute(
+                    """
+                    UPDATE research_campaigns
+                    SET state_version=state_version+1, updated_at=?,
+                        fault_kind='lane_failure', fault_detail=?
+                    WHERE campaign_id=?
+                    """,
+                    (utc_now(), (detail or "lane failed")[:2000], lane["campaign_id"]),
+                )
+            return cursor.rowcount == 1
+
+    def record_lane_metric_window(
+        self,
+        *,
+        metric_window_id: str,
+        lane_id: str,
+        campaign_id: str,
+        lane_version: int,
+        start_high_water: int,
+        end_high_water: int,
+        started_at: str,
+        ended_at: str,
+        metrics: dict[str, Any],
+        retention: int = 120,
+    ) -> bool:
+        if retention < 2:
+            raise ValueError("metric retention must be at least 2")
+        with self.transaction() as database:
+            lane = database.execute(
+                """
+                SELECT lane_version, telemetry_high_water FROM research_lanes
+                WHERE lane_id=? AND campaign_id=?
+                """,
+                (lane_id, campaign_id),
+            ).fetchone()
+            if lane is None or int(lane["lane_version"]) != lane_version:
+                return False
+            database.execute(
+                """
+                INSERT OR IGNORE INTO lane_metric_windows
+                (metric_window_id, lane_id, campaign_id, lane_version,
+                 start_high_water, end_high_water, start_at, end_at,
+                 metrics_json, artifact_ref, artifact_sha256)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
+                """,
+                (
+                    metric_window_id,
+                    lane_id,
+                    campaign_id,
+                    lane_version,
+                    start_high_water,
+                    end_high_water,
+                    started_at,
+                    ended_at,
+                    json.dumps(metrics, sort_keys=True),
+                ),
+            )
+            database.execute(
+                """
+                UPDATE research_lanes
+                SET telemetry_high_water=MAX(telemetry_high_water, ?),
+                    updated_at=?
+                WHERE lane_id=?
+                """,
+                (end_high_water, utc_now(), lane_id),
+            )
+            database.execute(
+                """
+                DELETE FROM lane_metric_windows
+                WHERE lane_id=?
+                  AND metric_window_id NOT IN (
+                    SELECT metric_window_id FROM lane_metric_windows
+                    WHERE lane_id=? ORDER BY end_high_water DESC LIMIT ?
+                  )
+                  AND metric_window_id NOT IN (
+                    SELECT pre_window_id FROM director_action_outcomes
+                    WHERE pre_window_id IS NOT NULL
+                    UNION
+                    SELECT post_window_id FROM director_action_outcomes
+                    WHERE post_window_id IS NOT NULL
+                  )
+                """,
+                (lane_id, lane_id, retention),
+            )
+            return True
+
+    def complete_lane_births(
+        self,
+        *,
+        action_id: str,
+        lane_ids: list[str],
+        observed_effect: dict[str, Any],
+    ) -> bool:
+        """Atomically mark all children ready and complete start/fork."""
+
+        with self.transaction() as database:
+            if database.execute(
+                "SELECT 1 FROM director_action_outcomes WHERE action_id=?",
+                (action_id,),
+            ).fetchone():
+                return False
+            action = database.execute(
+                "SELECT campaign_id FROM director_actions WHERE action_id=?",
+                (action_id,),
+            ).fetchone()
+            if action is None:
+                raise KeyError(action_id)
+            if not lane_ids:
+                raise ValueError("lane birth outcome requires a lane")
+            placeholders = ",".join("?" for _ in lane_ids)
+            rows = database.execute(
+                f"""
+                SELECT lane_id, state FROM research_lanes
+                WHERE campaign_id=? AND lane_id IN ({placeholders})
+                """,
+                (action["campaign_id"], *lane_ids),
+            ).fetchall()
+            if len(rows) != len(lane_ids) or any(
+                row["state"] != "starting" for row in rows
+            ):
+                raise RuntimeError("lane birth completion is stale")
+            database.execute(
+                f"""
+                UPDATE research_lanes SET state='running', updated_at=?
+                WHERE lane_id IN ({placeholders})
+                """,
+                (utc_now(), *lane_ids),
+            )
+            now = utc_now()
+            database.execute(
+                """
+                INSERT INTO director_action_outcomes
+                (action_outcome_id, action_id, campaign_id,
+                 application_status, resulting_lane_id,
+                 resulting_lane_version, pre_window_id, post_window_id,
+                 observed_effect_json, expectation_met, failure_kind,
+                 failure_detail, applied_at, evaluated_at)
+                VALUES (?, ?, ?, 'applied', ?, 0, NULL, NULL, ?, NULL,
+                        NULL, NULL, ?, NULL)
+                """,
+                (
+                    new_id("action-outcome"),
+                    action_id,
+                    action["campaign_id"],
+                    lane_ids[0],
+                    json.dumps(observed_effect, sort_keys=True),
+                    now,
+                ),
+            )
+            database.execute(
+                """
+                UPDATE research_campaigns
+                SET state_version=state_version+1, updated_at=?
+                WHERE campaign_id=?
+                """,
+                (now, action["campaign_id"]),
+            )
+            return True
+
+    def record_action_outcome(
+        self,
+        *,
+        action_id: str,
+        status: str,
+        resulting_lane_id: str | None = None,
+        resulting_lane_version: int | None = None,
+        failure_kind: str | None = None,
+        failure_detail: str | None = None,
+        observed_effect: dict[str, Any] | None = None,
+    ) -> bool:
+        """Record an idempotent outcome for an action without a lane revision."""
+
+        with self.transaction() as database:
+            if database.execute(
+                "SELECT 1 FROM director_action_outcomes WHERE action_id=?",
+                (action_id,),
+            ).fetchone():
+                return False
+            action = database.execute(
+                "SELECT campaign_id FROM director_actions WHERE action_id=?",
+                (action_id,),
+            ).fetchone()
+            if action is None:
+                raise KeyError(action_id)
+            applied = status == "applied"
+            now = utc_now()
+            database.execute(
+                """
+                INSERT INTO director_action_outcomes
+                (action_outcome_id, action_id, campaign_id,
+                 application_status, resulting_lane_id,
+                 resulting_lane_version, pre_window_id, post_window_id,
+                 observed_effect_json, expectation_met, failure_kind,
+                 failure_detail, applied_at, evaluated_at)
+                VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, NULL, ?, ?, ?, NULL)
+                """,
+                (
+                    new_id("action-outcome"),
+                    action_id,
+                    action["campaign_id"],
+                    status,
+                    resulting_lane_id,
+                    resulting_lane_version,
+                    json.dumps(observed_effect, sort_keys=True)
+                    if observed_effect is not None
+                    else None,
+                    failure_kind,
+                    failure_detail,
+                    now if applied else None,
+                ),
+            )
+            if applied:
+                database.execute(
+                    """
+                    UPDATE research_campaigns
+                    SET state_version=state_version+1, updated_at=?
+                    WHERE campaign_id=?
+                    """,
+                    (now, action["campaign_id"]),
+                )
+            return True
+
+    def apply_lane_action_outcome(
+        self,
+        *,
+        action_id: str,
+        status: str,
+        resulting_lane_id: str | None,
+        resulting_lane_version: int | None,
+        checkpoint_ref: str | None,
+        checkpoint_sha256: str | None,
+        parameters: dict[str, Any] | None,
+        resource_share: float | None,
+        failure_kind: str | None = None,
+        failure_detail: str | None = None,
+        observed_effect: dict[str, Any] | None = None,
+    ) -> bool:
+        """Atomically record one idempotent action result and lane revision."""
+
+        with self.transaction() as database:
+            if database.execute(
+                "SELECT 1 FROM director_action_outcomes WHERE action_id=?",
+                (action_id,),
+            ).fetchone():
+                return False
+            action = database.execute(
+                """
+                SELECT campaign_id, target_lane_id, expected_lane_version,
+                       action_type
+                FROM director_actions WHERE action_id=?
+                """,
+                (action_id,),
+            ).fetchone()
+            if action is None:
+                raise KeyError(action_id)
+            applied = status == "applied"
+            if applied and action["target_lane_id"] is not None:
+                lane = database.execute(
+                    "SELECT * FROM research_lanes WHERE lane_id=?",
+                    (action["target_lane_id"],),
+                ).fetchone()
+                if (
+                    lane is None
+                    or int(lane["lane_version"])
+                    != int(action["expected_lane_version"])
+                    or resulting_lane_version is None
+                    or resulting_lane_version != int(lane["lane_version"]) + 1
+                ):
+                    status = "rejected_late_completion"
+                    applied = False
+                    failure_kind = "stale_lane_completion"
+                    failure_detail = "lane version changed before outcome commit"
+                else:
+                    new_parameters = (
+                        parameters
+                        if parameters is not None
+                        else json.loads(lane["current_parameters_json"])
+                    )
+                    new_share = (
+                        resource_share
+                        if resource_share is not None
+                        else float(lane["resource_share"])
+                    )
+                    database.execute(
+                        """
+                        UPDATE research_lanes
+                        SET lane_version=?, current_parameters_json=?,
+                            resource_share=?, checkpoint_ref=?,
+                            checkpoint_sha256=?, state=?, updated_at=?,
+                            stopped_at=?
+                        WHERE lane_id=? AND lane_version=?
+                        """,
+                        (
+                            resulting_lane_version,
+                            json.dumps(new_parameters, sort_keys=True),
+                            new_share,
+                            checkpoint_ref or lane["checkpoint_ref"],
+                            checkpoint_sha256 or lane["checkpoint_sha256"],
+                            (
+                                "stopped"
+                                if action["action_type"] == "stop_lane"
+                                else "running"
+                            ),
+                            utc_now(),
+                            utc_now()
+                            if action["action_type"] == "stop_lane"
+                            else None,
+                            lane["lane_id"],
+                            lane["lane_version"],
+                        ),
+                    )
+                    database.execute(
+                        """
+                        INSERT INTO lane_revisions VALUES
+                        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            new_id("lane-revision"),
+                            lane["lane_id"],
+                            action["campaign_id"],
+                            action_id,
+                            lane["lane_version"],
+                            resulting_lane_version,
+                            lane["current_parameters_json"],
+                            json.dumps(new_parameters, sort_keys=True),
+                            checkpoint_ref or lane["checkpoint_ref"] or "none",
+                            checkpoint_sha256,
+                            utc_now(),
+                        ),
+                    )
+                    database.execute(
+                        """
+                        UPDATE research_campaigns
+                        SET state_version=state_version+1, updated_at=?
+                        WHERE campaign_id=?
+                        """,
+                        (utc_now(), action["campaign_id"]),
+                    )
+            database.execute(
+                """
+                INSERT INTO director_action_outcomes
+                (action_outcome_id, action_id, campaign_id,
+                 application_status, resulting_lane_id,
+                 resulting_lane_version, pre_window_id, post_window_id,
+                 observed_effect_json, expectation_met, failure_kind,
+                 failure_detail, applied_at, evaluated_at)
+                VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, NULL, ?, ?, ?, NULL)
+                """,
+                (
+                    new_id("action-outcome"),
+                    action_id,
+                    action["campaign_id"],
+                    status,
+                    resulting_lane_id,
+                    resulting_lane_version,
+                    json.dumps(observed_effect, sort_keys=True)
+                    if observed_effect is not None
+                    else None,
+                    failure_kind,
+                    failure_detail,
+                    utc_now() if applied else None,
+                ),
+            )
+            return True
+
+    def apply_multi_lane_action_outcome(
+        self,
+        *,
+        action_id: str,
+        revisions: list[dict[str, Any]],
+    ) -> bool:
+        """Commit one successful multi-lane allocation as one transaction."""
+
+        if not revisions:
+            raise ValueError("multi-lane action requires revisions")
+        with self.transaction() as database:
+            if database.execute(
+                "SELECT 1 FROM director_action_outcomes WHERE action_id=?",
+                (action_id,),
+            ).fetchone():
+                return False
+            action = database.execute(
+                """
+                SELECT campaign_id, action_type FROM director_actions
+                WHERE action_id=?
+                """,
+                (action_id,),
+            ).fetchone()
+            if action is None:
+                raise KeyError(action_id)
+            if action["action_type"] != "reallocate_resources":
+                raise ValueError("multi-lane completion is only for allocation")
+            lane_rows: list[sqlite3.Row] = []
+            for revision in revisions:
+                lane = database.execute(
+                    """
+                    SELECT * FROM research_lanes
+                    WHERE lane_id=? AND campaign_id=?
+                    """,
+                    (revision["lane_id"], action["campaign_id"]),
+                ).fetchone()
+                if (
+                    lane is None
+                    or int(lane["lane_version"])
+                    != int(revision["expected_lane_version"])
+                    or int(revision["resulting_lane_version"])
+                    != int(lane["lane_version"]) + 1
+                ):
+                    raise RuntimeError("multi-lane completion is stale")
+                lane_rows.append(lane)
+            now = utc_now()
+            for revision, lane in zip(revisions, lane_rows, strict=True):
+                checkpoint_ref = (
+                    revision.get("checkpoint_ref") or lane["checkpoint_ref"]
+                )
+                checkpoint_sha256 = (
+                    revision.get("checkpoint_sha256")
+                    or lane["checkpoint_sha256"]
+                )
+                database.execute(
+                    """
+                    UPDATE research_lanes
+                    SET lane_version=?, resource_share=?, checkpoint_ref=?,
+                        checkpoint_sha256=?, updated_at=?
+                    WHERE lane_id=? AND lane_version=?
+                    """,
+                    (
+                        revision["resulting_lane_version"],
+                        revision["resource_share"],
+                        checkpoint_ref,
+                        checkpoint_sha256,
+                        now,
+                        lane["lane_id"],
+                        lane["lane_version"],
+                    ),
+                )
+                database.execute(
+                    """
+                    INSERT INTO lane_revisions VALUES
+                    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        new_id("lane-revision"),
+                        lane["lane_id"],
+                        action["campaign_id"],
+                        action_id,
+                        lane["lane_version"],
+                        revision["resulting_lane_version"],
+                        lane["current_parameters_json"],
+                        lane["current_parameters_json"],
+                        checkpoint_ref or "none",
+                        checkpoint_sha256,
+                        now,
+                    ),
+                )
+            database.execute(
+                """
+                INSERT INTO director_action_outcomes
+                (action_outcome_id, action_id, campaign_id,
+                 application_status, resulting_lane_id,
+                 resulting_lane_version, pre_window_id, post_window_id,
+                 observed_effect_json, expectation_met, failure_kind,
+                 failure_detail, applied_at, evaluated_at)
+                VALUES (?, ?, ?, 'applied', NULL, NULL, NULL, NULL, ?,
+                        NULL, NULL, NULL, ?, NULL)
+                """,
+                (
+                    new_id("action-outcome"),
+                    action_id,
+                    action["campaign_id"],
+                    json.dumps(
+                        {
+                            "allocations": [
+                                {
+                                    "lane_id": revision["lane_id"],
+                                    "resource_share": revision["resource_share"],
+                                    "lane_version": revision[
+                                        "resulting_lane_version"
+                                    ],
+                                }
+                                for revision in revisions
+                            ]
+                        },
+                        sort_keys=True,
+                    ),
+                    now,
+                ),
+            )
+            database.execute(
+                """
+                UPDATE research_campaigns
+                SET state_version=state_version+1, updated_at=?
+                WHERE campaign_id=?
+                """,
+                (now, action["campaign_id"]),
+            )
+            return True
+
+    def pending_accepted_actions(self, campaign_id: str) -> list[dict[str, Any]]:
+        rows = self.connection.execute(
+            """
+            SELECT a.* FROM director_actions a
+            LEFT JOIN director_action_outcomes o ON o.action_id=a.action_id
+            WHERE a.campaign_id=? AND a.validation_status='accepted'
+              AND o.action_id IS NULL
+            ORDER BY a.priority DESC, a.created_at, a.action_id
+            """,
+            (campaign_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
     def close(self) -> None:
         self.connection.close()
 
