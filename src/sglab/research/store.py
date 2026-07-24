@@ -176,6 +176,15 @@ class ResearchStore:
                 ),
             )
 
+    def mark_trigger_status(self, trigger_id: str, status: str) -> None:
+        with self.transaction() as database:
+            cursor = database.execute(
+                "UPDATE director_triggers SET status=? WHERE trigger_id=?",
+                (status, trigger_id),
+            )
+            if cursor.rowcount != 1:
+                raise KeyError(trigger_id)
+
     def record_session(
         self,
         *,
@@ -1201,6 +1210,39 @@ class ResearchStore:
                 (now, action["campaign_id"]),
             )
             return True
+
+    def complete_action_evaluation(
+        self,
+        *,
+        action_id: str,
+        pre_window_id: str,
+        post_window_id: str,
+        observed_effect: dict[str, Any],
+        expectation_met: bool | None,
+    ) -> bool:
+        with self.transaction() as database:
+            cursor = database.execute(
+                """
+                UPDATE director_action_outcomes
+                SET pre_window_id=?, post_window_id=?,
+                    observed_effect_json=?, expectation_met=?, evaluated_at=?
+                WHERE action_id=? AND application_status='applied'
+                  AND evaluated_at IS NULL
+                """,
+                (
+                    pre_window_id,
+                    post_window_id,
+                    json.dumps(observed_effect, sort_keys=True),
+                    (
+                        int(expectation_met)
+                        if expectation_met is not None
+                        else None
+                    ),
+                    utc_now(),
+                    action_id,
+                ),
+            )
+            return cursor.rowcount == 1
 
     def pending_accepted_actions(self, campaign_id: str) -> list[dict[str, Any]]:
         rows = self.connection.execute(

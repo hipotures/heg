@@ -54,3 +54,18 @@ Decision: exclude graph order from hot patches and forks while allowing the
 Director to choose order when starting a new lane. Rationale: changing order
 cannot preserve the current graph state; requiring a new lane keeps patch
 semantics honest and checkpoint replay exact.
+
+## D-008 — 2026-07-24 — snapshots pin admissible checkpoints
+
+Decision: pin every checkpoint ID exposed as admissible evidence before
+starting its Director turn, using the separately bounded pinned-checkpoint
+retention. Rationale: ordinary micro-batch rotation must not invalidate an
+exact fork/restart reference while app-server inference is still running.
+
+## D-009 — 2026-07-24 — inference wait remains an event pump
+
+Decision: await the persistent provider in an asyncio task while repeatedly
+draining bounded lane queues, persisting telemetry, applying already committed
+actions, and evaluating completed interventions. Rationale: worker processes
+search independently, but an undrained bounded event queue would eventually
+back-pressure them and violate the active-control requirement.

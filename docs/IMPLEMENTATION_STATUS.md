@@ -75,6 +75,32 @@ brokering, crash-resume campaign recovery, dashboard/API work, authenticated
 live Director turns, the live intervention campaign, and the two-hour soak
 remain pending.
 
+### M6.4 event-driven scientific loop — offline milestone complete
+
+The coordinator now coalesces bounded triggers, publishes hashed research
+snapshot v3 artifacts, invokes a durable decision provider asynchronously, and
+continues pumping lane telemetry and actions while inference is pending.
+Critical verifier/fault/resource triggers bypass debounce; ordinary triggers
+respect AI-selected reviewed intervals, candidate deltas, and event types.
+
+Snapshots include current lane parameters and versions, telemetry slopes,
+resources, verifier authority, recent action expectations/outcomes, current
+hypotheses, and an exact evidence allowlist. Checkpoints admitted by a
+committed snapshot are pinned for delayed actions. A bounded effect evaluator
+persists pre/post windows, score/diversity/throughput/operator-yield changes,
+and expectation results for the next Director turn.
+
+The offline three-turn integration uses a deterministic durable provider: it
+starts two lanes, delays the intervention turn while both keep searching,
+patches and forks, measures the patch, then confirms that the next snapshot
+contains the observed effect before reallocating resources. The focused gate
+completed in 0.49 seconds at 137% aggregate CPU; the full suite passes 62
+tests. See `docs/reports/M6_EVENT_DRIVEN_LOOP.md`.
+
+Production still requires the app-server authentication gate and one live
+campaign demonstrating the same loop. M4 brokering and the later recovery,
+operator, dashboard, replay, and soak milestones remain pending.
+
 ## M0 — complete
 
 - installable standard `src/` package and CLI entry point;

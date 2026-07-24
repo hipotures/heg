@@ -28,3 +28,11 @@ needed explicit target and parent-checkpoint fields. The reviewed v7 SQL now
 contains both fields, and `migrate()` forward-completes databases created from
 the earlier M6.2 checkout without changing their user version. A compatibility
 test preserves a non-default campaign target.
+
+## I-005 — resolved — snapshot checkpoint rotation race
+
+The first delayed-turn orchestrator test showed that a checkpoint named in a
+committed snapshot could rotate out before a returned fork action was
+delivered. The orchestrator now pins all snapshot-admissible checkpoints
+before inference. The pin set remains globally bounded, and the delayed fork
+test passes.

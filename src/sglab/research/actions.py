@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from collections import deque
 from pathlib import Path
 from typing import Any
 import hashlib
@@ -40,6 +41,7 @@ class LaneActionDispatcher:
         self._allocation_expected: dict[str, int] = {}
         self._allocation_outcomes: dict[str, list[dict[str, Any]]] = {}
         self._allocation_counts: dict[str, int] = {}
+        self._control_events: deque[dict[str, Any]] = deque(maxlen=128)
 
     def dispatch_pending(self) -> list[str]:
         dispatched: list[str] = []
@@ -57,6 +59,12 @@ class LaneActionDispatcher:
                     failure_kind="action_lease_expired",
                     failure_detail="action was not delivered before its lease expired",
                 )
+                self._control_events.append(
+                    {
+                        "kind": "director_trigger",
+                        "reason": "action_lease_expired",
+                    }
+                )
                 continue
             self.inflight_actions.add(action_id)
             try:
@@ -73,9 +81,17 @@ class LaneActionDispatcher:
                     failure_kind=type(error).__name__,
                     failure_detail=str(error)[:2000],
                 )
+                self._control_events.append(
+                    {"kind": "director_trigger", "reason": "lane_failure"}
+                )
                 continue
             dispatched.append(action_id)
         return dispatched
+
+    def drain_control_events(self) -> list[dict[str, Any]]:
+        values = list(self._control_events)
+        self._control_events.clear()
+        return values
 
     def _dispatch(self, row: dict[str, Any]) -> None:
         action_id = str(row["action_id"])

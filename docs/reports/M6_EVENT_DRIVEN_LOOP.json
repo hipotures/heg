@@ -1,0 +1,47 @@
+{
+  "schema_version": "1.0",
+  "milestone": "M6.4",
+  "status": "offline_complete",
+  "date": "2026-07-24",
+  "snapshot_schema_version": "3.0",
+  "snapshot_limit_bytes": 262144,
+  "trigger_model": {
+    "debounced": true,
+    "coalesced": true,
+    "maximum_review_mandatory": true,
+    "critical_bypass": [
+      "verification_result",
+      "verifier_disagreement",
+      "lane_failure",
+      "resource_pressure"
+    ]
+  },
+  "effect_metrics": [
+    "score_slope_change",
+    "diversity_change",
+    "throughput_change",
+    "duplicate_rate_change",
+    "operator_yield_change",
+    "expectation_met"
+  ],
+  "focused_gate": {
+    "command": "uv run python -m unittest tests.test_orchestrator -v",
+    "turns": 3,
+    "status": "passed",
+    "unittest_seconds": 0.401,
+    "wall_seconds": 0.49,
+    "aggregate_cpu_percent": 137,
+    "search_progress_during_inference": true,
+    "next_turn_received_prior_effect": true
+  },
+  "full_suite": {
+    "command": "make test",
+    "tests": 62,
+    "status": "passed",
+    "seconds": 12.216
+  },
+  "static_check": "passed",
+  "production_provider_required": "codex_app_server_json_rpc_stdio",
+  "production_live_turn_demonstrated": false,
+  "m6_complete": false
+}
