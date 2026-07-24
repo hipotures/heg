@@ -1,0 +1,53 @@
+{
+  "schema_version": "1.0",
+  "source_runtime_artifacts_modified": false,
+  "persistent_P1_schema_valid": true,
+  "persistent_P1_semantic_validation": "indeterminate_due_to_validator_contract_mismatch",
+  "persistent_P1_semantic_revalidation": "valid",
+  "persistent_P1_model_output_modified": false,
+  "persistent_P1_disputed_references": [
+    "snapshot-81a7b29a71684fd89f0d907163186711",
+    "snapshot-81a7b29a71684fd89f0d907163186711"
+  ],
+  "persistent_P1_both_disputed_references_visible": true,
+  "persistent_P1_reference_json_paths": [
+    "$.source_snapshot_id",
+    "$.artifact_references[0].id"
+  ],
+  "persistent_P1_corrected_validation_issues": [],
+  "persistent_P1_registry_sha256": "690eae8fd1d6083576ea0aefc621f8c2992d8cd357a30ccfe6c651ca96ab8136",
+  "persistent_P1_registry_round_trip_identical": true,
+  "persistent_P1_response_sha256": "860a5ca9344ac713a82654f3a077cb7a5e2244ffb504f09796abf901fa55c804",
+  "persistent_P2_status": "timed_out_after_inference",
+  "persistent_P2_turn_id": "019f953e-e784-7241-bd0d-28b92c67570b",
+  "persistent_P2_reasoning_item_ids": [
+    "rs_07a914ce88aabd5b016a63a59d53a48191a3a8198fe946f174",
+    "rs_07a914ce88aabd5b016a63a5a6f36c8191a70be144eec325a2"
+  ],
+  "persistent_P2_final_answer": null,
+  "persistent_P2_usage": null,
+  "persistent_arm_completed": false,
+  "stateless_arm_completed": false,
+  "context_mode_comparison": "inconclusive",
+  "deterministic_verification": {
+    "targeted_evidence_registry_tests": "passed",
+    "targeted_incomplete_turn_tests": "passed",
+    "targeted_timeout_shutdown_tests": "passed",
+    "full_safe_test_suite_passes": 2,
+    "tests_per_full_pass": 121,
+    "make_doctor": "passed",
+    "make_check": "passed",
+    "make_benchmark_smoke": "passed",
+    "make_dashboard_smoke": "passed",
+    "original_v8_integrity_check": "ok",
+    "migrated_v9_integrity_check": "ok",
+    "migrated_user_version": 9,
+    "model_inferences": 0,
+    "auth_accesses": 0,
+    "app_server_runtime_starts": 0,
+    "search_batches": 0
+  },
+  "original_failure_report_sha256": "dba6963f017a134beb5a8b04aa3f5a4d3db653dd0b44e230b95fc9d855fd5d2f",
+  "original_rollout_sha256": "ec3837ec17808f080cfab915fe18dee073d13993bdc11cdc866aa3e6ddea3614",
+  "original_failure_database_snapshot_sha256": "e121468da08aab95237592c2a774633bef6562cb251e67196dc82f29714937af"
+}

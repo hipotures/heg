@@ -712,8 +712,12 @@ def _id_list(
         issues.add(path, "must be unique")
     for index, identifier in enumerate(value):
         checked = _identifier(issues, identifier, f"{path}[{index}]")
-        if checked not in allowed:
-            issues.add(f"{path}[{index}]", "is not admissible in this snapshot")
+        if checked and checked not in allowed:
+            issues.add(
+                f"{path}[{index}]",
+                f"unknown reference {checked!r} is not admissible "
+                "in this snapshot",
+            )
 
 
 def _identifier(

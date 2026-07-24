@@ -285,7 +285,7 @@ class OneBatchExperimentTests(unittest.TestCase):
                 replay.decisions[second_snapshot["snapshot_id"]] = (
                     _second_decision(
                         second_snapshot["snapshot_id"],
-                        observed["evidence_id"],
+                        observed["action_id"],
                     )
                 )
                 second = asyncio.run(

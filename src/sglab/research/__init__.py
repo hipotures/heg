@@ -5,7 +5,9 @@ from .app_server_client import (
     AppServerConfig,
     AppServerError,
     AppServerSession,
+    AppServerTurnEvent,
     AppServerTurnResult,
+    AppServerTurnTimeout,
     AppServerUsage,
 )
 
@@ -14,6 +16,8 @@ __all__ = [
     "AppServerConfig",
     "AppServerError",
     "AppServerSession",
+    "AppServerTurnEvent",
     "AppServerTurnResult",
+    "AppServerTurnTimeout",
     "AppServerUsage",
 ]

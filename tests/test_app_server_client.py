@@ -12,6 +12,7 @@ from sglab.research.app_server_client import (
     AppServerClient,
     AppServerConfig,
     AppServerError,
+    AppServerTurnTimeout,
 )
 from sglab.research.auth import (
     auth_is_imported,
@@ -31,7 +32,10 @@ class AppServerClientTests(unittest.IsolatedAsyncioTestCase):
             launcher=(sys.executable, str(FAKE), f"--fake-mode={mode}"),
             disabled_features=(),
             request_timeout_seconds=1,
-            turn_timeout_seconds=0.2 if mode == "timeout" else 2,
+            turn_timeout_seconds=(
+                0.2 if mode in {"timeout", "late-abort"} else 2
+            ),
+            timeout_drain_seconds=0.1,
             usage_wait_seconds=0.2,
         )
 
@@ -154,8 +158,37 @@ class AppServerClientTests(unittest.IsolatedAsyncioTestCase):
             client = AppServerClient(self.config(Path(directory), "timeout"))
             await client.start()
             session = await client.start_thread("Return only JSON.")
-            with self.assertRaisesRegex(AppServerError, "timed out"):
-                await client.turn(session, "test")
+            events = []
+            with self.assertRaisesRegex(AppServerTurnTimeout, "timed out"):
+                await client.turn(session, "test", on_event=events.append)
+            self.assertIsNone(client.process)
+            self.assertEqual(
+                {
+                    item_id
+                    for event in events
+                    for item_id, item_type in event.items
+                    if item_type == "reasoning"
+                },
+                {"reasoning-1", "reasoning-2"},
+            )
+            self.assertEqual(events[-1].lifecycle_status, "timed_out")
+            self.assertIn(b'"method":"turn/interrupt"', client.wire_bytes)
+
+    async def test_late_abort_is_drained_after_timeout(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            client = AppServerClient(
+                self.config(Path(directory), "late-abort")
+            )
+            await client.start()
+            session = await client.start_thread("Return only JSON.")
+            events = []
+            with self.assertRaisesRegex(AppServerTurnTimeout, "timed out"):
+                await client.turn(session, "test", on_event=events.append)
+            self.assertEqual(events[-1].lifecycle_status, "aborted")
+            self.assertIn(
+                "timeout followed by terminal status interrupted",
+                str(events[-1].terminal_reason),
+            )
             self.assertIsNone(client.process)
 
 

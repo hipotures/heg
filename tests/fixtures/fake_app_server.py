@@ -19,8 +19,25 @@ def send(value: dict) -> None:
     print(json.dumps(value, separators=(",", ":")), flush=True)
 
 
-thread_id = "thread-test"
-turn_id = "turn-test"
+P2_SHAPE = MODE in {"p2-timeout", "p2-late-abort"}
+thread_id = (
+    "019f953e-5817-7c21-ae03-79c0ad6942eb"
+    if P2_SHAPE
+    else "thread-test"
+)
+turn_id = (
+    "019f953e-e784-7241-bd0d-28b92c67570b"
+    if P2_SHAPE
+    else "turn-test"
+)
+reasoning_item_ids = (
+    (
+        "rs_07a914ce88aabd5b016a63a59d53a48191a3a8198fe946f174",
+        "rs_07a914ce88aabd5b016a63a5a6f36c8191a70be144eec325a2",
+    )
+    if P2_SHAPE
+    else ("reasoning-1", "reasoning-2")
+)
 skills_enabled = True
 
 
@@ -145,6 +162,46 @@ for line in sys.stdin:
             )
             continue
         send({"id": request_id, "result": {}})
+    elif method == "turn/interrupt":
+        if request.get("params") != {
+            "threadId": thread_id,
+            "turnId": turn_id,
+        }:
+            send(
+                {
+                    "id": request_id,
+                    "error": {
+                        "code": -32602,
+                        "message": "unknown turn",
+                    },
+                }
+            )
+            continue
+        send({"id": request_id, "result": {}})
+        if MODE in {"late-abort", "p2-late-abort"}:
+            time.sleep(0.02)
+            send(
+                {
+                    "method": "turn/completed",
+                    "params": {
+                        "threadId": thread_id,
+                        "turn": {
+                            "id": turn_id,
+                            "status": "interrupted",
+                            "items": [
+                                {
+                                    "id": reasoning_item_ids[0],
+                                    "type": "reasoning",
+                                },
+                                {
+                                    "id": reasoning_item_ids[1],
+                                    "type": "reasoning",
+                                },
+                            ],
+                        },
+                    },
+                }
+            )
     elif method == "turn/start":
         params = request.get("params", {})
         if params.get("environments") != [] or params.get(
@@ -171,7 +228,27 @@ for line in sys.stdin:
         if MODE == "malformed":
             print("{bad", flush=True)
             continue
-        if MODE == "timeout":
+        if MODE in {
+            "timeout",
+            "late-abort",
+            "p2-timeout",
+            "p2-late-abort",
+        }:
+            for item_id in reasoning_item_ids:
+                send(
+                    {
+                        "method": "item/started",
+                        "params": {
+                            "threadId": thread_id,
+                            "turnId": turn_id,
+                            "startedAtMs": 1,
+                            "item": {
+                                "id": item_id,
+                                "type": "reasoning",
+                            },
+                        },
+                    }
+                )
             continue
         if MODE == "partial-final-usage":
             send(

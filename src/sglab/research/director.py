@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from importlib.resources import files
 from pathlib import Path
 from time import perf_counter
@@ -12,13 +12,16 @@ import os
 from .app_server_client import (
     AppServerClient,
     AppServerSession,
+    AppServerTurnEvent,
     AppServerTurnResult,
+    AppServerTurnTimeout,
 )
 from .context import (
     CLIENT_ESTIMATED_TOKENS_MAX,
     DirectorContextBudgetExceeded,
     DirectorContextMode,
     complete_context_size_report,
+    evidence_registry_ids,
     prepare_director_state_v2,
 )
 from .protocol import (
@@ -81,7 +84,6 @@ def build_director_prompt(snapshot: dict[str, Any]) -> str:
         "immutable_target": target,
         "acceptance_control": acceptance_control,
         "director_state_v2": director_state,
-        "admissible_evidence_ids": snapshot.get("available_evidence_ids", []),
         "required_response": (
             "Assess, update evidence-backed hypotheses, issue concrete typed "
             "interventions with numeric parameters and expected observations, "
@@ -122,6 +124,7 @@ class ActiveDirector:
             self.audit_dir / "requests",
             self.audit_dir / "responses",
             self.audit_dir / "wire",
+            self.audit_dir / "evidence-registries",
         ):
             child.mkdir(parents=True, exist_ok=True, mode=0o700)
             child.chmod(0o700)
@@ -283,6 +286,11 @@ class ActiveDirector:
         request_relative = Path("director") / "requests" / f"{turn_record_id}.json"
         response_relative = Path("director") / "responses" / f"{turn_record_id}.json"
         wire_relative = Path("director") / "wire" / f"{turn_record_id}.jsonl"
+        registry_relative = (
+            Path("director")
+            / "evidence-registries"
+            / f"{turn_record_id}.json"
+        )
         context_relative = (
             Path("director")
             / "context-budgets"
@@ -306,6 +314,32 @@ class ActiveDirector:
             raise RuntimeError(
                 "prompt DirectorStateV2 does not match the committed snapshot"
             )
+        registry_bytes = canonical_json(
+            prepared_state.evidence_registry, max_bytes=128 * 1024
+        )
+        _write_private(
+            self.campaign_dir / registry_relative,
+            registry_bytes + b"\n",
+        )
+        validation_context = replace(
+            context,
+            snapshot_id=str(prepared_state.state["source_snapshot_id"]),
+            evidence_ids=evidence_registry_ids(
+                prepared_state.evidence_registry
+            ),
+            candidate_ids=evidence_registry_ids(
+                prepared_state.evidence_registry,
+                kinds=frozenset({"candidate"}),
+            ),
+            checkpoint_ids=evidence_registry_ids(
+                prepared_state.evidence_registry,
+                kinds=frozenset({"checkpoint"}),
+            ),
+            hypothesis_ids=evidence_registry_ids(
+                prepared_state.evidence_registry,
+                kinds=frozenset({"hypothesis"}),
+            ),
+        )
         context_report = complete_context_size_report(
             prepared_state,
             prompt=prompt,
@@ -333,6 +367,10 @@ class ActiveDirector:
             "trigger_id": trigger_id,
             "prompt": prompt,
             "output_schema": director_decision_schema(),
+            "evidence_registry_artifact_ref": str(registry_relative),
+            "evidence_registry_sha256": (
+                prepared_state.evidence_registry_sha256
+            ),
         }
         request_bytes = canonical_json(request_payload, max_bytes=1024 * 1024)
         _write_private(self.campaign_dir / request_relative, request_bytes + b"\n")
@@ -346,13 +384,35 @@ class ActiveDirector:
             request_artifact_ref=str(request_relative),
             request_sha256=hashlib.sha256(request_bytes).hexdigest(),
             wire_artifact_ref=str(wire_relative),
+            evidence_registry_artifact_ref=str(registry_relative),
+            evidence_registry_sha256=(
+                prepared_state.evidence_registry_sha256
+            ),
         )
+        def persist_event(event: AppServerTurnEvent) -> None:
+            self.store.record_turn_event(
+                turn_record_id,
+                event_sequence=event.sequence,
+                lifecycle_status=event.lifecycle_status,
+                request_id=event.request_id,
+                thread_id=event.thread_id,
+                turn_id=event.turn_id,
+                items=event.items,
+                terminal_reason=event.terminal_reason,
+                usage=(
+                    _usage_value(event.usage)
+                    if event.usage is not None
+                    else None
+                ),
+            )
+
         started = perf_counter()
         try:
             result = await self.client.turn(
                 self.session,
                 prompt,
                 output_schema=director_decision_schema(),
+                on_event=persist_event,
             )
             if not isinstance(result.parsed, dict):
                 raise RuntimeError("Director structured result is not an object")
@@ -365,7 +425,9 @@ class ActiveDirector:
             wire = take_wire() if callable(take_wire) else self.client.wire_bytes
             _write_private(self.campaign_dir / wire_relative, wire)
             self._prune_wire_artifacts()
-            validation = validate_decision(result.parsed, context)
+            validation = validate_decision(
+                result.parsed, validation_context
+            )
             self.store.complete_turn(
                 turn_record_id,
                 turn_id=result.turn_id,
@@ -378,15 +440,27 @@ class ActiveDirector:
                 usage=_usage_payload(result),
                 final_agent_item_id=result.final_agent_item_id,
                 wall_seconds=perf_counter() - started,
+                lifecycle_status="completed",
             )
         except BaseException as error:
+            take_wire = getattr(self.client, "take_wire_bytes", None)
+            wire = take_wire() if callable(take_wire) else self.client.wire_bytes
+            _write_private(self.campaign_dir / wire_relative, wire)
+            self._prune_wire_artifacts()
             self.store.complete_turn(
                 turn_record_id,
                 turn_id=None,
                 status="failed",
+                wire_sha256=hashlib.sha256(wire).hexdigest(),
                 wall_seconds=perf_counter() - started,
                 error_kind=type(error).__name__,
                 error_detail=str(error)[:4000],
+                lifecycle_status=(
+                    "timed_out"
+                    if isinstance(error, AppServerTurnTimeout)
+                    else "failed"
+                ),
+                terminal_reason=str(error)[:4000],
             )
             raise
         all_turns = (*prior_turns, turn_record_id)
@@ -556,6 +630,10 @@ def _usage_payload(result: AppServerTurnResult) -> dict[str, Any] | None:
     usage = result.usage
     if usage is None:
         return None
+    return _usage_value(usage)
+
+
+def _usage_value(usage: Any) -> dict[str, Any]:
     return {
         "input_tokens": usage.input_tokens,
         "cached_input_tokens": usage.cached_input_tokens,

@@ -19,6 +19,7 @@ CLIENT_ESTIMATED_TOKENS_MAX = 12_000
 MAX_OUTCOMES = 3
 MAX_GLOBAL_RECORD_SUMMARIES = 8
 MAX_FINAL_BEST_ANCESTORS = 8
+EVIDENCE_REGISTRY_VERSION = "1.0"
 
 
 class DirectorContextMode(StrEnum):
@@ -40,6 +41,8 @@ class PreparedDirectorState:
     state: dict[str, Any]
     pre_compaction: dict[str, Any]
     size_report: dict[str, Any]
+    evidence_registry: dict[str, Any]
+    evidence_registry_sha256: str
 
 
 def director_state_v2_schema() -> dict[str, Any]:
@@ -238,11 +241,132 @@ def prepare_director_state_v2(
         != payload,
         "within_state_limits": within_state_limits,
     }
+    registry = build_evidence_registry(state)
+    registry_bytes = canonical_json(registry, max_bytes=128 * 1024)
     return PreparedDirectorState(
         state=state,
         pre_compaction=pre,
         size_report=report,
+        evidence_registry=registry,
+        evidence_registry_sha256=hashlib.sha256(registry_bytes).hexdigest(),
     )
+
+
+def build_evidence_registry(
+    director_state_v2: dict[str, Any],
+) -> dict[str, Any]:
+    """Build the sole evidence allowlist from the exact model-facing state."""
+
+    state = json.loads(
+        canonical_json(
+            director_state_v2, max_bytes=DIRECTOR_STATE_MAX_BYTES
+        )
+    )
+    state_sha256 = hashlib.sha256(
+        canonical_json(state, max_bytes=DIRECTOR_STATE_MAX_BYTES)
+    ).hexdigest()
+    references: dict[str, dict[str, set[str]]] = {}
+
+    def add(value: Any, kind: str, path: str) -> None:
+        if not isinstance(value, str) or not value:
+            return
+        entry = references.setdefault(
+            value, {"kinds": set(), "json_paths": set()}
+        )
+        entry["kinds"].add(kind)
+        entry["json_paths"].add(path)
+
+    add(
+        state.get("source_snapshot_id"),
+        "source_snapshot",
+        "$.source_snapshot_id",
+    )
+    artifact_references = state.get("artifact_references")
+    if isinstance(artifact_references, list):
+        for index, value in enumerate(artifact_references):
+            if not isinstance(value, dict):
+                continue
+            add(
+                value.get("id"),
+                str(value.get("kind") or "artifact"),
+                f"$.artifact_references[{index}].id",
+            )
+            add(
+                value.get("sha256"),
+                "artifact_hash",
+                f"$.artifact_references[{index}].sha256",
+            )
+
+    identifier_kinds = {
+        "action_id": "action",
+        "candidate_id": "candidate",
+        "best_candidate_identifier": "candidate",
+        "parent_candidate_id": "candidate",
+        "checkpoint_id": "checkpoint",
+        "decision_batch_id": "outcome",
+        "evidence_id": "evidence",
+        "hypothesis_id": "hypothesis",
+        "metric_window_id": "outcome",
+        "outcome_id": "outcome",
+        "outcome_artifact_sha256": "artifact_hash",
+    }
+
+    def visit(value: Any, path: str) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                child_path = f"{path}.{key}"
+                kind = identifier_kinds.get(str(key))
+                if kind is not None:
+                    add(child, kind, child_path)
+                elif key == "hypothesis_ids" and isinstance(child, list):
+                    for index, identifier in enumerate(child):
+                        add(
+                            identifier,
+                            "hypothesis",
+                            f"{child_path}[{index}]",
+                        )
+                visit(child, child_path)
+        elif isinstance(value, list):
+            for index, child in enumerate(value):
+                visit(child, f"{path}[{index}]")
+
+    visit(state, "$")
+    return {
+        "schema_version": EVIDENCE_REGISTRY_VERSION,
+        "director_state_sha256": state_sha256,
+        "references": [
+            {
+                "id": identifier,
+                "kinds": sorted(entry["kinds"]),
+                "json_paths": sorted(entry["json_paths"]),
+            }
+            for identifier, entry in sorted(references.items())
+        ],
+    }
+
+
+def evidence_registry_ids(
+    registry: dict[str, Any],
+    *,
+    kinds: frozenset[str] | None = None,
+) -> frozenset[str]:
+    """Return registry IDs, optionally restricted to reference kinds."""
+
+    identifiers: set[str] = set()
+    for reference in registry.get("references", []):
+        if not isinstance(reference, dict):
+            continue
+        identifier = reference.get("id")
+        reference_kinds = reference.get("kinds")
+        if not isinstance(identifier, str) or not isinstance(
+            reference_kinds, list
+        ):
+            continue
+        if kinds is None or kinds.intersection(
+            str(value) for value in reference_kinds
+        ):
+            identifiers.add(identifier)
+    return frozenset(identifiers)
 
 
 def complete_context_size_report(
@@ -472,6 +596,7 @@ def _best_result(
                 "candidate_id",
                 "evidence_id",
                 "lane_id",
+                "checkpoint_id",
                 "score",
                 "order",
                 "size",

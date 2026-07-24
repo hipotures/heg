@@ -5,7 +5,7 @@ from typing import Any, Iterable
 import json
 import sqlite3
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 MAX_METRIC_ROWS = 100_000
 
 BASE_SCHEMA_SQL = """
@@ -382,6 +382,61 @@ ALTER TABLE app_server_turns
 PRAGMA user_version=8;
 """
 
+APP_SERVER_TURN_LIFECYCLE_COLUMNS = {
+    "lifecycle_status": "TEXT NOT NULL DEFAULT 'requested'",
+    "request_id": "TEXT",
+    "item_ids_json": "TEXT NOT NULL DEFAULT '[]'",
+    "item_types_json": "TEXT NOT NULL DEFAULT '{}'",
+    "reasoning_item_ids_json": "TEXT NOT NULL DEFAULT '[]'",
+    "latest_event_sequence": "INTEGER NOT NULL DEFAULT 0",
+    "latest_event_at": "TEXT",
+    "turn_started_at": "TEXT",
+    "terminal_reason": "TEXT",
+    "evidence_registry_artifact_ref": "TEXT",
+    "evidence_registry_sha256": "TEXT",
+}
+
+APP_SERVER_TURN_LIFECYCLE_SCHEMA_SQL = """
+ALTER TABLE app_server_turns
+    ADD COLUMN lifecycle_status TEXT NOT NULL DEFAULT 'requested';
+ALTER TABLE app_server_turns
+    ADD COLUMN request_id TEXT;
+ALTER TABLE app_server_turns
+    ADD COLUMN item_ids_json TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE app_server_turns
+    ADD COLUMN item_types_json TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE app_server_turns
+    ADD COLUMN reasoning_item_ids_json TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE app_server_turns
+    ADD COLUMN latest_event_sequence INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE app_server_turns
+    ADD COLUMN latest_event_at TEXT;
+ALTER TABLE app_server_turns
+    ADD COLUMN turn_started_at TEXT;
+ALTER TABLE app_server_turns
+    ADD COLUMN terminal_reason TEXT;
+ALTER TABLE app_server_turns
+    ADD COLUMN evidence_registry_artifact_ref TEXT;
+ALTER TABLE app_server_turns
+    ADD COLUMN evidence_registry_sha256 TEXT;
+
+UPDATE app_server_turns
+SET lifecycle_status=CASE
+    WHEN status IN ('completed', 'completed_valid', 'completed_invalid')
+        THEN 'completed'
+    WHEN status='failed_interrupted' THEN 'aborted'
+    WHEN status='failed' THEN 'failed'
+    WHEN status='in_progress' THEN 'in_progress'
+    ELSE lifecycle_status
+END,
+turn_started_at=CASE
+    WHEN turn_id IS NOT NULL AND turn_started_at IS NULL THEN started_at
+    ELSE turn_started_at
+END;
+
+PRAGMA user_version=9;
+"""
+
 
 def connect(path: str | Path) -> sqlite3.Connection:
     target = Path(path)
@@ -416,6 +471,7 @@ def migrate(connection: sqlite3.Connection) -> None:
     _ensure_m6_lane_columns(connection)
     _ensure_m6_candidate_table(connection)
     _ensure_app_server_compliance_columns(connection)
+    _ensure_app_server_turn_lifecycle_columns(connection)
 
 
 def _ensure_m6_lane_columns(connection: sqlite3.Connection) -> None:
@@ -514,6 +570,49 @@ def _ensure_app_server_compliance_columns(
         elif "final_agent_item_id" in missing:
             connection.execute(
                 "ALTER TABLE app_server_turns ADD COLUMN final_agent_item_id TEXT"
+            )
+    connection.commit()
+
+
+def _ensure_app_server_turn_lifecycle_columns(
+    connection: sqlite3.Connection,
+) -> None:
+    exists = connection.execute(
+        """
+        SELECT 1 FROM sqlite_master
+        WHERE type='table' AND name='app_server_turns'
+        """
+    ).fetchone()
+    if exists is not None:
+        columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(app_server_turns)")
+        }
+        lifecycle_added = "lifecycle_status" not in columns
+        for name, definition in APP_SERVER_TURN_LIFECYCLE_COLUMNS.items():
+            if name not in columns:
+                connection.execute(
+                    f"ALTER TABLE app_server_turns "
+                    f"ADD COLUMN {name} {definition}"
+                )
+        if lifecycle_added:
+            connection.execute(
+                """
+                UPDATE app_server_turns
+                SET lifecycle_status=CASE
+                    WHEN status IN ('completed', 'completed_valid',
+                                    'completed_invalid') THEN 'completed'
+                    WHEN status='failed_interrupted' THEN 'aborted'
+                    WHEN status='failed' THEN 'failed'
+                    WHEN status='in_progress' THEN 'in_progress'
+                    ELSE lifecycle_status
+                END,
+                turn_started_at=CASE
+                    WHEN turn_id IS NOT NULL AND turn_started_at IS NULL
+                    THEN started_at
+                    ELSE turn_started_at
+                END
+                """
             )
     connection.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
     connection.commit()

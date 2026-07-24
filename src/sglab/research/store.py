@@ -371,6 +371,8 @@ class ResearchStore:
         request_artifact_ref: str,
         request_sha256: str,
         wire_artifact_ref: str,
+        evidence_registry_artifact_ref: str | None = None,
+        evidence_registry_sha256: str | None = None,
     ) -> None:
         with self.transaction() as database:
             database.execute(
@@ -378,8 +380,11 @@ class ResearchStore:
                 INSERT INTO app_server_turns
                 (turn_record_id, session_record_id, campaign_id, thread_id,
                  snapshot_id, trigger_id, status, request_artifact_ref,
-                 request_sha256, wire_log_artifact_ref, started_at)
-                VALUES (?, ?, ?, ?, ?, ?, 'in_progress', ?, ?, ?, ?)
+                 request_sha256, wire_log_artifact_ref,
+                 evidence_registry_artifact_ref,
+                 evidence_registry_sha256, lifecycle_status, started_at)
+                VALUES (?, ?, ?, ?, ?, ?, 'in_progress', ?, ?, ?, ?, ?,
+                        'requested', ?)
                 """,
                 (
                     turn_record_id,
@@ -391,9 +396,165 @@ class ResearchStore:
                     request_artifact_ref,
                     request_sha256,
                     wire_artifact_ref,
+                    evidence_registry_artifact_ref,
+                    evidence_registry_sha256,
                     utc_now(),
                 ),
             )
+
+    def record_turn_event(
+        self,
+        turn_record_id: str,
+        *,
+        event_sequence: int,
+        lifecycle_status: str,
+        request_id: str | int | None = None,
+        thread_id: str | None = None,
+        turn_id: str | None = None,
+        items: tuple[tuple[str, str], ...] = (),
+        terminal_reason: str | None = None,
+        usage: dict[str, Any] | None = None,
+    ) -> bool:
+        """Idempotently retain correlation as app-server events arrive."""
+
+        allowed = {
+            "requested",
+            "started",
+            "in_progress",
+            "completed",
+            "failed",
+            "aborted",
+            "timed_out",
+        }
+        terminal = {"completed", "failed", "aborted", "timed_out"}
+        if lifecycle_status not in allowed:
+            raise ValueError(f"invalid turn lifecycle status: {lifecycle_status}")
+        if event_sequence < 0:
+            raise ValueError("event sequence cannot be negative")
+        normalized_usage = usage or {}
+        with self.transaction() as database:
+            row = database.execute(
+                "SELECT * FROM app_server_turns WHERE turn_record_id=?",
+                (turn_record_id,),
+            ).fetchone()
+            if row is None:
+                raise RuntimeError("turn event references an unknown row")
+            if thread_id is not None and str(row["thread_id"]) != thread_id:
+                raise RuntimeError("turn event has inconsistent threadId")
+            stored_request = row["request_id"]
+            normalized_request = (
+                str(request_id) if request_id is not None else None
+            )
+            if (
+                stored_request is not None
+                and normalized_request is not None
+                and str(stored_request) != normalized_request
+            ):
+                raise RuntimeError("turn event has inconsistent requestId")
+            stored_turn = row["turn_id"]
+            if (
+                stored_turn is not None
+                and turn_id is not None
+                and str(stored_turn) != turn_id
+            ):
+                raise RuntimeError("turn event has inconsistent turnId")
+            item_types = json.loads(str(row["item_types_json"] or "{}"))
+            if not isinstance(item_types, dict):
+                raise RuntimeError("turn item type registry is malformed")
+            for item_id, item_type in items:
+                existing = item_types.get(item_id)
+                if existing is not None and existing != item_type:
+                    raise RuntimeError(
+                        f"item {item_id} changed type from "
+                        f"{existing} to {item_type}"
+                    )
+                item_types[item_id] = item_type
+            if event_sequence <= int(row["latest_event_sequence"]):
+                return False
+            current_lifecycle = str(row["lifecycle_status"])
+            next_lifecycle = lifecycle_status
+            if current_lifecycle in terminal:
+                if (
+                    current_lifecycle == "timed_out"
+                    and lifecycle_status == "aborted"
+                ):
+                    next_lifecycle = "aborted"
+                else:
+                    next_lifecycle = current_lifecycle
+            current_reason = row["terminal_reason"]
+            if terminal_reason and current_reason:
+                next_reason = (
+                    str(current_reason)
+                    if terminal_reason in str(current_reason)
+                    else f"{current_reason}; {terminal_reason}"
+                )
+            else:
+                next_reason = terminal_reason or current_reason
+            reasoning_ids = sorted(
+                item_id
+                for item_id, item_type in item_types.items()
+                if item_type == "reasoning"
+            )
+            database.execute(
+                """
+                UPDATE app_server_turns
+                SET request_id=COALESCE(request_id, ?),
+                    turn_id=COALESCE(turn_id, ?),
+                    lifecycle_status=?,
+                    item_ids_json=?,
+                    item_types_json=?,
+                    reasoning_item_ids_json=?,
+                    latest_event_sequence=?,
+                    latest_event_at=?,
+                    turn_started_at=CASE
+                        WHEN ? IN ('started', 'in_progress')
+                             AND turn_started_at IS NULL
+                        THEN ?
+                        ELSE turn_started_at
+                    END,
+                    terminal_reason=?,
+                    input_tokens=COALESCE(?, input_tokens),
+                    cached_input_tokens=COALESCE(?, cached_input_tokens),
+                    cache_write_input_tokens=COALESCE(
+                        ?, cache_write_input_tokens
+                    ),
+                    output_tokens=COALESCE(?, output_tokens),
+                    reasoning_output_tokens=COALESCE(
+                        ?, reasoning_output_tokens
+                    ),
+                    total_tokens=COALESCE(?, total_tokens),
+                    raw_usage_json=COALESCE(?, raw_usage_json)
+                WHERE turn_record_id=?
+                """,
+                (
+                    normalized_request,
+                    turn_id,
+                    next_lifecycle,
+                    json.dumps(sorted(item_types)),
+                    json.dumps(item_types, sort_keys=True),
+                    json.dumps(reasoning_ids),
+                    event_sequence,
+                    utc_now(),
+                    lifecycle_status,
+                    utc_now(),
+                    next_reason,
+                    normalized_usage.get("input_tokens"),
+                    normalized_usage.get("cached_input_tokens"),
+                    normalized_usage.get("cache_write_input_tokens"),
+                    normalized_usage.get("output_tokens"),
+                    normalized_usage.get("reasoning_output_tokens"),
+                    normalized_usage.get("total_tokens"),
+                    (
+                        json.dumps(
+                            normalized_usage.get("raw"), sort_keys=True
+                        )
+                        if normalized_usage.get("raw") is not None
+                        else None
+                    ),
+                    turn_record_id,
+                ),
+            )
+            return True
 
     def close_session(self, session_record_id: str, *, state: str) -> None:
         if state not in {"closed", "interrupted", "rolled_over"}:
@@ -423,24 +584,94 @@ class ResearchStore:
         wall_seconds: float | None = None,
         error_kind: str | None = None,
         error_detail: str | None = None,
+        lifecycle_status: str | None = None,
+        terminal_reason: str | None = None,
     ) -> None:
         normalized = usage or {}
         with self.transaction() as database:
-            cursor = database.execute(
+            row = database.execute(
+                "SELECT * FROM app_server_turns WHERE turn_record_id=?",
+                (turn_record_id,),
+            ).fetchone()
+            if row is None:
+                raise RuntimeError("turn completion references an unknown row")
+            if (
+                row["turn_id"] is not None
+                and turn_id is not None
+                and str(row["turn_id"]) != turn_id
+            ):
+                raise RuntimeError("turn completion has inconsistent turnId")
+            inferred_lifecycle = lifecycle_status
+            if inferred_lifecycle is None:
+                if status in {"completed", "completed_valid", "completed_invalid"}:
+                    inferred_lifecycle = "completed"
+                elif "timeout" in str(error_detail or "").lower():
+                    inferred_lifecycle = "timed_out"
+                else:
+                    inferred_lifecycle = "failed"
+            current_lifecycle = str(row["lifecycle_status"])
+            if current_lifecycle in {
+                "completed",
+                "failed",
+                "aborted",
+                "timed_out",
+            }:
+                if (
+                    current_lifecycle == "timed_out"
+                    and inferred_lifecycle == "aborted"
+                ):
+                    inferred_lifecycle = "aborted"
+                else:
+                    inferred_lifecycle = current_lifecycle
+            resolved_status = (
+                status
+                if str(row["status"]) == "in_progress"
+                else str(row["status"])
+            )
+            current_reason = row["terminal_reason"]
+            if terminal_reason and current_reason:
+                resolved_reason = (
+                    str(current_reason)
+                    if terminal_reason in str(current_reason)
+                    else f"{current_reason}; {terminal_reason}"
+                )
+            else:
+                resolved_reason = terminal_reason or current_reason
+            database.execute(
                 """
                 UPDATE app_server_turns
-                SET turn_id=?, status=?, response_artifact_ref=?,
-                    response_sha256=?, wire_log_sha256=?,
-                    input_tokens=?, cached_input_tokens=?,
-                    cache_write_input_tokens=?, output_tokens=?,
-                    reasoning_output_tokens=?, total_tokens=?,
-                    raw_usage_json=?, wall_seconds=?, error_kind=?,
-                    error_detail=?, final_agent_item_id=?, completed_at=?
-                WHERE turn_record_id=? AND status='in_progress'
+                SET turn_id=COALESCE(turn_id, ?), status=?,
+                    lifecycle_status=?,
+                    response_artifact_ref=COALESCE(
+                        ?, response_artifact_ref
+                    ),
+                    response_sha256=COALESCE(?, response_sha256),
+                    wire_log_sha256=COALESCE(?, wire_log_sha256),
+                    input_tokens=COALESCE(?, input_tokens),
+                    cached_input_tokens=COALESCE(?, cached_input_tokens),
+                    cache_write_input_tokens=COALESCE(
+                        ?, cache_write_input_tokens
+                    ),
+                    output_tokens=COALESCE(?, output_tokens),
+                    reasoning_output_tokens=COALESCE(
+                        ?, reasoning_output_tokens
+                    ),
+                    total_tokens=COALESCE(?, total_tokens),
+                    raw_usage_json=COALESCE(?, raw_usage_json),
+                    wall_seconds=COALESCE(?, wall_seconds),
+                    error_kind=COALESCE(?, error_kind),
+                    error_detail=COALESCE(?, error_detail),
+                    terminal_reason=?,
+                    final_agent_item_id=COALESCE(
+                        ?, final_agent_item_id
+                    ),
+                    completed_at=COALESCE(completed_at, ?)
+                WHERE turn_record_id=?
                 """,
                 (
                     turn_id,
-                    status,
+                    resolved_status,
+                    inferred_lifecycle,
                     response_artifact_ref,
                     response_sha256,
                     wire_sha256,
@@ -456,13 +687,12 @@ class ResearchStore:
                     wall_seconds,
                     error_kind,
                     error_detail,
+                    resolved_reason,
                     final_agent_item_id,
                     utc_now(),
                     turn_record_id,
                 ),
             )
-            if cursor.rowcount != 1:
-                raise RuntimeError("turn completion is stale or duplicated")
 
     def commit_decision_batch(
         self,
@@ -1677,10 +1907,15 @@ class ResearchStore:
                 """
                 UPDATE app_server_turns
                 SET status='failed_interrupted',
+                    lifecycle_status='aborted',
                     error_kind='application_restart',
                     error_detail='turn interrupted before durable completion',
+                    terminal_reason='application restart interrupted turn',
                     completed_at=?
                 WHERE campaign_id=? AND status='in_progress'
+                  AND lifecycle_status NOT IN (
+                      'completed', 'failed', 'aborted', 'timed_out'
+                  )
                 """,
                 (utc_now(), campaign_id),
             ).rowcount

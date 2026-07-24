@@ -9,6 +9,7 @@ import sqlite3
 from .context import (
     DirectorContextMode,
     duplicated_key_estimate,
+    evidence_registry_ids,
     prepare_director_state_v2,
 )
 from .protocol import canonical_json
@@ -273,11 +274,11 @@ def _replay_decisions_validate(
     if len(snapshots) != len(decisions):
         return False
     for index, (snapshot, decision) in enumerate(zip(snapshots, decisions)):
+        prepared = prepare_director_state_v2(snapshot)
+        registry = prepared.evidence_registry
         context = DecisionContext(
-            snapshot_id=str(snapshot["snapshot_id"]),
-            evidence_ids=frozenset(
-                snapshot.get("available_evidence_ids", [])
-            ),
+            snapshot_id=str(prepared.state["source_snapshot_id"]),
+            evidence_ids=evidence_registry_ids(registry),
             lane_versions={
                 str(value["lane_id"]): int(value["lane_version"])
                 for value in snapshot.get("lanes", [])
@@ -290,19 +291,14 @@ def _replay_decisions_validate(
                 if value.get("state")
                 in {"starting", "running", "paused", "stopping"}
             },
-            checkpoint_ids=frozenset(
-                str(value["checkpoint_id"])
-                for value in snapshot.get("lanes", [])
-                if value.get("checkpoint_id")
+            checkpoint_ids=evidence_registry_ids(
+                registry, kinds=frozenset({"checkpoint"})
             ),
-            candidate_ids=frozenset(
-                [str(snapshot["global_best"]["candidate_id"])]
-                if isinstance(snapshot.get("global_best"), dict)
-                else []
+            candidate_ids=evidence_registry_ids(
+                registry, kinds=frozenset({"candidate"})
             ),
-            hypothesis_ids=frozenset(
-                str(value["hypothesis_id"])
-                for value in snapshot.get("hypotheses", [])
+            hypothesis_ids=evidence_registry_ids(
+                registry, kinds=frozenset({"hypothesis"})
             ),
             max_active_lanes=1,
         )

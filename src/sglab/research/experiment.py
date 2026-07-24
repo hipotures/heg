@@ -738,7 +738,6 @@ def build_experiment_prompt(
         "experiment_contract": contract,
         "phase_a_static_benchmark_evidence": PHASE_A_BENCHMARK_EVIDENCE,
         "director_state_v2": prepare_director_state_v2(snapshot).state,
-        "admissible_evidence_ids": snapshot.get("available_evidence_ids", []),
         "required_response": "Return only the existing Director decision schema.",
     }
     return canonical_json(payload, max_bytes=MAX_SNAPSHOT_BYTES).decode("ascii")
@@ -810,7 +809,7 @@ def run_phase_a_audit(workspace: Path) -> dict[str, Any]:
                 for outcome in outcomes
             )
             evidence_ids = [
-                str(observed[action_id]["evidence_id"])
+                str(observed[action_id]["action_id"])
                 for action_id in sorted(observed)
             ]
             provider.decisions[snapshot_id] = _phase_a_batch_decision(
@@ -841,7 +840,7 @@ def run_phase_a_audit(workspace: Path) -> dict[str, Any]:
         provider.decisions[final_snapshot_id] = _phase_a_final_decision(
             final_snapshot_id,
             [
-                str(final_feedback[str(outcome["action_id"])]["evidence_id"])
+                str(final_feedback[str(outcome["action_id"])]["action_id"])
                 for outcome in outcomes
             ],
         )

@@ -4,15 +4,19 @@ from pathlib import Path
 import json
 import tempfile
 import unittest
+from unittest.mock import AsyncMock, patch
 
 from sglab.cli import build_parser
+from sglab.research.context import prepare_director_state_v2
 from sglab.research.context_screen import (
+    _run_screen_arms,
     build_context_screen_prompt,
     decision_context_for_snapshot,
     prepare_context_screen_phase_a,
     run_authenticated_context_screen,
     semantic_decision_rubric,
 )
+from sglab.research.validation import validate_decision
 
 
 def source_snapshot(snapshot_id: str, *, outcome: bool) -> dict:
@@ -238,6 +242,44 @@ class ContextScreenTests(unittest.TestCase):
             rejected["checks"]["no_code_tool_file_or_shell_request"]
         )
 
+    def test_evidence_registry_matches_exact_submitted_v2(self) -> None:
+        snapshot = source_snapshot("snapshot-visible", outcome=True)
+        snapshot["available_evidence_ids"] = ["database-only-hidden"]
+        prepared = prepare_director_state_v2(snapshot)
+        rebuilt = prepare_director_state_v2(
+            json.loads(json.dumps(snapshot))
+        )
+        self.assertEqual(
+            prepared.evidence_registry, rebuilt.evidence_registry
+        )
+        self.assertEqual(
+            prepared.evidence_registry_sha256,
+            rebuilt.evidence_registry_sha256,
+        )
+        self.assertEqual(
+            prepared.evidence_registry,
+            json.loads(json.dumps(prepared.evidence_registry)),
+        )
+        context = decision_context_for_snapshot(snapshot)
+        self.assertIn("snapshot-visible", context.evidence_ids)
+        self.assertNotIn("database-only-hidden", context.evidence_ids)
+        decision = measurement_decision("snapshot-visible")
+        decision["actions"][0]["evidence_ids"] = ["snapshot-visible"]
+        accepted = validate_decision(decision, context)
+        self.assertTrue(accepted.accepted, accepted.issues)
+        unknown = json.loads(json.dumps(decision))
+        unknown["actions"][0]["evidence_ids"] = ["not-submitted"]
+        rejected = validate_decision(unknown, context)
+        self.assertFalse(rejected.accepted)
+        self.assertIn(
+            (
+                "$.actions[0].evidence_ids[0]",
+                "unknown reference 'not-submitted' is not admissible "
+                "in this snapshot",
+            ),
+            {(issue.path, issue.message) for issue in rejected.issues},
+        )
+
     def test_run_refuses_before_per_arm_auth_import(self) -> None:
         with (
             tempfile.TemporaryDirectory() as source_directory,
@@ -296,6 +338,31 @@ class ContextScreenTests(unittest.TestCase):
             ]
         )
         self.assertEqual(run.ai_experiment_command, "context-screen-run")
+
+
+class ContextScreenFailureTests(unittest.IsolatedAsyncioTestCase):
+    async def test_persistent_failure_prevents_every_later_slot(self) -> None:
+        failed = AsyncMock(side_effect=RuntimeError("P2 failed"))
+        with patch(
+            "sglab.research.context_screen._run_screen_arm", failed
+        ):
+            with self.assertRaisesRegex(RuntimeError, "P2 failed"):
+                await _run_screen_arms(
+                    arm_roots={
+                        "persistent_thread": Path("/tmp/persistent"),
+                        "stateless_turns": Path("/tmp/stateless"),
+                    },
+                    states={},
+                    codex="must-not-start",
+                    preflight={},
+                    protocol_hash="a" * 64,
+                    turn_timeout_seconds=10,
+                )
+        self.assertEqual(failed.await_count, 1)
+        self.assertEqual(
+            failed.await_args.kwargs["mode"],
+            "persistent_thread",
+        )
 
 
 if __name__ == "__main__":

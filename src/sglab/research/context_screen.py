@@ -16,6 +16,7 @@ from .context import (
     DIRECTOR_STATE_MAX_BYTES,
     DirectorContextMode,
     complete_context_size_report,
+    evidence_registry_ids,
     prepare_director_state_v2,
 )
 from .director import ActiveDirector, base_instructions
@@ -220,12 +221,18 @@ def run_authenticated_context_screen(
     *,
     source_workspace: Path,
     codex: str = "codex",
+    turn_timeout_seconds: float = 900.0,
 ) -> dict[str, Any]:
+    if not 1.0 <= turn_timeout_seconds <= 900.0:
+        raise ValueError(
+            "context-screen turn timeout must be between 1 and 900 seconds"
+        )
     return asyncio.run(
         _run_authenticated_context_screen(
             workspace.resolve(),
             source_workspace=source_workspace.resolve(),
             codex=codex,
+            turn_timeout_seconds=turn_timeout_seconds,
         )
     )
 
@@ -235,6 +242,7 @@ async def _run_authenticated_context_screen(
     *,
     source_workspace: Path,
     codex: str,
+    turn_timeout_seconds: float,
 ) -> dict[str, Any]:
     phase_a_path = root / "context-screen-phase-a.json"
     if not phase_a_path.is_file():
@@ -273,23 +281,13 @@ async def _run_authenticated_context_screen(
             separators=(",", ":"),
         ).encode("ascii")
     ).hexdigest()
-    persistent = await _run_screen_arm(
-        arm_roots["persistent_thread"],
-        mode=DirectorContextMode.PERSISTENT_THREAD,
-        slots=(("P1", "A1"), ("P2", "A4")),
+    persistent, stateless = await _run_screen_arms(
+        arm_roots=arm_roots,
         states=states,
         codex=codex,
         preflight=preflight,
         protocol_hash=protocol_hash,
-    )
-    stateless = await _run_screen_arm(
-        arm_roots["stateless_turns"],
-        mode=DirectorContextMode.STATELESS_TURNS,
-        slots=(("S1", "A1"), ("S2", "A4")),
-        states=states,
-        codex=codex,
-        preflight=preflight,
-        protocol_hash=protocol_hash,
+        turn_timeout_seconds=turn_timeout_seconds,
     )
     turns = [*persistent["turns"], *stateless["turns"]]
     usage_p = _sum_usage(persistent["turns"])
@@ -408,6 +406,40 @@ async def _run_authenticated_context_screen(
     return report
 
 
+async def _run_screen_arms(
+    *,
+    arm_roots: dict[str, Path],
+    states: dict[str, dict[str, Any]],
+    codex: str,
+    preflight: dict[str, Any],
+    protocol_hash: str,
+    turn_timeout_seconds: float,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Run in order; any persistent-arm failure prevents stateless inference."""
+
+    persistent = await _run_screen_arm(
+        arm_roots["persistent_thread"],
+        mode=DirectorContextMode.PERSISTENT_THREAD,
+        slots=(("P1", "A1"), ("P2", "A4")),
+        states=states,
+        codex=codex,
+        preflight=preflight,
+        protocol_hash=protocol_hash,
+        turn_timeout_seconds=turn_timeout_seconds,
+    )
+    stateless = await _run_screen_arm(
+        arm_roots["stateless_turns"],
+        mode=DirectorContextMode.STATELESS_TURNS,
+        slots=(("S1", "A1"), ("S2", "A4")),
+        states=states,
+        codex=codex,
+        preflight=preflight,
+        protocol_hash=protocol_hash,
+        turn_timeout_seconds=turn_timeout_seconds,
+    )
+    return persistent, stateless
+
+
 async def _run_screen_arm(
     root: Path,
     *,
@@ -417,6 +449,7 @@ async def _run_screen_arm(
     codex: str,
     preflight: dict[str, Any],
     protocol_hash: str,
+    turn_timeout_seconds: float,
 ) -> dict[str, Any]:
     root.mkdir(parents=True, exist_ok=True)
     campaign_id = f"context-screen-{mode.value}"
@@ -438,6 +471,7 @@ async def _run_screen_arm(
             launcher=(codex,),
             model=SCREEN_MODEL,
             effort=SCREEN_EFFORT,
+            turn_timeout_seconds=turn_timeout_seconds,
         )
     )
     director = ActiveDirector(
@@ -451,6 +485,7 @@ async def _run_screen_arm(
         context_mode=mode,
     )
     turns: list[dict[str, Any]] = []
+    arm_body_completed = False
     try:
         await director.start()
         for label, state_label in slots:
@@ -490,8 +525,15 @@ async def _run_screen_arm(
             terminal_kind="stopped_by_operator",
             detail="Context-mode screen completed without decision dispatch",
         )
+        arm_body_completed = True
     finally:
-        await director.close()
+        close_completed = False
+        try:
+            await director.close()
+            close_completed = True
+        finally:
+            if not arm_body_completed or not close_completed:
+                store.close()
     counts = {
         "lanes": int(
             store.connection.execute(
@@ -792,15 +834,16 @@ def semantic_decision_rubric(
 def decision_context_for_snapshot(
     snapshot: dict[str, Any],
 ) -> DecisionContext:
+    prepared = prepare_director_state_v2(snapshot)
+    registry = prepared.evidence_registry
     active = [
         value
         for value in snapshot.get("lanes", [])
         if value.get("state") in {"starting", "running", "paused", "stopping"}
     ]
-    best = snapshot.get("global_best")
     return DecisionContext(
-        snapshot_id=str(snapshot["snapshot_id"]),
-        evidence_ids=frozenset(snapshot.get("available_evidence_ids", [])),
+        snapshot_id=str(prepared.state["source_snapshot_id"]),
+        evidence_ids=evidence_registry_ids(registry),
         lane_versions={
             str(value["lane_id"]): int(value["lane_version"])
             for value in active
@@ -809,17 +852,14 @@ def decision_context_for_snapshot(
             str(value["lane_id"]): str(value["algorithm"])
             for value in active
         },
-        checkpoint_ids=frozenset(
-            str(value["checkpoint_id"])
-            for value in active
-            if value.get("checkpoint_id")
+        checkpoint_ids=evidence_registry_ids(
+            registry, kinds=frozenset({"checkpoint"})
         ),
-        candidate_ids=frozenset(
-            [str(best["candidate_id"])] if isinstance(best, dict) else []
+        candidate_ids=evidence_registry_ids(
+            registry, kinds=frozenset({"candidate"})
         ),
-        hypothesis_ids=frozenset(
-            str(value["hypothesis_id"])
-            for value in snapshot.get("hypotheses", [])
+        hypothesis_ids=evidence_registry_ids(
+            registry, kinds=frozenset({"hypothesis"})
         ),
         max_active_lanes=1,
     )

@@ -2,6 +2,27 @@
 
 Last implementation audit: **2026-07-24**.
 
+## Context-screen deterministic failure fixes complete
+
+The aborted persistent P1 output was revalidated offline without changing the
+model response. Both disputed snapshot references were present in the exact
+submitted DirectorStateV2, so the corrected canonical registry makes P1
+schema-valid and semantically valid. The original semantic result is retained
+as `indeterminate_due_to_validator_contract_mismatch`.
+
+Schema v9 durably records requested, started, in-progress, completed, failed,
+aborted, and timed-out app-server turn lifecycles. Request/thread/turn/item
+correlation, reasoning IDs, event sequence, terminal reason, raw wire
+reference, and nullable usage survive timeout and SQLite reopen. The timeout
+path uses installed `turn/interrupt`, bounded event draining, and does not
+continue to the stateless arm after a persistent-arm failure. See
+`docs/reports/M6_CONTEXT_SCREEN_FAILURE_REVALIDATION.md`.
+
+Focused lifecycle and evidence tests pass, as do two complete 121-test runs,
+doctor, compile checks, benchmark smoke, dashboard smoke, and v8-to-v9
+migration/integrity checks on an SQLite Online Backup. No inference, auth
+access, app-server runtime start, or search batch was used for this repair.
+
 ## Low-cost context-mode screen — deterministic Phase A complete
 
 A measurement-only A/B harness is prepared for `persistent_thread` versus

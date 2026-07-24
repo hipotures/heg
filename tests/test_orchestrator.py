@@ -103,6 +103,11 @@ class DurableScenarioProvider:
                 for lane in snapshot["lanes"]
                 if lane["algorithm"] == "iterated_local_search"
             )
+            best = snapshot["global_best"]
+            if not isinstance(best, dict) or not best.get("checkpoint_id"):
+                raise AssertionError(
+                    "the real-lane test requires a visible best checkpoint"
+                )
             actions = [
                 {
                     **action_common("patch-sa", "patch_lane"),
@@ -114,7 +119,7 @@ class DurableScenarioProvider:
                     **action_common("fork-ils", "fork_lane"),
                     "lane_id": ils["lane_id"],
                     "expected_lane_version": ils["lane_version"],
-                    "checkpoint_id": ils["checkpoint_id"],
+                    "checkpoint_id": best["checkpoint_id"],
                     "variants": [
                         {
                             "name": "short-tabu",

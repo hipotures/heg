@@ -44,6 +44,10 @@ class AppServerError(RuntimeError):
     pass
 
 
+class AppServerTurnTimeout(AppServerError):
+    pass
+
+
 @dataclass(frozen=True, slots=True)
 class AppServerConfig:
     application_data: Path
@@ -52,6 +56,7 @@ class AppServerConfig:
     effort: str = "high"
     request_timeout_seconds: float = 30.0
     turn_timeout_seconds: float = 900.0
+    timeout_drain_seconds: float = 2.0
     usage_wait_seconds: float = 3.0
     graceful_shutdown_seconds: float = 2.0
     termination_timeout_seconds: float = 2.0
@@ -67,6 +72,7 @@ class AppServerConfig:
         for value in (
             self.request_timeout_seconds,
             self.turn_timeout_seconds,
+            self.timeout_drain_seconds,
             self.usage_wait_seconds,
             self.graceful_shutdown_seconds,
             self.termination_timeout_seconds,
@@ -129,6 +135,24 @@ class AppServerTurnResult:
     retrying_errors: tuple[dict[str, Any], ...]
     raw_completed_turn: dict[str, Any]
     final_agent_item_id: str | None = None
+    request_id: str | int | None = None
+    item_ids: tuple[str, ...] = ()
+    item_types: tuple[tuple[str, str], ...] = ()
+    reasoning_item_ids: tuple[str, ...] = ()
+    latest_event_sequence: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class AppServerTurnEvent:
+    sequence: int
+    lifecycle_status: str
+    request_id: str | int | None
+    thread_id: str
+    turn_id: str | None
+    method: str
+    items: tuple[tuple[str, str], ...] = ()
+    terminal_reason: str | None = None
+    usage: AppServerUsage | None = None
 
 
 class _BoundedBytes:
@@ -187,6 +211,13 @@ class AppServerClient:
         self.skills_isolated = False
         self.unsupported_server_requests = 0
         self.last_shutdown_mode: str | None = None
+        self._active_request_id: str | int | None = None
+        self._active_thread_id: str | None = None
+        self._active_turn_id: str | None = None
+        self._active_event_sequence = 0
+        self._active_event_callback: (
+            Callable[[AppServerTurnEvent], None] | None
+        ) = None
 
     def _command(self) -> list[str]:
         command = [
@@ -402,16 +433,44 @@ class AppServerClient:
         *,
         output_schema: dict[str, Any] | None = None,
         on_delta: Callable[[str], None] | None = None,
+        on_event: Callable[[AppServerTurnEvent], None] | None = None,
     ) -> AppServerTurnResult:
         async with self._turn_lock:
+            self._active_request_id = None
+            self._active_thread_id = session.thread_id
+            self._active_turn_id = None
+            self._active_event_sequence = 0
+            self._active_event_callback = on_event
             try:
                 return await asyncio.wait_for(
-                    self._turn(session, text, output_schema, on_delta),
+                    self._turn(
+                        session,
+                        text,
+                        output_schema,
+                        on_delta,
+                    ),
                     timeout=self.config.turn_timeout_seconds,
                 )
             except TimeoutError as error:
+                self._emit_turn_event(
+                    "timed_out",
+                    method="client/timeout",
+                    terminal_reason=(
+                        f"wall timeout after "
+                        f"{self.config.turn_timeout_seconds:g} seconds"
+                    ),
+                )
+                await self._interrupt_and_drain_timeout(session)
                 await self.close(force=True)
-                raise AppServerError("app-server turn timed out") from error
+                self._drain_queued_timeout_events(session)
+                raise AppServerTurnTimeout(
+                    "app-server turn timed out"
+                ) from error
+            finally:
+                self._active_event_callback = None
+                self._active_request_id = None
+                self._active_thread_id = None
+                self._active_turn_id = None
 
     async def _turn(
         self,
@@ -432,11 +491,18 @@ class AppServerClient:
             params["model"] = self.config.model
         if output_schema is not None:
             params["outputSchema"] = output_schema
-        response = await self._rpc("turn/start", params)
+        request_id, response = await self._rpc_with_id(
+            "turn/start",
+            params,
+            on_sent=lambda identifier: self._turn_request_sent(
+                session, identifier
+            ),
+        )
         turn = response.get("turn")
         if not isinstance(turn, dict) or not isinstance(turn.get("id"), str):
             raise AppServerError("turn/start omitted turn.id")
         turn_id = turn["id"]
+        self._active_turn_id = turn_id
         turn_items = turn.get("items", [])
         if not isinstance(turn_items, list):
             raise AppServerError("turn/start returned malformed items")
@@ -445,6 +511,7 @@ class AppServerClient:
         deltas: list[str] = []
         retrying_errors: list[dict[str, Any]] = []
         started_item_ids: set[str] = set()
+        item_types: dict[str, str] = {}
         for item in turn_items:
             item_id = item.get("id") if isinstance(item, dict) else None
             if not isinstance(item_id, str) or not item_id:
@@ -452,6 +519,12 @@ class AppServerClient:
             if item_id in started_item_ids:
                 raise AppServerError(f"duplicate turn/start itemId: {item_id}")
             started_item_ids.add(item_id)
+            item_types[item_id] = str(item.get("type") or "unknown")
+        self._emit_turn_event(
+            "started",
+            method="turn/start",
+            items=tuple(sorted(item_types.items())),
+        )
         delta_item_ids: set[str] = set()
         completed_item_ids: set[str] = set()
         final_agent_item_id: str | None = None
@@ -477,6 +550,12 @@ class AppServerClient:
                 if started_item_ids and item_id not in started_item_ids:
                     raise AppServerError(f"delta references unknown itemId: {item_id}")
                 delta_item_ids.add(item_id)
+                item_types.setdefault(item_id, "agentMessage")
+                self._emit_turn_event(
+                    "in_progress",
+                    method=method,
+                    items=((item_id, item_types[item_id]),),
+                )
                 delta = payload.get("delta")
                 if isinstance(delta, str):
                     deltas.append(delta)
@@ -490,6 +569,13 @@ class AppServerClient:
                 if item_id in completed_item_ids:
                     raise AppServerError(f"item restarted after completion: {item_id}")
                 started_item_ids.add(item_id)
+                item_type = str(item.get("type") or "unknown")
+                item_types[item_id] = item_type
+                self._emit_turn_event(
+                    "in_progress",
+                    method=method,
+                    items=((item_id, item_type),),
+                )
             elif method == "item/completed":
                 item = payload.get("item")
                 item_id = item.get("id") if isinstance(item, dict) else None
@@ -500,6 +586,13 @@ class AppServerClient:
                 if started_item_ids and item_id not in started_item_ids:
                     raise AppServerError(f"completion references unknown itemId: {item_id}")
                 completed_item_ids.add(item_id)
+                item_type = str(item.get("type") or "unknown")
+                item_types[item_id] = item_type
+                self._emit_turn_event(
+                    "in_progress",
+                    method=method,
+                    items=((item_id, item_type),),
+                )
                 if isinstance(item, dict) and item.get("type") == "agentMessage":
                     if delta_item_ids and item_id not in delta_item_ids:
                         raise AppServerError(
@@ -514,17 +607,64 @@ class AppServerClient:
                             fallback_messages.append(value)
             elif method == "thread/tokenUsage/updated":
                 usage = AppServerUsage.from_notification(payload)
+                self._emit_turn_event(
+                    "in_progress",
+                    method=method,
+                    usage=usage,
+                )
             elif method == "error":
                 error = dict(payload.get("error") or {})
                 if payload.get("willRetry") is True:
                     retrying_errors.append(error)
+                    self._emit_turn_event(
+                        "in_progress",
+                        method=method,
+                        terminal_reason=f"retrying error: {error}",
+                    )
                 else:
+                    self._emit_turn_event(
+                        "failed",
+                        method=method,
+                        terminal_reason=f"terminal error: {error}",
+                    )
                     raise AppServerError(f"terminal app-server error: {error}")
             elif method == "thread/status/changed":
                 if payload.get("status", {}).get("type") == "systemError":
+                    self._emit_turn_event(
+                        "failed",
+                        method=method,
+                        terminal_reason="app-server thread entered systemError",
+                    )
                     raise AppServerError("app-server thread entered systemError")
             elif method == "turn/completed":
                 completed_turn = dict(payload.get("turn") or {})
+                completed_status = str(completed_turn.get("status") or "")
+                self._emit_turn_event(
+                    (
+                        "completed"
+                        if completed_status == "completed"
+                        else "aborted"
+                        if completed_status in {"interrupted", "aborted"}
+                        else "failed"
+                    ),
+                    method=method,
+                    items=tuple(
+                        sorted(
+                            (
+                                str(item.get("id")),
+                                str(item.get("type") or "unknown"),
+                            )
+                            for item in completed_turn.get("items", [])
+                            if isinstance(item, dict)
+                            and isinstance(item.get("id"), str)
+                        )
+                    ),
+                    terminal_reason=(
+                        None
+                        if completed_status == "completed"
+                        else f"turn completed with status {completed_status}"
+                    ),
+                )
         if completed_turn.get("status") != "completed":
             raise AppServerError(
                 f"turn ended with status {completed_turn.get('status')}"
@@ -564,6 +704,11 @@ class AppServerClient:
                     and message.get("params", {}).get("turnId") == turn_id
                 ):
                     usage = AppServerUsage.from_notification(message["params"])
+                    self._emit_turn_event(
+                        "completed",
+                        method="thread/tokenUsage/updated",
+                        usage=usage,
+                    )
                 elif message.get("method") == "error":
                     payload = message.get("params")
                     if isinstance(payload, dict) and payload.get("willRetry") is not True:
@@ -593,9 +738,170 @@ class AppServerClient:
             retrying_errors=tuple(retrying_errors),
             raw_completed_turn=completed_turn,
             final_agent_item_id=final_agent_item_id,
+            request_id=request_id,
+            item_ids=tuple(sorted(item_types)),
+            item_types=tuple(sorted(item_types.items())),
+            reasoning_item_ids=tuple(
+                sorted(
+                    item_id
+                    for item_id, item_type in item_types.items()
+                    if item_type == "reasoning"
+                )
+            ),
+            latest_event_sequence=self._active_event_sequence,
         )
 
+    def _turn_request_sent(
+        self, session: AppServerSession, request_id: str | int
+    ) -> None:
+        self._active_request_id = request_id
+        self._active_thread_id = session.thread_id
+        self._emit_turn_event("requested", method="turn/start")
+
+    def _emit_turn_event(
+        self,
+        lifecycle_status: str,
+        *,
+        method: str,
+        items: tuple[tuple[str, str], ...] = (),
+        terminal_reason: str | None = None,
+        usage: AppServerUsage | None = None,
+    ) -> None:
+        callback = self._active_event_callback
+        if callback is None or self._active_thread_id is None:
+            return
+        self._active_event_sequence += 1
+        callback(
+            AppServerTurnEvent(
+                sequence=self._active_event_sequence,
+                lifecycle_status=lifecycle_status,
+                request_id=self._active_request_id,
+                thread_id=self._active_thread_id,
+                turn_id=self._active_turn_id,
+                method=method,
+                items=items,
+                terminal_reason=terminal_reason,
+                usage=usage,
+            )
+        )
+
+    async def _interrupt_and_drain_timeout(
+        self, session: AppServerSession
+    ) -> None:
+        turn_id = self._active_turn_id
+        if (
+            turn_id is not None
+            and self.process is not None
+            and self.process.returncode is None
+        ):
+            try:
+                await asyncio.wait_for(
+                    self._rpc(
+                        "turn/interrupt",
+                        {
+                            "threadId": session.thread_id,
+                            "turnId": turn_id,
+                        },
+                    ),
+                    timeout=self.config.timeout_drain_seconds,
+                )
+            except (AppServerError, TimeoutError):
+                pass
+        deadline = (
+            asyncio.get_running_loop().time()
+            + self.config.timeout_drain_seconds
+        )
+        while asyncio.get_running_loop().time() < deadline:
+            timeout = deadline - asyncio.get_running_loop().time()
+            try:
+                message = await asyncio.wait_for(
+                    self._next_notification(), timeout=timeout
+                )
+            except (AppServerError, TimeoutError):
+                break
+            self._process_timeout_notification(session, message)
+
+    def _drain_queued_timeout_events(
+        self, session: AppServerSession
+    ) -> None:
+        while True:
+            try:
+                message = self._notifications.get_nowait()
+            except asyncio.QueueEmpty:
+                return
+            self._process_timeout_notification(session, message)
+
+    def _process_timeout_notification(
+        self,
+        session: AppServerSession,
+        message: dict[str, Any],
+    ) -> None:
+        method = str(message.get("method") or "")
+        payload = message.get("params")
+        if not isinstance(payload, dict):
+            return
+        if payload.get("threadId") not in (None, session.thread_id):
+            return
+        correlated_turn = payload.get("turnId")
+        if method == "turn/completed":
+            turn = payload.get("turn")
+            if not isinstance(turn, dict):
+                return
+            correlated_turn = turn.get("id")
+        if correlated_turn not in (None, self._active_turn_id):
+            return
+        if method in {"item/started", "item/completed"}:
+            item = payload.get("item")
+            if isinstance(item, dict) and isinstance(item.get("id"), str):
+                self._emit_turn_event(
+                    "timed_out",
+                    method=method,
+                    items=(
+                        (
+                            str(item["id"]),
+                            str(item.get("type") or "unknown"),
+                        ),
+                    ),
+                    terminal_reason="event observed during timeout drain",
+                )
+        elif method == "thread/tokenUsage/updated":
+            self._emit_turn_event(
+                "timed_out",
+                method=method,
+                usage=AppServerUsage.from_notification(payload),
+                terminal_reason="usage observed during timeout drain",
+            )
+        elif method in {"turn/completed", "turn/aborted"}:
+            turn = payload.get("turn")
+            status = (
+                str(turn.get("status") or "")
+                if isinstance(turn, dict)
+                else "aborted"
+            )
+            self._emit_turn_event(
+                (
+                    "aborted"
+                    if status in {"interrupted", "aborted", ""}
+                    else "timed_out"
+                ),
+                method=method,
+                terminal_reason=(
+                    f"timeout followed by terminal status "
+                    f"{status or 'aborted'}"
+                ),
+            )
+
     async def _rpc(self, method: str, params: dict[str, Any]) -> Any:
+        _, result = await self._rpc_with_id(method, params)
+        return result
+
+    async def _rpc_with_id(
+        self,
+        method: str,
+        params: dict[str, Any],
+        *,
+        on_sent: Callable[[str | int], None] | None = None,
+    ) -> tuple[str | int, Any]:
         if self._fatal is not None:
             raise AppServerError(f"app-server protocol failed: {self._fatal}")
         loop = asyncio.get_running_loop()
@@ -604,13 +910,19 @@ class AppServerClient:
         future: asyncio.Future[Any] = loop.create_future()
         self._pending[request_id] = future
         await self._send({"id": request_id, "method": method, "params": params})
+        if on_sent is not None:
+            on_sent(request_id)
         try:
-            return await asyncio.wait_for(
+            result = await asyncio.wait_for(
                 future, timeout=self.config.request_timeout_seconds
             )
+            return request_id, result
         except TimeoutError as error:
             self._pending.pop(request_id, None)
             raise AppServerError(f"RPC timed out: {method}") from error
+        except asyncio.CancelledError:
+            self._pending.pop(request_id, None)
+            raise
 
     async def _notify(self, method: str, params: dict[str, Any]) -> None:
         await self._send({"method": method, "params": params})

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import stat
 import tempfile
@@ -390,12 +391,17 @@ class ResearchStoreTests(unittest.TestCase):
                 self.assertEqual(row["cache_write_input_tokens"], 4)
                 self.assertEqual(row["final_agent_item_id"], "item-1")
                 self.assertEqual(row["status"], "completed")
-                with self.assertRaisesRegex(RuntimeError, "duplicated"):
-                    store.complete_turn(
-                        "turn-record-1",
-                        turn_id="turn-1",
-                        status="completed",
-                    )
+                store.complete_turn(
+                    "turn-record-1",
+                    turn_id="turn-1",
+                    status="completed",
+                )
+                self.assertEqual(
+                    store.connection.execute(
+                        "SELECT count(*) FROM app_server_turns"
+                    ).fetchone()[0],
+                    1,
+                )
                 self.assertEqual(
                     store.connection.execute("PRAGMA integrity_check").fetchone()[0],
                     "ok",
@@ -436,7 +442,14 @@ class StubDecisionClient:
             raw_thread={},
         )
 
-    async def turn(self, session, prompt, *, output_schema):
+    async def turn(
+        self,
+        session,
+        prompt,
+        *,
+        output_schema,
+        on_event=None,
+    ):
         decision = self.decisions.pop(0)
         return AppServerTurnResult(
             thread_id=session.thread_id,
@@ -562,7 +575,13 @@ class ActiveDirectorTests(unittest.IsolatedAsyncioTestCase):
                 first_event_at="2026-07-24T00:00:00Z",
                 snapshot_id="snapshot-1",
             )
-            client = StubDecisionClient([{"invalid": True}, valid_decision()])
+            corrected = valid_decision()
+            corrected["hypothesis_updates"][0]["evidence_for"] = [
+                "snapshot-1"
+            ]
+            for action in corrected["actions"]:
+                action["evidence_ids"] = ["snapshot-1"]
+            client = StubDecisionClient([{"invalid": True}, corrected])
             director = ActiveDirector(
                 client=client,  # type: ignore[arg-type]
                 store=store,
@@ -581,12 +600,27 @@ class ActiveDirectorTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(evidence.validation.accepted)
             self.assertEqual(len(evidence.turn_record_ids), 2)
             rows = store.connection.execute(
-                "SELECT status FROM app_server_turns ORDER BY started_at, rowid"
+                """
+                SELECT status, evidence_registry_artifact_ref,
+                       evidence_registry_sha256
+                FROM app_server_turns ORDER BY started_at, rowid
+                """
             ).fetchall()
             self.assertEqual(
                 [row["status"] for row in rows],
                 ["completed_invalid", "completed_valid"],
             )
+            for row in rows:
+                registry_path = root / row[
+                    "evidence_registry_artifact_ref"
+                ]
+                self.assertTrue(registry_path.is_file())
+                self.assertEqual(
+                    hashlib.sha256(
+                        registry_path.read_bytes().rstrip(b"\n")
+                    ).hexdigest(),
+                    row["evidence_registry_sha256"],
+                )
             statuses = store.commit_decision_batch(
                 decision_batch_id="batch-1",
                 campaign_id="campaign-1",

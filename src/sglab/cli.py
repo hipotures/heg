@@ -482,6 +482,7 @@ def cmd_ai_experiment(args: Namespace) -> int:
             workspace,
             source_workspace=Path(args.source_workspace),
             codex=args.codex,
+            turn_timeout_seconds=args.turn_timeout_seconds,
         )
     else:
         report = run_authenticated_experiment(
@@ -706,6 +707,9 @@ def build_parser() -> ArgumentParser:
     context_screen_run.add_argument("--workspace", required=True)
     context_screen_run.add_argument("--source-workspace", required=True)
     context_screen_run.add_argument("--codex", default="codex")
+    context_screen_run.add_argument(
+        "--turn-timeout-seconds", type=float, default=900.0
+    )
     context_screen_run.set_defaults(func=cmd_ai_experiment)
     experiment_run = ai_experiment_commands.add_parser("run")
     experiment_run.add_argument("--workspace", required=True)

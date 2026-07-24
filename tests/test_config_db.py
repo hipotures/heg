@@ -7,6 +7,7 @@ from sglab.config import merge_config
 from sglab.db import (
     ACTIVE_DIRECTOR_SCHEMA_SQL,
     APP_SERVER_COMPLIANCE_SCHEMA_SQL,
+    APP_SERVER_TURN_LIFECYCLE_SCHEMA_SQL,
     BASE_SCHEMA_SQL,
     SCHEMA_VERSION,
     connect,
@@ -43,6 +44,15 @@ class ConfigAndDatabaseTests(unittest.TestCase):
         self.assertEqual(
             normalize(compliance),
             normalize(APP_SERVER_COMPLIANCE_SCHEMA_SQL),
+        )
+        lifecycle = (
+            Path(__file__).parents[1]
+            / "sql"
+            / "009_incomplete_turn_lifecycle.sql"
+        ).read_text(encoding="utf-8")
+        self.assertEqual(
+            normalize(lifecycle),
+            normalize(APP_SERVER_TURN_LIFECYCLE_SCHEMA_SQL),
         )
 
     def test_recursive_config_merge(self) -> None:
@@ -125,6 +135,61 @@ class ConfigAndDatabaseTests(unittest.TestCase):
             )
             migrated.close()
 
+    def test_v8_turn_lifecycle_migration_preserves_nullable_failure(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "legacy-v8.sqlite3"
+            database = sqlite3.connect(path)
+            database.executescript(BASE_SCHEMA_SQL)
+            database.executescript(ACTIVE_DIRECTOR_SCHEMA_SQL)
+            database.executescript(APP_SERVER_COMPLIANCE_SCHEMA_SQL)
+            database.executescript(
+                """
+                INSERT INTO research_campaigns
+                (campaign_id, created_at, updated_at, target,
+                 target_definition_sha256, state, state_version, stop_mode)
+                VALUES ('campaign', 'now', 'now', 'erdos_gyarfas',
+                        'hash', 'running', 0, 'until_success');
+                INSERT INTO director_snapshots
+                VALUES ('snapshot', 'campaign', 0, '{}', 'snapshot.json',
+                        'hash', 1, 'now');
+                INSERT INTO director_triggers
+                VALUES ('trigger', 'campaign', 0, '[]', 'now', 'now',
+                        'snapshot', 'pending');
+                INSERT INTO app_server_sessions
+                (session_record_id, campaign_id, thread_id, codex_version,
+                 codex_executable_sha256, protocol_schema_sha256, state,
+                 started_at)
+                VALUES ('session', 'campaign', 'thread', '0.145.0',
+                        'hash', 'hash', 'closed', 'now');
+                INSERT INTO app_server_turns
+                (turn_record_id, session_record_id, campaign_id, thread_id,
+                 turn_id, snapshot_id, trigger_id, status, started_at,
+                 completed_at)
+                VALUES ('turn', 'session', 'campaign', 'thread',
+                        'turn-id', 'snapshot', 'trigger', 'failed',
+                        'started', 'completed');
+                """
+            )
+            database.close()
+            migrated = connect(path)
+            try:
+                row = migrated.execute(
+                    "SELECT * FROM app_server_turns WHERE turn_record_id='turn'"
+                ).fetchone()
+                self.assertEqual(row["lifecycle_status"], "failed")
+                self.assertEqual(row["turn_started_at"], "started")
+                self.assertIsNone(row["total_tokens"])
+                self.assertEqual(
+                    migrated.execute(
+                        "PRAGMA integrity_check"
+                    ).fetchone()[0],
+                    "ok",
+                )
+            finally:
+                migrated.close()
+
     def test_v1_migration_runs_only_on_online_backup_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -173,6 +238,19 @@ class ConfigAndDatabaseTests(unittest.TestCase):
             }
             self.assertIn("cache_write_input_tokens", turn_columns)
             self.assertIn("final_agent_item_id", turn_columns)
+            for column in (
+                "lifecycle_status",
+                "request_id",
+                "item_ids_json",
+                "item_types_json",
+                "reasoning_item_ids_json",
+                "latest_event_sequence",
+                "turn_started_at",
+                "terminal_reason",
+                "evidence_registry_artifact_ref",
+                "evidence_registry_sha256",
+            ):
+                self.assertIn(column, turn_columns)
             migrated.close()
 
             untouched = sqlite3.connect(original)

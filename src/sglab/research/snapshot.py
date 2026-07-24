@@ -13,6 +13,7 @@ from ..state import utc_now
 from ..targets import target_summary
 from .lanes import LaneManager
 from .catalog import action_catalog
+from .context import evidence_registry_ids, prepare_director_state_v2
 from .protocol import MAX_SNAPSHOT_BYTES, canonical_json
 from .store import ResearchStore, new_id
 from .validation import DecisionContext
@@ -49,7 +50,7 @@ class SnapshotBuilder:
         lanes = self._lanes(evidence)
         recent_actions = self._recent_actions(evidence)
         hypotheses = self._hypotheses(evidence)
-        global_best, candidate_ids = self._global_best(evidence)
+        global_best, _ = self._global_best(evidence)
         verification = self._verification(evidence)
         created_at = utc_now()
         created = _parse_time(str(campaign["created_at"]))
@@ -114,9 +115,11 @@ class SnapshotBuilder:
             for lane in lanes
             if lane["state"] in {"starting", "running", "paused", "stopping"}
         ]
+        prepared = prepare_director_state_v2(snapshot)
+        registry = prepared.evidence_registry
         context = DecisionContext(
-            snapshot_id=snapshot_id,
-            evidence_ids=frozenset(snapshot["available_evidence_ids"]),
+            snapshot_id=str(prepared.state["source_snapshot_id"]),
+            evidence_ids=evidence_registry_ids(registry),
             lane_versions={
                 str(lane["lane_id"]): int(lane["lane_version"])
                 for lane in active
@@ -125,14 +128,14 @@ class SnapshotBuilder:
                 str(lane["lane_id"]): str(lane["algorithm"])
                 for lane in active
             },
-            checkpoint_ids=frozenset(
-                str(lane["checkpoint_id"])
-                for lane in active
-                if lane["checkpoint_id"] is not None
+            checkpoint_ids=evidence_registry_ids(
+                registry, kinds=frozenset({"checkpoint"})
             ),
-            candidate_ids=frozenset(candidate_ids),
-            hypothesis_ids=frozenset(
-                str(item["hypothesis_id"]) for item in hypotheses
+            candidate_ids=evidence_registry_ids(
+                registry, kinds=frozenset({"candidate"})
+            ),
+            hypothesis_ids=evidence_registry_ids(
+                registry, kinds=frozenset({"hypothesis"})
             ),
             max_active_lanes=self.manager.max_active_lanes,
         )

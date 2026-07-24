@@ -90,6 +90,7 @@ workspace/research-campaigns/<campaign-id>/
   candidates/
   diagnostics/
   director/requests/
+  director/evidence-registries/
   director/responses/
   director/wire/
   lane-checkpoints/
@@ -98,12 +99,16 @@ workspace/research-campaigns/<campaign-id>/
   exports/
 ```
 
-The shared `results.sqlite3` schema v8 records campaigns, persistent sessions
+The shared `results.sqlite3` schema v9 records campaigns, persistent sessions
 and turns, snapshots and triggers, lanes/revisions/windows, action
 batches/outcomes, hypotheses, retained candidates, verification jobs, and
 terminal events. App-server turns retain cache-read, cache-write, output,
 reasoning, server-authoritative total-token counts, raw usage, and the final
-agent item ID. Only the campaign supervisor writes these records.
+agent item ID. Incomplete turns additionally retain lifecycle status, request,
+thread, turn and item correlation, reasoning-item IDs, latest event sequence,
+terminal reason, and the canonical evidence-registry reference/hash. Final
+answer and usage remain nullable. Only the campaign supervisor writes these
+records.
 
 ## Candidate record
 
