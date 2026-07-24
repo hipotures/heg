@@ -19,6 +19,21 @@ boundary. All five existing completion gates passed before implementation.
 This is an implementation status only; no M6 Active Director completion claim
 has been made.
 
+### M6.1 app-server integration — in progress
+
+The installed Codex 0.145.0 schemas have been generated and hashed, including
+documented compatibility differences from the package examples. A direct
+asynchronous stdio JSON-RPC client now implements private-home isolation,
+dynamic skill disabling, persisted start/resume, structured turns, event
+correlation, usage accounting, bounded diagnostics, unsupported-request
+rejection, and process-group cleanup. Five focused tests and a real isolated
+app-server initialization pass.
+
+The authenticated live-turn, saved-rollout isolation, and process-restart
+resume gates remain pending because the required explicit one-time auth import
+has not been authorized. See `docs/reports/M6_APP_SERVER_PREFLIGHT.md`; no
+credentials have been copied.
+
 ## M0 — complete
 
 - installable standard `src/` package and CLI entry point;

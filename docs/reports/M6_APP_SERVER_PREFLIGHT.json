@@ -1,0 +1,51 @@
+{
+  "report_version": "1.0",
+  "created_at": "2026-07-24T08:13:56Z",
+  "status": "protocol_client_pass_live_auth_pending",
+  "codex": {
+    "version": "codex-cli 0.145.0",
+    "launcher": "/home/xai/.nvm/versions/node/v22.15.0/bin/codex",
+    "resolved_executable": "/home/xai/.nvm/versions/node/v22.15.0/lib/node_modules/@openai/codex/bin/codex.js",
+    "executable_sha256": "134063e133f0b4244fa3b251acf973d4fe4b4aeeacbdc135211bf480f59f1477",
+    "features_stdout_sha256": "d3d4366c4fb3177f4920dcf4eaca28100571dab6c30463ce3ef9e641266adb83",
+    "features_stdout_bytes": 5915
+  },
+  "schema_hashes": {
+    "codex_app_server_protocol.schemas.json": "8a9694a5508a95ba4a48b1ba43551f88b704dbe6cd0c4f9f04f330d3166d2930",
+    "codex_app_server_protocol.v2.schemas.json": "07d21d7335b88e46a6dd11bbf099dbf868dd24156d6ce4aa9441d41e22ccd296",
+    "v1/InitializeParams.json": "4f576f99e285beb28f71f48a72b887c1f517dada86fee348fe2af0a35511de23",
+    "v2/SkillsListParams.json": "a942aa92e6da4cf8a76d6b99cbdaf6672864e6ff955f44a6d469f0363afd3bf2",
+    "v2/SkillsConfigWriteParams.json": "24c9645b4f09b3d4d6ed8a18dda989717959e200eb3a70cd455a97e0c3754ca1",
+    "v2/ThreadStartParams.json": "01aece2283d733451fec34d3bc0394f9d47e6dc22213ccd50e9f87321926b52d",
+    "v2/ThreadResumeParams.json": "ed7af2227449f7d9f520c3541d93ceac31cdff251f41b57faede35e094ef3f02",
+    "v2/TurnStartParams.json": "48a0ee95b669b47f5557c68b99a4d459b50577ccce8ebc5976532f50e3c6d059",
+    "v2/ItemCompletedNotification.json": "047016f3132b046cedc98b62672656f834e7561c872c06c155643a018f51eef8",
+    "v2/TurnCompletedNotification.json": "96a42581ca7053aba0d86acf7259bc1993628ff782c243f649215652c1562fbd",
+    "v2/ThreadTokenUsageUpdatedNotification.json": "a30830510723d95793880f2a629472f0142c3df936799e24c8c92afde8e24402",
+    "v2/ErrorNotification.json": "1ec871b02771300a26a34e41a7cfaf7484330a8c37c197d1ac133e753b083a09",
+    "v2/ThreadStatusChangedNotification.json": "146af6d3702c4f3c844bd10b6b6b3e2b872e958a8d7d822157c19aaa6dc085f6"
+  },
+  "canonical_aggregate_hashes": {
+    "codex_app_server_protocol.schemas.json": "5469280cfbdaa12f6d28e2206f942da808f8b699ce6c43b13f2439d843432f38",
+    "codex_app_server_protocol.v2.schemas.json": "27f8d983f19d8e1a5548d52176de0a460fb05aaf2a72110f913c6f4af2bd4f27"
+  },
+  "compatibility_adjustments": [
+    "thread_start_omits_environment_dynamic_tool_and_runtime_root_fields",
+    "thread_resume_omits_environment_and_runtime_root_fields",
+    "turn_start_omits_environment_and_runtime_root_fields",
+    "isolation_controls_moved_to_process_flags_and_config",
+    "thread_response_exposes_sessionId_and_path",
+    "canonical_final_phase_is_final_answer",
+    "usage_source_is_tokenUsage.last"
+  ],
+  "tests": {
+    "focused_tests": 5,
+    "focused_status": "pass",
+    "real_initialize": "pass",
+    "real_enabled_skills_discovered_and_disabled": 6,
+    "authenticated_greeting": "pending_explicit_auth_import",
+    "authenticated_structured_turn": "pending_explicit_auth_import",
+    "saved_rollout_isolation": "pending_explicit_auth_import",
+    "process_restart_thread_resume": "pending_explicit_auth_import"
+  }
+}

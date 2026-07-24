@@ -23,6 +23,9 @@ package-dir = {"" = "src"}
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"sglab.research" = ["assets/*.txt", "assets/*.json"]
+
 [tool.setuptools.data-files]
 "share/structural-graph-lab/web" = ["web/index.html"]
 "share/structural-graph-lab/configs" = ["configs/default.toml"]
