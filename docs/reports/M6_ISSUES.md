@@ -36,3 +36,11 @@ committed snapshot could rotate out before a returned fork action was
 delivered. The orchestrator now pins all snapshot-admissible checkpoints
 before inference. The pin set remains globally bounded, and the delayed fork
 test passes.
+
+## I-006 — resolved — telemetry ahead of recovery checkpoint
+
+The initial recovery test observed a telemetry high-water one batch ahead of
+the latest persisted checkpoint because worker events were ordered telemetry
+then checkpoint. Worker emission is now checkpoint-first at each safe
+boundary. Recovery proves identical checkpoint ID/SHA/high-water before new
+progress.

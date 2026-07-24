@@ -431,3 +431,62 @@ class ActiveDirectorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(evidence.decision, decision)
         decision["actions"][0]["shell"] = "must not affect replay copy"
         self.assertNotIn("shell", evidence.decision["actions"][0])
+
+    async def test_durable_replay_turn_is_commit_compatible(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = ResearchStore(Path(directory) / "replay.sqlite3")
+            try:
+                store.create_campaign(
+                    campaign_id="campaign-1",
+                    target="erdos_gyarfas",
+                    target_definition_sha256="a" * 64,
+                    stop_mode="until_success",
+                    deadline_at=None,
+                )
+                store.record_snapshot(
+                    snapshot_id="snapshot-1",
+                    campaign_id="campaign-1",
+                    campaign_state_version=0,
+                    high_water={},
+                    artifact_ref="snapshots/snapshot-1.json",
+                    artifact_sha256="b" * 64,
+                    payload_bytes=100,
+                )
+                store.record_trigger(
+                    trigger_id="trigger-replay",
+                    campaign_id="campaign-1",
+                    campaign_state_version=0,
+                    reasons=["bootstrap"],
+                    first_event_at="2026-07-24T00:00:00Z",
+                    snapshot_id="snapshot-1",
+                )
+                provider = ReplayDecisionProvider(
+                    {"snapshot-1": valid_decision()},
+                    store=store,
+                    campaign_id="campaign-1",
+                )
+                evidence = await provider.decide(
+                    snapshot={"snapshot_id": "snapshot-1"},
+                    trigger_id="trigger-replay",
+                    context=context(),
+                )
+                statuses = store.commit_decision_batch(
+                    decision_batch_id="batch-replay",
+                    campaign_id="campaign-1",
+                    snapshot_id="snapshot-1",
+                    trigger_id="trigger-replay",
+                    turn_record_id=evidence.turn_record_ids[-1],
+                    decision=evidence.decision,
+                )
+                self.assertEqual(statuses["action-start"], "accepted")
+                self.assertEqual(
+                    store.connection.execute(
+                        """
+                        SELECT status FROM app_server_turns
+                        WHERE turn_record_id='replay:trigger-replay'
+                        """
+                    ).fetchone()[0],
+                    "completed_valid",
+                )
+            finally:
+                store.close()

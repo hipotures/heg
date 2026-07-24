@@ -1506,6 +1506,68 @@ class ResearchStore:
             )
             return cursor.rowcount == 1
 
+    def prepare_lane_recovery(
+        self, lane_id: str, expected_version: int
+    ) -> bool:
+        with self.transaction() as database:
+            cursor = database.execute(
+                """
+                UPDATE research_lanes
+                SET process_generation=process_generation+1, updated_at=?
+                WHERE lane_id=? AND lane_version=?
+                  AND state IN ('starting', 'running', 'paused')
+                """,
+                (utc_now(), lane_id, expected_version),
+            )
+            return cursor.rowcount == 1
+
+    def recover_interrupted_records(self, campaign_id: str) -> dict[str, int]:
+        with self.transaction() as database:
+            turns = database.execute(
+                """
+                UPDATE app_server_turns
+                SET status='failed_interrupted',
+                    error_kind='application_restart',
+                    error_detail='turn interrupted before durable completion',
+                    completed_at=?
+                WHERE campaign_id=? AND status='in_progress'
+                """,
+                (utc_now(), campaign_id),
+            ).rowcount
+            jobs = database.execute(
+                """
+                UPDATE campaign_verification_jobs
+                SET state='queued', started_at=NULL
+                WHERE campaign_id=? AND state='running'
+                """,
+                (campaign_id,),
+            ).rowcount
+            sessions = database.execute(
+                """
+                UPDATE app_server_sessions
+                SET state='interrupted'
+                WHERE campaign_id=? AND state='active'
+                """,
+                (campaign_id,),
+            ).rowcount
+            return {
+                "interrupted_turns": turns,
+                "requeued_verifications": jobs,
+                "interrupted_sessions": sessions,
+            }
+
+    def latest_app_server_thread(self, campaign_id: str) -> str | None:
+        row = self.connection.execute(
+            """
+            SELECT thread_id FROM app_server_sessions
+            WHERE campaign_id=?
+            ORDER BY COALESCE(last_resumed_at, started_at) DESC, rowid DESC
+            LIMIT 1
+            """,
+            (campaign_id,),
+        ).fetchone()
+        return str(row[0]) if row is not None else None
+
     def complete_verification_job(
         self,
         *,

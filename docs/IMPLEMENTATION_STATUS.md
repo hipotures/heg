@@ -128,6 +128,31 @@ A positive certified terminal path will be demonstrated later with the
 required deliberately false/hidden-witness control target, never by claiming a
 result for the open research target.
 
+### M6.6 recovery, replay, and export — offline milestone complete
+
+Campaign recovery now checks SQLite integrity, marks interrupted app-server
+turns/sessions, requeues interrupted M4 jobs, verifies checkpoint path and
+content hashes, restores exact lane graph/RNG/tabu/counters/high-water, bumps
+process generation, and redispatches only accepted actions without outcomes.
+It returns the persisted Director thread ID for production `thread/resume`.
+
+The worker durability boundary was tightened to emit a post-batch checkpoint
+before its matching telemetry window, preventing SQLite high-water from
+advancing beyond durable RNG state. The restart gate proves that the first
+recovered checkpoint has the same ID, SHA, and high-water and that subsequent
+search resumes from there.
+
+Decision replay can now create durable commit-compatible turns. Scientific
+replay deterministically reproduces bounded micro-batches from a checkpoint.
+Artifact audit verifies snapshot and response hashes. Reproducibility export
+uses SQLite Online Backup API, checks the snapshot database, applies file/byte
+limits, uses deterministic ZIP metadata, and excludes authentication/private
+homes. The full suite passes 69 tests. See
+`docs/reports/M6_RECOVERY_REPLAY_EXPORT.md`.
+
+The authenticated process-kill proof must still resume the actual persisted
+app-server thread and is intentionally pending the explicit auth gate.
+
 ## M0 — complete
 
 - installable standard `src/` package and CLI entry point;

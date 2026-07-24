@@ -1,0 +1,44 @@
+{
+  "schema_version": "1.0",
+  "milestone": "M6.6",
+  "status": "offline_complete",
+  "date": "2026-07-24",
+  "recovery": {
+    "sqlite_integrity_check": true,
+    "checkpoint_hash_check": true,
+    "exact_rng_restore": true,
+    "exact_high_water_restore": true,
+    "process_generation_increment": true,
+    "accepted_action_reconciliation": true,
+    "persisted_app_server_thread_lookup": true
+  },
+  "replay": {
+    "durable_decision_turn": true,
+    "semantic_revalidation": true,
+    "deterministic_micro_batch": true,
+    "artifact_hash_audit": true
+  },
+  "export": {
+    "sqlite_online_backup": true,
+    "integrity_check": true,
+    "default_maximum_files": 10000,
+    "default_maximum_input_bytes": 536870912,
+    "auth_included": false,
+    "deterministic_zip_metadata": true
+  },
+  "focused_gate": {
+    "tests": 4,
+    "status": "passed",
+    "wall_seconds": 0.41
+  },
+  "full_suite": {
+    "command": "make test",
+    "tests": 69,
+    "status": "passed",
+    "seconds": 12.665
+  },
+  "static_check": "passed",
+  "authenticated_thread_resume_pending": true,
+  "two_hour_soak_pending": true,
+  "m6_complete": false
+}

@@ -130,9 +130,24 @@ class _LaneKernel:
             )
             if fork_seed is None:
                 self.rng.setstate(ast.literal_eval(str(checkpoint["rng_state"])))
+                self.algorithm_evaluated = int(
+                    checkpoint.get("algorithm_evaluated", 0)
+                )
+                self.stagnation = int(checkpoint.get("stagnation", 0))
+                self.high_water = int(checkpoint.get("high_water", 0))
             else:
                 self.rng = Random(fork_seed)
-            self.tabu.append(self.graph.stable_hash())
+            restored_tabu = (
+                checkpoint.get("tabu", [])
+                if fork_seed is None
+                else [self.graph.stable_hash()]
+            )
+            self.tabu = deque(
+                (str(value) for value in restored_tabu),
+                maxlen=int(self.parameters.get("tabu_tenure", 128)),
+            )
+            if not self.tabu:
+                self.tabu.append(self.graph.stable_hash())
 
     def _new_seed(self, seed: int) -> None:
         self.rng = Random(seed)
@@ -366,22 +381,22 @@ def _lane_worker(
             _emit(
                 events,
                 {
-                    "kind": "telemetry",
-                    "lane_id": spec.lane_id,
-                    "lane_version": lane_version,
-                    "metrics": metrics,
-                    "at": utc_now(),
-                },
-            )
-            _emit(
-                events,
-                {
                     "kind": "checkpoint",
                     "lane_id": spec.lane_id,
                     "checkpoint": current_checkpoint,
                     "at": utc_now(),
                 },
                 important=True,
+            )
+            _emit(
+                events,
+                {
+                    "kind": "telemetry",
+                    "lane_id": spec.lane_id,
+                    "lane_version": lane_version,
+                    "metrics": metrics,
+                    "at": utc_now(),
+                },
             )
             if metrics["improvements"]:
                 _emit(
@@ -766,7 +781,9 @@ class LaneManager:
         runtime = self._runtime(str(event["lane_id"]))
         kind = event["kind"]
         if kind == "ready":
-            runtime.state = "running"
+            runtime.state = (
+                "paused" if runtime.pause_event.is_set() else "running"
+            )
             runtime.lane_version = int(event["lane_version"])
             runtime.parameters = dict(event["parameters"])
             runtime.resource_share = float(event["resource_share"])
@@ -815,6 +832,9 @@ class LaneManager:
         checkpoint_id = str(checkpoint["checkpoint_id"])
         runtime.latest_checkpoint_id = checkpoint_id
         runtime.latest_checkpoint = checkpoint
+        runtime.high_water = max(
+            runtime.high_water, int(checkpoint.get("high_water", 0))
+        )
         self.checkpoints[checkpoint_id] = checkpoint
         order = self._checkpoint_order.setdefault(
             runtime.spec.lane_id, deque()
@@ -933,3 +953,32 @@ def _score_scalar(score: ScoreResult) -> float:
         + novelty / 4_000_000_000_000
         + simplicity / 80_000_000_000_000_000
     )
+
+
+class _NeverStop:
+    def is_set(self) -> bool:
+        return False
+
+
+def replay_micro_batches(
+    spec: LaneSpec,
+    checkpoint: dict[str, Any],
+    *,
+    batches: int = 1,
+) -> dict[str, Any]:
+    """Deterministically replay bounded lane batches without persistence."""
+
+    if not 1 <= batches <= 100:
+        raise ValueError("replay batches must be between 1 and 100")
+    spec.validate()
+    if checkpoint.get("lane_id") != spec.lane_id:
+        raise ValueError("replay checkpoint belongs to another lane")
+    kernel = _LaneKernel(spec, checkpoint, fork_seed=None)
+    metrics = []
+    stop = _NeverStop()
+    for _ in range(batches):
+        metrics.append(kernel.run_batch(stop))
+    return {
+        "metrics": metrics,
+        "checkpoint": kernel.checkpoint(spec.lane_version),
+    }

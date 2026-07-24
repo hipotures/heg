@@ -85,3 +85,17 @@ transaction, and only after re-reading a persisted manifest containing both
 complete expected independent implementations. Rationale: no Director action
 type includes campaign success, and heuristic scores, prose, single-verifier
 results, timeouts, malformed output, and disagreements remain non-terminal.
+
+## D-012 — 2026-07-24 — checkpoint precedes matching telemetry
+
+Decision: after each micro-batch, enqueue and persist its exact checkpoint
+before the aggregate telemetry window for that same high-water. Rationale: a
+crash between the old telemetry-first events could leave SQLite one batch
+ahead of durable RNG state and force ambiguous replay.
+
+## D-013 — 2026-07-24 — export database only through Online Backup
+
+Decision: create campaign export databases with SQLite Online Backup API into
+a temporary snapshot, run `PRAGMA integrity_check`, and only then add them to
+the bounded deterministic archive. Rationale: copying the main file can omit
+committed WAL state and produce a scientifically incomplete bundle.
