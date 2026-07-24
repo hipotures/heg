@@ -56,7 +56,7 @@ The transport schema now follows those rules. The local semantic validator
 remains authoritative and removes only reviewed nullable transport
 placeholders before returning a normalized decision.
 
-## Isolation finding
+## Isolation findings
 
 Both process startups ended with zero active skills, empty skill-list error
 arrays, absolute discovered paths, strict configuration, empty dynamic tools,
@@ -71,11 +71,32 @@ describing multi-agent operation and a `world_state` whose `host_skills` and
 `AGENTS.md` occurred inside that generic platform wrapper, not as loaded
 project-file content.
 
-Accordingly:
+The evidence therefore supports separate acceptance properties:
 
 - `protocol_configuration_compliance`: **proven**
-- `authenticated_runtime_isolation`: **not_proven**
+- `local_runtime_isolation`: **proven**
+- `skill_isolation`: **proven**
+- `tool_isolation`: **proven**
+- `workspace_isolation`: **proven**
 - `persisted_thread_resume`: **proven**
+- `structured_decision_execution`: **proven**
+- `platform_instruction_absence`: **unsupported**
+
+The earlier aggregate mixed local-input isolation with absence of
+platform-owned instructions. It is retained only for report-reader backward
+compatibility:
+
+- `authenticated_runtime_isolation` (deprecated):
+  **proven_for_local_inputs**
+
+`local_runtime_isolation` means that the inspected rollout did not load
+instructions or context from the normal user Codex home, user configuration,
+the repository, project `AGENTS.md`, active skills, dynamic tools, selected
+capability roots, or runtime workspace roots. It does not mean the request was
+free of Codex platform instructions.
+
+`platform_instruction_absence` is `unsupported` because platform-owned Codex
+developer instructions were directly observed in the complete rollout.
 
 This smoke does not satisfy the live-campaign completion condition for M6.
 

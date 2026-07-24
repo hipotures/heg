@@ -41,12 +41,16 @@ validator, all token fields were captured, the opaque SQLite-backed rollout
 inspection succeeded, and the resumed turn used new turn/item identifiers.
 
 The smoke also exposed and fixed a concrete Structured Outputs compatibility
-defect in the Director schema. Protocol/configuration compliance and persisted
-thread resume are demonstrated. Authenticated runtime isolation is **not**
-proven: the complete rollout contained platform-owned multi-agent developer
-instructions and a `world_state` with skill-instruction inclusion flags,
-despite zero active discovered skills, no observed tool call, no normal user
-Codex-home reference, and no loaded repository instruction contents. See
+defect in the Director schema. Protocol/configuration compliance, local runtime
+isolation, skill isolation, tool isolation, workspace isolation, structured
+decision execution, and persisted thread resume are demonstrated. Absence of
+platform-owned instructions is **unsupported**: the complete rollout contained
+Codex multi-agent developer instructions and a `world_state` with
+skill-instruction inclusion flags. Those instructions were not loaded from the
+normal user Codex home, the repository, project `AGENTS.md`, active skills,
+dynamic tools, or runtime workspace roots. The deprecated aggregate
+`authenticated_runtime_isolation` is therefore recorded only as
+`proven_for_local_inputs`. See
 `docs/reports/M6_APP_SERVER_RUNTIME_SMOKE.md`. This is not a live research
 campaign or an M6 completion claim.
 

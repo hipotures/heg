@@ -87,17 +87,26 @@ empty, and `ok` was `true`. The audit initialized and shut down a private
 app-server, generated schemas, and exercised strict configuration; it did not
 start a model turn, contact the model, copy auth, or import `auth.json`.
 
-This result proves deterministic protocol/configuration compliance only. It
-does not claim that runtime isolation has been demonstrated by an
-authenticated rollout.
+This result proves deterministic protocol/configuration compliance only. By
+itself it does not claim authenticated local isolation or absence of
+platform-owned instructions; those properties require inspection of a
+completed authenticated rollout.
 
 ## Authenticated follow-up
 
 The operator subsequently authorized importing exactly one selected
 `auth.json` into the private `CODEX_HOME`. The runtime smoke completed two
 structured turns on one persisted thread with a natural app-server restart
-between them. Opaque rollout inspection and resume passed, but authenticated
-runtime isolation remains unproven because the complete rollout contained
-unexpected platform-owned multi-agent developer instructions and skill
-inclusion flags in `world_state`. See
-`M6_APP_SERVER_RUNTIME_SMOKE.md`. No graph-search campaign was started.
+between them. Opaque rollout inspection proved isolation from local/user
+configuration, repository instructions, project `AGENTS.md`, active skills,
+tools, capability roots, and runtime workspace roots. Skill isolation, tool
+isolation, workspace isolation, structured decision execution, and resume all
+passed.
+
+The complete rollout also contained platform-owned Codex multi-agent developer
+instructions and skill-inclusion flags in `world_state`. Their presence is
+reported without treating them as local leakage:
+`platform_instruction_absence` is `unsupported`. For compatibility, the old
+aggregate `authenticated_runtime_isolation` is retained only as
+`proven_for_local_inputs`. See `M6_APP_SERVER_RUNTIME_SMOKE.md`. No graph-search
+campaign was started.
