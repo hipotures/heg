@@ -2,6 +2,23 @@
 
 Last implementation audit: **2026-07-24**.
 
+## M6 Active Director — Phase 0 complete
+
+The separately specified Active AI Research Director initiative has completed
+its baseline freeze at commit
+`bdacdb34b12086fe3f906bf3794397d81f4427ab`, tagged
+`m6-baseline-bdacdb3`. The authoritative audit and actual-module
+implementation plan are in `docs/reports/M6_BASELINE_AUDIT.md` and
+`docs/reports/M6_IMPLEMENTATION_PLAN.md`.
+
+The planning package assumed a different `gilab` M5 AI architecture and schema
+v6. The real repository is `sglab`, has schema v1, and has no prior AI
+provider. The Active Director work will therefore be an additive migration
+around the existing stateful search workers and unchanged M4 certification
+boundary. All five existing completion gates passed before implementation.
+This is an implementation status only; no M6 Active Director completion claim
+has been made.
+
 ## M0 — complete
 
 - installable standard `src/` package and CLI entry point;

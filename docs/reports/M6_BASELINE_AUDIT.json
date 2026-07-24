@@ -1,0 +1,114 @@
+{
+  "audit_version": "1.0",
+  "created_at": "2026-07-24T08:02:08Z",
+  "repository": {
+    "package": "structural-graph-lab",
+    "cli": "sglab",
+    "branch": "main",
+    "commit": "bdacdb34b12086fe3f906bf3794397d81f4427ab",
+    "commit_subject": "Complete acceptance audit and pilot evidence",
+    "baseline_tag": "m6-baseline-bdacdb3",
+    "tracked_changes_before_audit": [],
+    "untracked_inputs_before_audit": [
+      "planning/"
+    ],
+    "tags_before_audit": []
+  },
+  "checks": [
+    {
+      "command": "make doctor",
+      "status": "pass"
+    },
+    {
+      "command": "make test",
+      "status": "pass",
+      "tests": 40,
+      "elapsed_seconds": 10.819,
+      "environment_note": "local socket permission required outside restricted sandbox"
+    },
+    {
+      "command": "make check",
+      "status": "pass"
+    },
+    {
+      "command": "make benchmark-smoke",
+      "status": "pass",
+      "benchmark_id": "micro-20260724T075948Z"
+    },
+    {
+      "command": "make dashboard-smoke",
+      "status": "pass",
+      "environment_note": "local socket permission required outside restricted sandbox"
+    }
+  ],
+  "sqlite": {
+    "declared_schema_version": 1,
+    "observed_user_versions": {
+      "workspace/results.sqlite3": 1,
+      "workspace/runs/20260724T033028Z-eg-n32-sa-s1/results.sqlite3": 1,
+      "workspace/runs/20260724T032408Z-eg-n32-sa-s1/results.sqlite3": 1
+    },
+    "tables": [
+      "runs",
+      "run_metrics",
+      "candidates",
+      "candidate_scores",
+      "artifacts",
+      "verifications",
+      "benchmarks",
+      "tool_versions"
+    ],
+    "migration_location": "src/sglab/db.py",
+    "one_writer": "search master"
+  },
+  "boundaries": {
+    "cli": "src/sglab/cli.py",
+    "dashboard": [
+      "src/sglab/web.py",
+      "web/index.html"
+    ],
+    "search_orchestrator": "src/sglab/search.py::run_search",
+    "search_worker": "src/sglab/search.py::_worker",
+    "state": "src/sglab/state.py",
+    "store": "src/sglab/db.py",
+    "target": "src/sglab/targets/erdos_gyarfas.py",
+    "certification_authority": "src/sglab/certification.py::certify",
+    "independent_verifiers": [
+      "python-reference-dfs",
+      "cpp17-bitset-dfs"
+    ],
+    "resources": "src/sglab/resources.py",
+    "provider": null,
+    "research_orchestrator": null,
+    "decision_replay": null,
+    "research_export": null
+  },
+  "discrepancy_codes": [
+    "package_name_gilab_vs_sglab",
+    "no_existing_ai_m5",
+    "schema_v1_vs_assumed_v6",
+    "missing_m5_completion_report",
+    "no_provider_or_ai_protocol",
+    "no_campaign_round_entities",
+    "static_workers_not_lanes",
+    "no_safe_boundary_action_mailbox",
+    "verification_only_after_search",
+    "state_snapshot_not_director_snapshot",
+    "global_controls_only",
+    "operator_exposes_scientific_parameters",
+    "terminal_status_contract_differs",
+    "no_decision_replay_or_export",
+    "no_lane_resource_shares",
+    "draft_migration_not_directly_applicable",
+    "planning_schema_parameter_specs_too_open",
+    "sample_operators_not_implemented",
+    "no_historical_m5_serial_ai_comparator",
+    "no_hidden_witness_target",
+    "no_app_server_or_auth_isolation",
+    "python_314_runtime_vs_312_evidence",
+    "planning_directory_is_untracked_input",
+    "m6_name_collision"
+  ],
+  "product_ambiguity": null,
+  "phase_0_status": "complete"
+}

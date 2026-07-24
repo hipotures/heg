@@ -1,0 +1,95 @@
+{
+  "plan_version": "1.0",
+  "baseline_commit": "bdacdb34b12086fe3f906bf3794397d81f4427ab",
+  "milestones": [
+    {
+      "id": "M6.0",
+      "name": "baseline_freeze",
+      "actual_modules": [
+        "docs/reports"
+      ],
+      "gate": "baseline tag, five current gates, schema and boundary audit"
+    },
+    {
+      "id": "M6.1",
+      "name": "app_server_preflight_and_client",
+      "actual_modules": [
+        "src/sglab/research/app_server_client.py",
+        "src/sglab/research/app_server_protocol.py",
+        "src/sglab/research/auth.py",
+        "src/sglab/cli.py"
+      ],
+      "gate": "installed-schema, isolation, persistence, structured-turn and fault tests"
+    },
+    {
+      "id": "M6.2",
+      "name": "schema_and_director_contracts",
+      "actual_modules": [
+        "src/sglab/db.py",
+        "src/sglab/research/protocol.py",
+        "src/sglab/research/catalog.py",
+        "src/sglab/research/validation.py",
+        "src/sglab/research/store.py",
+        "src/sglab/research/director.py"
+      ],
+      "gate": "schema-v7 integrity, strict validation, persisted same-thread turns and replay"
+    },
+    {
+      "id": "M6.3",
+      "name": "stateful_lanes",
+      "actual_modules": [
+        "src/sglab/search.py",
+        "src/sglab/research/lanes.py",
+        "src/sglab/research/telemetry.py",
+        "src/sglab/research/actions.py",
+        "src/sglab/certification.py"
+      ],
+      "gate": "concurrent live lanes, safe patch/fork, stale rejection, idempotency and restart"
+    },
+    {
+      "id": "M6.4",
+      "name": "event_driven_director",
+      "actual_modules": [
+        "src/sglab/research/triggers.py",
+        "src/sglab/research/snapshot.py",
+        "src/sglab/research/hypotheses.py",
+        "src/sglab/research/terminal.py",
+        "src/sglab/research/orchestrator.py"
+      ],
+      "gate": "observe-hypothesize-intervene-measure-update with search during inference"
+    },
+    {
+      "id": "M6.5",
+      "name": "campaign_ux_replay_export",
+      "actual_modules": [
+        "src/sglab/cli.py",
+        "src/sglab/web.py",
+        "web/index.html",
+        "src/sglab/state.py",
+        "src/sglab/artifacts.py"
+      ],
+      "gate": "only stop mode in normal UX; emergency controls; bounded replay/export"
+    },
+    {
+      "id": "M6.6",
+      "name": "live_acceptance_and_controls",
+      "actual_modules": [
+        "src/sglab/targets",
+        "src/sglab/benchmark.py",
+        "tests",
+        "docs/reports"
+      ],
+      "gate": "one live campaign demonstrates all active-control and M4 authority conditions"
+    },
+    {
+      "id": "M6.7",
+      "name": "production_hardening",
+      "actual_modules": [
+        "tests",
+        "docs",
+        "docs/reports"
+      ],
+      "gate": "recovery matrix, all repository gates, M6 gates, two-hour bounded-growth soak"
+    }
+  ]
+}
