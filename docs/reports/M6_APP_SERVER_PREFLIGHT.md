@@ -1,7 +1,7 @@
 # M6 Codex App Server Preflight
 
-Status: **deterministic no-model compliance audit passed; authenticated live
-turn remains pending explicit authorization**
+Status: **deterministic no-model compliance audit passed; authenticated runtime
+smoke executed with a residual isolation failure**
 
 Audit date: **2026-07-24**
 
@@ -91,11 +91,13 @@ This result proves deterministic protocol/configuration compliance only. It
 does not claim that runtime isolation has been demonstrated by an
 authenticated rollout.
 
-## Remaining authenticated gate
+## Authenticated follow-up
 
-The first authenticated smoke turn still requires an explicit operator
-authorization to import one chosen `auth.json` into the private
-`CODEX_HOME`, followed by account/network/model availability. After that, the
-pending live checks are one minimal structured turn, validation of the opaque
-server-returned rollout path, and same-thread resume after process restart.
-No credential action was performed as part of this work.
+The operator subsequently authorized importing exactly one selected
+`auth.json` into the private `CODEX_HOME`. The runtime smoke completed two
+structured turns on one persisted thread with a natural app-server restart
+between them. Opaque rollout inspection and resume passed, but authenticated
+runtime isolation remains unproven because the complete rollout contained
+unexpected platform-owned multi-agent developer instructions and skill
+inclusion flags in `world_state`. See
+`M6_APP_SERVER_RUNTIME_SMOKE.md`. No graph-search campaign was started.

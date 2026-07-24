@@ -34,12 +34,21 @@ with zero active skills after reload and an empty failure list. See
 `docs/reports/M6_APP_SERVER_PREFLIGHT.md` and
 `docs/reports/M6_APP_SERVER_COMPLIANCE.json`.
 
-The authenticated live-turn, saved-rollout isolation, and process-restart
-resume gates remain pending because the required explicit one-time auth import
-has not been authorized. No authenticated model turn was performed and no
-credentials were copied. The focused 25-test compliance set, full 91-test
-suite, no-model installed-protocol audit, and all five repository completion
-commands pass.
+The explicitly authorized runtime smoke then completed exactly two structured
+model turns on one persisted thread, with a natural shutdown and fresh
+app-server process between them. Both decisions passed the local semantic
+validator, all token fields were captured, the opaque SQLite-backed rollout
+inspection succeeded, and the resumed turn used new turn/item identifiers.
+
+The smoke also exposed and fixed a concrete Structured Outputs compatibility
+defect in the Director schema. Protocol/configuration compliance and persisted
+thread resume are demonstrated. Authenticated runtime isolation is **not**
+proven: the complete rollout contained platform-owned multi-agent developer
+instructions and a `world_state` with skill-instruction inclusion flags,
+despite zero active discovered skills, no observed tool call, no normal user
+Codex-home reference, and no loaded repository instruction contents. See
+`docs/reports/M6_APP_SERVER_RUNTIME_SMOKE.md`. This is not a live research
+campaign or an M6 completion claim.
 
 ### M6.2 durable Director contracts — offline milestone complete
 
