@@ -1,0 +1,193 @@
+{
+  "$id": "https://sglab.local/schemas/director-state-v2.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "allowed_action_space": {
+      "type": "object"
+    },
+    "ancestry": {
+      "additionalProperties": false,
+      "properties": {
+        "final_best_accepted_ancestors": {
+          "items": {
+            "type": "object"
+          },
+          "maxItems": 8,
+          "type": "array"
+        },
+        "global_record_summaries": {
+          "items": {
+            "type": "object"
+          },
+          "maxItems": 8,
+          "type": "array"
+        }
+      },
+      "required": [
+        "global_record_summaries",
+        "final_best_accepted_ancestors"
+      ],
+      "type": "object"
+    },
+    "artifact_references": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_ref": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "artifact_ref",
+          "sha256"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "best_ever_result": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "campaign_budget": {
+      "type": "object"
+    },
+    "exact_verifier": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "latest_batch_outcome": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "operator_aggregates": {
+      "type": "object"
+    },
+    "parameter_effects": {
+      "type": "object"
+    },
+    "plateau": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "previous_hypothesis": {
+      "properties": {
+        "expected_signal": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expected_signal_occurred": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "hypothesis_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "previous_outcomes": {
+      "items": {
+        "type": "object"
+      },
+      "maxItems": 2,
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "2.0"
+    },
+    "source_snapshot_id": {
+      "type": "string"
+    },
+    "stage_timing_percentages": {
+      "type": "object"
+    },
+    "target": {
+      "additionalProperties": false,
+      "properties": {
+        "definition_sha256": {
+          "type": "string"
+        },
+        "statement_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "status_timestamp": {
+          "type": "string"
+        },
+        "success_authority": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "statement_id",
+        "definition_sha256",
+        "status",
+        "status_timestamp",
+        "success_authority"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema_version",
+    "source_snapshot_id",
+    "target",
+    "campaign_budget",
+    "allowed_action_space",
+    "best_ever_result",
+    "latest_batch_outcome",
+    "previous_outcomes",
+    "plateau",
+    "operator_aggregates",
+    "stage_timing_percentages",
+    "exact_verifier",
+    "parameter_effects",
+    "previous_hypothesis",
+    "ancestry",
+    "artifact_references"
+  ],
+  "title": "DirectorStateV2",
+  "type": "object"
+}

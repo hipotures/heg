@@ -132,6 +132,19 @@ for line in sys.stdin:
                 },
             }
         )
+    elif method == "thread/compact/start":
+        if request.get("params", {}).get("threadId") != thread_id:
+            send(
+                {
+                    "id": request_id,
+                    "error": {
+                        "code": -32602,
+                        "message": "unknown thread",
+                    },
+                }
+            )
+            continue
+        send({"id": request_id, "result": {}})
     elif method == "turn/start":
         params = request.get("params", {})
         if params.get("environments") != [] or params.get(

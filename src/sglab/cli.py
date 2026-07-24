@@ -474,6 +474,7 @@ def cmd_ai_experiment(args: Namespace) -> int:
             codex=args.codex,
             evaluation_cap=args.evaluation_cap,
             resume=args.resume,
+            context_mode=args.context_mode,
         )
     print(json.dumps(report, indent=2, sort_keys=True))
     return 0 if report["ok"] else 1
@@ -683,6 +684,15 @@ def build_parser() -> ArgumentParser:
         "--evaluation-cap", type=int, required=True
     )
     experiment_run.add_argument("--resume", action="store_true")
+    experiment_run.add_argument(
+        "--context-mode",
+        choices=[
+            "persistent_thread",
+            "compacted_thread",
+            "stateless_turns",
+        ],
+        default="persistent_thread",
+    )
     experiment_run.set_defaults(func=cmd_ai_experiment)
 
     research_campaign = subparsers.add_parser("research-campaign")

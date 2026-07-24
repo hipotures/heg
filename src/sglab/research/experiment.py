@@ -15,7 +15,7 @@ from .app_server_protocol import generate_protocol_preflight
 from .auth import auth_is_imported, director_work
 from .campaign import campaign_status, target_definition_sha256
 from .candidates import CandidateArchive
-from .catalog import action_catalog
+from .context import DirectorContextMode, prepare_director_state_v2
 from .director import ActiveDirector
 from .lanes import (
     LaneManager,
@@ -736,9 +736,8 @@ def build_experiment_prompt(
             "committed campaign state."
         ),
         "experiment_contract": contract,
-        "available_action_and_parameter_catalog": action_catalog(),
         "phase_a_static_benchmark_evidence": PHASE_A_BENCHMARK_EVIDENCE,
-        "committed_research_snapshot": snapshot,
+        "director_state_v2": prepare_director_state_v2(snapshot).state,
         "admissible_evidence_ids": snapshot.get("available_evidence_ids", []),
         "required_response": "Return only the existing Director decision schema.",
     }
@@ -999,6 +998,9 @@ def run_authenticated_experiment(
     codex: str = "codex",
     evaluation_cap: int,
     resume: bool = False,
+    context_mode: DirectorContextMode | str = (
+        DirectorContextMode.PERSISTENT_THREAD
+    ),
 ) -> dict[str, Any]:
     return asyncio.run(
         _run_authenticated_experiment(
@@ -1006,6 +1008,7 @@ def run_authenticated_experiment(
             codex=codex,
             evaluation_cap=evaluation_cap,
             resume=resume,
+            context_mode=DirectorContextMode(context_mode),
         )
     )
 
@@ -1016,6 +1019,7 @@ async def _run_authenticated_experiment(
     codex: str,
     evaluation_cap: int,
     resume: bool,
+    context_mode: DirectorContextMode,
 ) -> dict[str, Any]:
     application_data = root / ".sglab"
     if not auth_is_imported(application_data):
@@ -1069,7 +1073,7 @@ async def _run_authenticated_experiment(
         session = store.connection.execute(
             """
             SELECT thread_id, state FROM app_server_sessions
-            WHERE campaign_id=? ORDER BY started_at, rowid LIMIT 1
+            WHERE campaign_id=? ORDER BY started_at DESC, rowid DESC LIMIT 1
             """,
             (campaign_id,),
         ).fetchone()
@@ -1096,6 +1100,24 @@ async def _run_authenticated_experiment(
                 "campaign_dir": str(campaign_dir),
             },
         )
+    context_mode_path = campaign_dir / "director" / "context-mode.json"
+    if resume:
+        persisted_mode = json.loads(
+            context_mode_path.read_text(encoding="utf-8")
+        )
+        if persisted_mode.get("context_mode") != context_mode.value:
+            raise RuntimeError(
+                "resumed experiment context mode differs from persisted mode"
+            )
+    else:
+        context_mode_path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_json(
+            context_mode_path,
+            {
+                "schema_version": "1.0",
+                "context_mode": context_mode.value,
+            },
+        )
     manager = LaneManager(campaign_dir, max_active_lanes=1)
     existing_counts = _campaign_counts(store, campaign_id)
     protocol_hash = hashlib.sha256(
@@ -1119,6 +1141,7 @@ async def _run_authenticated_experiment(
         codex_version=str(preflight["codex_version_output"]),
         executable_sha256=str(preflight["codex_executable_sha256"]),
         protocol_schema_sha256=protocol_hash,
+        context_mode=context_mode,
     )
     provider = SingleTurnAppServerDecisionProvider(
         director=director,

@@ -362,6 +362,25 @@ class AppServerClient:
         result = await self._rpc("thread/resume", params)
         return self._session(result, resumed=True)
 
+    async def compact_thread(
+        self, session: AppServerSession
+    ) -> dict[str, Any]:
+        """Compact only at an application-selected completed-turn boundary."""
+
+        if not self.skills_isolated:
+            raise AppServerError(
+                "refusing thread compaction before skill isolation proof"
+            )
+        result = await self._rpc(
+            "thread/compact/start",
+            {"threadId": session.thread_id},
+        )
+        if not isinstance(result, dict):
+            raise AppServerError(
+                "thread/compact/start returned a non-object result"
+            )
+        return result
+
     def _session(self, result: dict[str, Any], *, resumed: bool) -> AppServerSession:
         thread = result.get("thread")
         if not isinstance(thread, dict) or not isinstance(thread.get("id"), str):

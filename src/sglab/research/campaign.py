@@ -25,6 +25,7 @@ from .app_server_client import AppServerClient, AppServerConfig
 from .app_server_protocol import generate_protocol_preflight
 from .auth import auth_is_imported
 from .candidates import CandidateArchive
+from .context import DirectorContextMode
 from .diagnostics import ScientificActionDispatcher
 from .director import ActiveDirector
 from .export import export_campaign
@@ -326,6 +327,9 @@ class ResearchCampaignRunner:
         controller_mode: str = "active_ai",
         controller_seed: int = 0,
         maximum_director_turns: int | None = None,
+        context_mode: DirectorContextMode | str = (
+            DirectorContextMode.PERSISTENT_THREAD
+        ),
     ):
         if stop_mode not in {"time_limit", "until_success"}:
             raise ValueError("invalid stop mode")
@@ -352,6 +356,7 @@ class ResearchCampaignRunner:
         self.controller_mode = controller_mode
         self.controller_seed = controller_seed
         self.maximum_director_turns = maximum_director_turns
+        self.context_mode = DirectorContextMode(context_mode)
 
     def run(self) -> dict[str, Any]:
         with campaign_lock(self.workspace):
@@ -458,6 +463,7 @@ class ResearchCampaignRunner:
                     codex_version=str(preflight["codex_version_output"]),
                     executable_sha256=str(preflight["codex_executable_sha256"]),
                     protocol_schema_sha256=protocol_hash,
+                    context_mode=self.context_mode,
                 )
 
             director = director_factory()

@@ -14,7 +14,13 @@ from .app_server_client import (
     AppServerSession,
     AppServerTurnResult,
 )
-from .catalog import action_catalog
+from .context import (
+    CLIENT_ESTIMATED_TOKENS_MAX,
+    DirectorContextBudgetExceeded,
+    DirectorContextMode,
+    complete_context_size_report,
+    prepare_director_state_v2,
+)
 from .protocol import (
     DecisionValidation,
     MAX_SNAPSHOT_BYTES,
@@ -65,6 +71,7 @@ def build_director_prompt(snapshot: dict[str, Any]) -> str:
         and target.get("target_id") == "m6_hidden_witness_control_v1"
         else None
     )
+    director_state = prepare_director_state_v2(snapshot).state
     payload = {
         "objective": (
             "Actively manage the running concurrent search portfolio. "
@@ -73,9 +80,7 @@ def build_director_prompt(snapshot: dict[str, Any]) -> str:
         ),
         "immutable_target": target,
         "acceptance_control": acceptance_control,
-        "campaign_stop_contract": snapshot.get("campaign"),
-        "available_action_and_parameter_catalog": action_catalog(),
-        "committed_research_snapshot": snapshot,
+        "director_state_v2": director_state,
         "admissible_evidence_ids": snapshot.get("available_evidence_ids", []),
         "required_response": (
             "Assess, update evidence-backed hypotheses, issue concrete typed "
@@ -97,6 +102,9 @@ class ActiveDirector:
         codex_version: str,
         executable_sha256: str,
         protocol_schema_sha256: str,
+        context_mode: DirectorContextMode | str = (
+            DirectorContextMode.PERSISTENT_THREAD
+        ),
     ):
         self.client = client
         self.store = store
@@ -105,6 +113,7 @@ class ActiveDirector:
         self.codex_version = codex_version
         self.executable_sha256 = executable_sha256
         self.protocol_schema_sha256 = protocol_schema_sha256
+        self.context_mode = DirectorContextMode(context_mode)
         self.session: AppServerSession | None = None
         self.session_record_id: str | None = None
         self.audit_dir = self.campaign_dir / "director"
@@ -124,8 +133,13 @@ class ActiveDirector:
         parent_thread_id: str | None = None,
     ) -> AppServerSession:
         await self.client.start()
-        if resume_thread_id is None:
+        if (
+            resume_thread_id is None
+            or self.context_mode is DirectorContextMode.STATELESS_TURNS
+        ):
             session = await self.client.start_thread(base_instructions())
+            if resume_thread_id is not None:
+                parent_thread_id = resume_thread_id
         else:
             session = await self.client.resume_thread(
                 resume_thread_id, base_instructions()
@@ -142,7 +156,11 @@ class ActiveDirector:
             codex_version=self.codex_version,
             executable_sha256=self.executable_sha256,
             protocol_schema_sha256=self.protocol_schema_sha256,
-            resumed=resume_thread_id is not None,
+            resumed=(
+                resume_thread_id is not None
+                and self.context_mode
+                is not DirectorContextMode.STATELESS_TURNS
+            ),
         )
         self.session = session
         self.session_record_id = record_id
@@ -265,6 +283,50 @@ class ActiveDirector:
         request_relative = Path("director") / "requests" / f"{turn_record_id}.json"
         response_relative = Path("director") / "responses" / f"{turn_record_id}.json"
         wire_relative = Path("director") / "wire" / f"{turn_record_id}.jsonl"
+        context_relative = (
+            Path("director")
+            / "context-budgets"
+            / f"{turn_record_id}.json"
+        )
+        try:
+            prepared_state = prepare_director_state_v2(snapshot)
+        except DirectorContextBudgetExceeded as error:
+            if error.size_report is not None:
+                _write_private(
+                    self.campaign_dir / context_relative,
+                    canonical_json(
+                        error.size_report, max_bytes=128 * 1024
+                    )
+                    + b"\n",
+                )
+            raise
+        parsed_prompt = _json_object(prompt)
+        supplied_state = parsed_prompt.get("director_state_v2")
+        if supplied_state != prepared_state.state:
+            raise RuntimeError(
+                "prompt DirectorStateV2 does not match the committed snapshot"
+            )
+        context_report = complete_context_size_report(
+            prepared_state,
+            prompt=prompt,
+            base_instructions=base_instructions(),
+            output_schema=director_decision_schema(),
+            mode=self.context_mode,
+        )
+        context_bytes = canonical_json(
+            context_report, max_bytes=128 * 1024
+        )
+        _write_private(
+            self.campaign_dir / context_relative,
+            context_bytes + b"\n",
+        )
+        if not context_report["within_client_token_limit"]:
+            raise DirectorContextBudgetExceeded(
+                "client-owned context estimate exceeds "
+                f"{CLIENT_ESTIMATED_TOKENS_MAX} tokens"
+            )
+        if not prior_turns:
+            await self._prepare_context_boundary()
         request_payload = {
             "thread_id": self.session.thread_id,
             "snapshot_id": snapshot_id,
@@ -334,7 +396,7 @@ class ActiveDirector:
                     "Return one corrected decision for the exact same committed "
                     "snapshot. Do not change snapshot_id."
                 ),
-                "snapshot": snapshot,
+                "director_state_v2": prepared_state.state,
                 "invalid_response": result.parsed,
                 "validation_errors": [
                     {"path": issue.path, "message": issue.message}
@@ -364,6 +426,62 @@ class ActiveDirector:
             thread_id=self.session.thread_id,
             turn_id=result.turn_id,
         )
+
+    async def _prepare_context_boundary(self) -> None:
+        if self.session is None or self.session_record_id is None:
+            raise RuntimeError("Director session has not been started")
+        completed = int(
+            self.store.connection.execute(
+                """
+                SELECT count(*) FROM app_server_turns
+                WHERE campaign_id=? AND thread_id=?
+                  AND status LIKE 'completed_%'
+                """,
+                (self.campaign_id, self.session.thread_id),
+            ).fetchone()[0]
+        )
+        if completed == 0:
+            return
+        if self.context_mode is DirectorContextMode.PERSISTENT_THREAD:
+            return
+        parent_thread_id = self.session.thread_id
+        if self.context_mode is DirectorContextMode.COMPACTED_THREAD:
+            response = await self.client.compact_thread(self.session)
+            relative = (
+                Path("director")
+                / "compactions"
+                / f"{new_id('compaction')}.json"
+            )
+            payload = {
+                "schema_version": "1.0",
+                "thread_id": parent_thread_id,
+                "boundary": "after_completed_turn_before_next_decision",
+                "response": response,
+            }
+            _write_private(
+                self.campaign_dir / relative,
+                canonical_json(payload, max_bytes=64 * 1024) + b"\n",
+            )
+            return
+        session = await self.client.start_thread(base_instructions())
+        self.store.close_session(
+            self.session_record_id, state="rolled_over"
+        )
+        record_id = self.store.record_session(
+            record_id=new_id("app-session"),
+            campaign_id=self.campaign_id,
+            thread_id=session.thread_id,
+            session_id=session.session_id,
+            thread_path=session.thread_path,
+            parent_thread_id=parent_thread_id,
+            model=session.model,
+            effort=session.effort,
+            codex_version=self.codex_version,
+            executable_sha256=self.executable_sha256,
+            protocol_schema_sha256=self.protocol_schema_sha256,
+        )
+        self.session = session
+        self.session_record_id = record_id
 
     async def close(self) -> None:
         await self.client.close()
@@ -447,6 +565,14 @@ def _usage_payload(result: AppServerTurnResult) -> dict[str, Any] | None:
         "total_tokens": usage.total_tokens,
         "raw": usage.raw,
     }
+
+
+def _json_object(value: str) -> dict[str, Any]:
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def _write_private(path: Path, payload: bytes) -> None:

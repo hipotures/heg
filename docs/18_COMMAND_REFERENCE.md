@@ -14,7 +14,8 @@ sglab ai-director inspect-session --workspace ./workspace
 
 sglab ai-experiment phase-a --workspace ./phase-a-workspace
 sglab ai-experiment run --workspace ./new-private-workspace \
-  --evaluation-cap <cap-from-phase-a>
+  --evaluation-cap <cap-from-phase-a> \
+  --context-mode persistent_thread
 
 sglab research-campaign start --workspace ./workspace --time-limit 24h
 sglab research-campaign start --workspace ./workspace --until-success
@@ -30,9 +31,14 @@ sglab research-campaign export --workspace ./workspace \
 
 `ai-experiment phase-a` is deterministic and never imports auth or calls a
 model. `ai-experiment run` requires auth to have been imported explicitly
-into that new workspace, makes exactly two non-repair app-server turns on one
-thread, executes one bounded search batch between them, and stops after
-persisting the second decision.
+into that new workspace. The current adaptive experiment contract makes four
+non-repair app-server turns, executes three bounded search batches, and stops
+after persisting the fourth decision without a fourth batch.
+
+The experimental context modes are `persistent_thread`, `compacted_thread`
+and `stateless_turns`. They submit the same bounded DirectorStateV2 scientific
+state. The normal `research-campaign start` interface deliberately does not
+expose this A/B-test setting.
 
 Normal campaign start exposes no scientific tuning flags. The installed target
 is read-only, and the AI Director chooses algorithms, graph sizes, lane count,

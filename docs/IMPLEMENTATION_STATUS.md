@@ -2,6 +2,33 @@
 
 Last implementation audit: **2026-07-24**.
 
+## Director context management — deterministic preparation complete
+
+The proven adaptive-loop baseline is preserved by annotated tag
+`m6-adaptive-ai-loop-proven`, which points to
+`a9ea28bcf9a86fd5d2332343a26fb3a7e56a3df6`. The Phase-B production-code
+commit `a460dd752119eea9340d01e872956eab1b6c2580` is its ancestor; the only
+intervening changes were the final runtime report and status. Director prompts
+now use a strict, versioned `DirectorStateV2` containing at most three
+outcomes, eight record summaries and eight accepted final-best ancestors,
+with immutable hashes pointing to full artifacts. Full graphs, raw outcomes,
+checkpoints, RNG state, metric windows and prior prompts are excluded.
+
+A pre-turn gate persists pre/post compaction measurements and enforces 32 KiB
+state, 8 KiB ancestry, 12 KiB historical outcomes and a conservative
+12,000-token client-owned estimate. The four preserved Phase-B states compact
+to 3.0–16.7 KiB and estimated total client inputs of 6.5–10.1 thousand tokens.
+A 100-batch replay remains bounded at 16,682 bytes, preserves outcome hashes,
+reconstructs after restart, validates all four decisions and still creates no
+B4.
+
+Three infrastructure modes are implemented without selecting a winner:
+`persistent_thread`, installed-protocol `compacted_thread`, and
+`stateless_turns`. No authenticated call was made. See
+`docs/reports/M6_DIRECTOR_TOKEN_ATTRIBUTION.md`,
+`docs/reports/M6_DIRECTOR_CONTEXT_GROWTH.md`, and
+`docs/reports/M6_DIRECTOR_CONTEXT_MODES.md`.
+
 ## Adaptive multi-batch Director — authenticated Phase B complete
 
 After explicit authorization, the bounded runtime campaign completed exactly

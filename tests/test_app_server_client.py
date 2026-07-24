@@ -72,6 +72,7 @@ class AppServerClientTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertTrue(resumed.resumed)
             self.assertEqual(resumed.thread_id, session.thread_id)
+            self.assertEqual(await client.compact_thread(resumed), {})
             await client.close()
             self.assertEqual(client.last_shutdown_mode, "graceful")
             self.assertTrue(
