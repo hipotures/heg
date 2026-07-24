@@ -29,8 +29,6 @@ def lane_spec() -> LaneSpec:
             "witness_cap": 4,
             "tabu_tenure": 16,
             "perturbation_interval": 8,
-            "restart_threshold": 1000,
-            "promotion_penalty": 0,
         },
         resource_share=1,
         seed_lineage=(91,),

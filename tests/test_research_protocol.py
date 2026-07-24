@@ -115,6 +115,55 @@ class ResearchProtocolTests(unittest.TestCase):
         self.assertIn('"expected_lane_version"', encoded)
         self.assertNotIn('"command"', encoded)
 
+    def test_parameter_semantics_are_normalized_and_unsupported_rejected(
+        self,
+    ) -> None:
+        decision = valid_decision()
+        parameters = decision["actions"][0]["spec"]["parameters"]
+        parameters["mutation_weights"] = {
+            "uniform_two_edge_switch": 2,
+            "forbidden_cycle_break_switch": 1,
+        }
+        result = validate_decision(decision, context())
+        self.assertTrue(result.accepted, result.issues)
+        action = result.normalized["actions"][0]
+        self.assertEqual(
+            action["effective_parameters"]["mutation_weights"],
+            {
+                "uniform_two_edge_switch": 2 / 3,
+                "forbidden_cycle_break_switch": 1 / 3,
+            },
+        )
+        self.assertEqual(action["ignored_parameters"], {})
+        self.assertEqual(action["rejected_parameters"], {})
+        self.assertIn("mutation_weights", action["parameter_effects"])
+
+        unsupported = valid_decision()
+        unsupported["actions"][0]["spec"]["algorithm"] = (
+            "iterated_local_search_tabu"
+        )
+        unsupported["actions"][0]["spec"]["parameters"] = {
+            "order": 20,
+            "batch_candidates": 300,
+            "witness_cap": 64,
+            "tabu_tenure": 48,
+            "perturbation_interval": 200,
+            "restart_threshold": 1500,
+        }
+        rejected = validate_decision(unsupported, context())
+        self.assertFalse(rejected.accepted)
+        self.assertTrue(
+            any(
+                issue.path.endswith(".restart_threshold")
+                for issue in rejected.issues
+            )
+        )
+        metadata = valid_decision()
+        metadata["actions"][0]["spec"]["parameters"][
+            "promotion_penalty"
+        ] = 10
+        self.assertFalse(validate_decision(metadata, context()).accepted)
+
     def test_structured_output_const_nodes_declare_their_type(self) -> None:
         schema = director_decision_schema()
         pending = [schema]
@@ -148,7 +197,6 @@ class ResearchProtocolTests(unittest.TestCase):
         parameters.update(
             {
                 "restart_threshold": None,
-                "promotion_penalty": None,
                 "tabu_tenure": None,
                 "perturbation_interval": None,
             }
@@ -157,7 +205,6 @@ class ResearchProtocolTests(unittest.TestCase):
             {
                 "cooling": None,
                 "restart_threshold": None,
-                "promotion_penalty": None,
                 "tabu_tenure": None,
                 "perturbation_interval": None,
                 "witness_cap": None,

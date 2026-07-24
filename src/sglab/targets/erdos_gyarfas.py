@@ -176,6 +176,14 @@ class ErdosGyarfasPlugin:
 
     def mutate(self, graph: BitGraph, rng: Random, config: dict[str, Any]) -> BitGraph:
         mode = str(config.get("mode", "cubic_first"))
+        operator = str(
+            config.get("mutation_operator", "uniform_two_edge_switch")
+        )
+        if operator not in {
+            "uniform_two_edge_switch",
+            "forbidden_cycle_break_switch",
+        }:
+            raise ValueError(f"unsupported mutation operator: {operator}")
         if mode == "unrestricted_min_degree_3":
             if rng.random() < 0.55:
                 missing = [
@@ -198,23 +206,77 @@ class ErdosGyarfasPlugin:
         edges = tuple(graph.edges())
         if len(edges) < 2:
             return graph
+        if operator == "forbidden_cycle_break_switch":
+            witness_edges = self._forbidden_witness_edges(graph, rng)
+            if not witness_edges:
+                return graph
+            for _ in range(64):
+                first = rng.choice(witness_edges)
+                remote = rng.choice(edges)
+                candidate = self._two_edge_switch(
+                    graph, first, remote, rng, mode
+                )
+                if candidate is not None:
+                    return candidate
+            return graph
         for _ in range(64):
-            (a, b), (c, d) = rng.sample(edges, 2)
-            if len({a, b, c, d}) != 4:
-                continue
-            pairing = ((a, c), (b, d)) if rng.randrange(2) == 0 else ((a, d), (b, c))
+            first, second = rng.sample(edges, 2)
+            candidate = self._two_edge_switch(
+                graph, first, second, rng, mode
+            )
+            if candidate is not None:
+                return candidate
+        return graph
+
+    def _forbidden_witness_edges(
+        self, graph: BitGraph, rng: Random
+    ) -> tuple[tuple[int, int], ...]:
+        witnesses: list[tuple[int, ...]] = []
+        for length in self.forbidden_lengths(graph.n):
+            found, _complete = find_cycles_of_length_bounded(
+                graph, length, 2, 4_096
+            )
+            if found:
+                witnesses.extend(found[:1])
+        if not witnesses:
+            return ()
+        witness = rng.choice(witnesses)
+        return tuple(
+            tuple(sorted((witness[index], witness[(index + 1) % len(witness)])))
+            for index in range(len(witness))
+        )
+
+    def _two_edge_switch(
+        self,
+        graph: BitGraph,
+        first: tuple[int, int],
+        second: tuple[int, int],
+        rng: Random,
+        mode: str,
+    ) -> BitGraph | None:
+        (a, b), (c, d) = first, second
+        if len({a, b, c, d}) != 4:
+            return None
+        pairings = (
+            (((a, c), (b, d)), ((a, d), (b, c)))
+            if rng.randrange(2) == 0
+            else (((a, d), (b, c)), ((a, c), (b, d)))
+        )
+        for pairing in pairings:
             additions = tuple(tuple(sorted(edge)) for edge in pairing)
             if additions[0] == additions[1] or any(
                 graph.has_edge(*edge) for edge in additions
             ):
                 continue
-            candidate = graph.with_edges(add=additions, remove=((a, b), (c, d)))
+            candidate = graph.with_edges(
+                add=additions, remove=(first, second)
+            )
             if candidate.is_connected() and (
                 mode != "minimal_structure_mixed_degree"
                 or self._minimal_structure_valid(candidate)
             ):
                 return candidate
-        return graph
+        return None
 
     def cheap_score(self, graph: BitGraph, cap: int) -> ScoreResult:
         validation = self.validate_graph(graph)

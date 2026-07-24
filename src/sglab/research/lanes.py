@@ -24,6 +24,8 @@ from .catalog import (
     ALGORITHMS,
     ALGORITHM_PARAMETERS,
     GRAPH_FAMILIES,
+    MUTATION_OPERATORS,
+    MUTATION_WEIGHTS_PARAMETER,
     PARAMETER_DOMAINS,
 )
 from .protocol import canonical_json
@@ -79,6 +81,28 @@ class LaneSpec:
             if required not in self.parameters:
                 raise ValueError(f"lane parameter is required: {required}")
         for name, value in self.parameters.items():
+            if name == MUTATION_WEIGHTS_PARAMETER:
+                if not isinstance(value, dict) or set(value) != set(
+                    MUTATION_OPERATORS
+                ):
+                    raise ValueError(
+                        "mutation_weights must contain every reviewed operator"
+                    )
+                if any(
+                    isinstance(weight, bool)
+                    or not isinstance(weight, (int, float))
+                    or weight < 0
+                    for weight in value.values()
+                ):
+                    raise ValueError("mutation weights must be non-negative")
+                if not math.isclose(
+                    sum(float(weight) for weight in value.values()),
+                    1.0,
+                    rel_tol=0,
+                    abs_tol=1e-9,
+                ):
+                    raise ValueError("mutation weights must be normalized")
+                continue
             domain = PARAMETER_DOMAINS[name]
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 raise ValueError(f"lane parameter must be numeric: {name}")
@@ -146,6 +170,7 @@ class _LaneKernel:
         self.high_water = 0
         self.total_accepted = 0
         self.total_improvements = 0
+        self.actual_restarts = 0
         self.recent_hashes: deque[str] = deque(maxlen=4096)
         self.recent_hash_set: set[str] = set()
         if checkpoint is None:
@@ -307,10 +332,12 @@ class _LaneKernel:
             else None
         )
         initial_score = self.score
+        score_counts_truncated = not initial_score.complete
         trajectory: list[dict[str, Any]] = []
         global_records: list[dict[str, Any]] = []
         ancestry_operator_statistics: dict[str, dict[str, int]] = {}
         evaluated = accepted = legal = improvements = duplicates = 0
+        accepted_at_last_record = 0
         for _ in range(target):
             if stop_event.is_set():
                 break
@@ -324,11 +351,22 @@ class _LaneKernel:
                 == 0
             ):
                 self._new_seed(self.rng.randrange(2**63))
+                self.actual_restarts += 1
             mutation_started = (
                 time.perf_counter_ns()
                 if self.timing_ns is not None
                 else 0
             )
+            mutation_operator = (
+                "random_restart_seed"
+                if self.algorithm == "random_restart"
+                else self._choose_mutation_operator()
+            )
+            operator_counts = ancestry_operator_statistics.setdefault(
+                mutation_operator,
+                {"uses": 0, "accepted": 0, "global_records": 0},
+            )
+            operator_counts["uses"] += 1
             candidate = (
                 self.plugin.generate_seed(
                     self.rng,
@@ -341,7 +379,10 @@ class _LaneKernel:
                 else self.plugin.mutate(
                     self.graph,
                     self.rng,
-                    {"mode": self.mode},
+                    {
+                        "mode": self.mode,
+                        "mutation_operator": mutation_operator,
+                    },
                 )
             )
             if self.timing_ns is not None:
@@ -367,6 +408,9 @@ class _LaneKernel:
                     time.perf_counter_ns() - duplicate_started
                 )
             candidate_score = self._score(candidate)
+            score_counts_truncated = (
+                score_counts_truncated or not candidate_score.complete
+            )
             tabu_started = (
                 time.perf_counter_ns()
                 if self.timing_ns is not None
@@ -400,18 +444,14 @@ class _LaneKernel:
                     evaluation=evaluated,
                     accepted=accept,
                     global_record=global_record,
+                    mutation_operator=mutation_operator,
                 )
-                operator = str(mutation_record["mutation_operator"])
-                operator_counts = ancestry_operator_statistics.setdefault(
-                    operator,
-                    {"accepted": 0, "global_records": 0},
-                )
-                operator_counts["accepted"] += int(accept)
-                operator_counts["global_records"] += int(global_record)
                 if self.timing_ns is not None:
                     self.timing_ns["ancestry_construction"] += (
                         time.perf_counter_ns() - ancestry_started
                     )
+            operator_counts["accepted"] += int(accept)
+            operator_counts["global_records"] += int(global_record)
             if accept:
                 self.graph = candidate
                 self.score = candidate_score
@@ -441,6 +481,7 @@ class _LaneKernel:
                     global_records.append(mutation_record)
                 improvements += 1
                 self.total_improvements += 1
+                accepted_at_last_record = accepted
                 self.stagnation = 0
                 if len(trajectory) < 64:
                     trajectory.append(
@@ -470,6 +511,33 @@ class _LaneKernel:
             if self.timing_ns is not None
             else 0
         )
+        for counts in ancestry_operator_statistics.values():
+            counts["yield"] = counts["global_records"] / max(1, counts["uses"])
+            counts["acceptance_rate"] = counts["accepted"] / max(
+                1, counts["uses"]
+            )
+        plateau_evaluations = (
+            evaluated - int(trajectory[-1]["evaluation"])
+            if trajectory
+            else evaluated
+        )
+        accepted_since_record = accepted - accepted_at_last_record
+        remaining_budget = max(0, target - evaluated)
+        plateau_threshold = max(25, min(250, target // 3))
+        plateau_signal = {
+            "active": (
+                plateau_evaluations >= plateau_threshold
+                and accepted_since_record > 0
+                and (1.0 - duplicates / max(1, legal)) >= 0.25
+                and remaining_budget > 0
+            ),
+            "evaluations_since_last_global_record": plateau_evaluations,
+            "accepted_moves_since_last_global_record": accepted_since_record,
+            "diversity": 1.0 - duplicates / max(1, legal),
+            "remaining_evaluation_budget": remaining_budget,
+            "evaluation_threshold": plateau_threshold,
+            "telemetry_only": True,
+        }
         result = {
             "evaluated": evaluated,
             "accepted": accepted,
@@ -504,6 +572,15 @@ class _LaneKernel:
                 "operator_yield": improvements / max(1, legal),
                 "mutation_operators": ancestry_operator_statistics,
             },
+            "best_evaluation": (
+                int(trajectory[-1]["evaluation"]) if trajectory else 0
+            ),
+            "plateau_evaluations": plateau_evaluations,
+            "plateau_signal": plateau_signal,
+            "global_record_count": improvements,
+            "actual_restart_occurred": self.actual_restarts > 0,
+            "actual_restart_count": self.actual_restarts,
+            "score_counts_truncated_by_witness_cap": score_counts_truncated,
             "mutation_ancestry": _ancestry_payload(
                 global_records=global_records,
                 final_best_ancestry=self.best_ancestry,
@@ -522,6 +599,18 @@ class _LaneKernel:
                 search_loop_seconds=elapsed,
             )
         return result
+
+    def _choose_mutation_operator(self) -> str:
+        weights = self.parameters.get(MUTATION_WEIGHTS_PARAMETER)
+        if not isinstance(weights, dict):
+            return MUTATION_OPERATORS[0]
+        draw = self.rng.random()
+        cumulative = 0.0
+        for name in MUTATION_OPERATORS:
+            cumulative += float(weights[name])
+            if draw <= cumulative:
+                return name
+        return MUTATION_OPERATORS[-1]
 
     @property
     def algorithm(self) -> str:
@@ -1264,6 +1353,7 @@ def _mutation_record(
     evaluation: int,
     accepted: bool,
     global_record: bool,
+    mutation_operator: str,
 ) -> dict[str, Any]:
     parent_edges = set(parent.edges())
     child_edges = set(child.edges())
@@ -1272,18 +1362,10 @@ def _mutation_record(
     mutated_vertices = sorted(
         {vertex for edge in (*removed, *added) for vertex in edge}
     )
-    if len(removed) == len(added) == 2:
-        operator = "two_edge_switch"
-    elif added and not removed:
-        operator = "edge_add"
-    elif removed and not added:
-        operator = "edge_remove"
-    else:
-        operator = "mixed_edge_edit"
     return {
         "candidate_id": _candidate_id(campaign_id, child),
         "parent_candidate_id": parent_candidate_id,
-        "mutation_operator": operator,
+        "mutation_operator": mutation_operator,
         "mutated_vertices": mutated_vertices,
         "mutated_edges": {
             "removed": [list(edge) for edge in removed],

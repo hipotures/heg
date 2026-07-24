@@ -12,9 +12,12 @@ from .catalog import (
     ALGORITHM_PARAMETERS,
     DIAGNOSTICS,
     GRAPH_FAMILIES,
+    MUTATION_OPERATORS,
+    MUTATION_WEIGHTS_PARAMETER,
     PARAMETER_DOMAINS,
     PATCHABLE_PARAMETERS,
     REVIEW_EVENTS,
+    action_catalog,
 )
 from .protocol import (
     DecisionValidation,
@@ -273,11 +276,10 @@ def validate_decision(
             f"would exceed max_active_lanes={context.max_active_lanes}",
         )
     _review(issues, value["next_review"], "$.next_review")
-    return DecisionValidation(
-        not issues.values,
-        tuple(issues.values),
-        dict(value) if not issues.values else None,
-    )
+    normalized = None
+    if not issues.values:
+        normalized = _annotate_parameter_effects(dict(value), context)
+    return DecisionValidation(not issues.values, tuple(issues.values), normalized)
 
 
 def _normalize_transport_nulls(value: Any) -> Any:
@@ -317,7 +319,12 @@ def _normalize_transport_nulls(value: Any) -> Any:
 def _drop_null_values(value: Any) -> None:
     if not isinstance(value, dict):
         return
-    for name in [name for name, item in value.items() if item is None]:
+    transport_fields = set(PARAMETER_DOMAINS) | {MUTATION_WEIGHTS_PARAMETER}
+    for name in [
+        name
+        for name, item in value.items()
+        if item is None and name in transport_fields
+    ]:
         value.pop(name)
 
 
@@ -533,6 +540,9 @@ def _parameters(
         if name not in allowed:
             issues.add(f"{path}.{name}", "is not valid for this algorithm")
             continue
+        if name == MUTATION_WEIGHTS_PARAMETER:
+            _mutation_weights(issues, value[name], f"{path}.{name}")
+            continue
         domain = PARAMETER_DOMAINS[name]
         if domain["type"] == "integer":
             _integer(
@@ -554,6 +564,69 @@ def _parameters(
         for required in ("order", "batch_candidates", "witness_cap"):
             if required not in value:
                 issues.add(f"{path}.{required}", "is required")
+
+
+def _mutation_weights(issues: _Issues, value: Any, path: str) -> None:
+    if not isinstance(value, dict):
+        issues.add(path, "must be an object")
+        return
+    known = set(MUTATION_OPERATORS)
+    if set(value) - known:
+        for name in sorted(set(value) - known):
+            issues.add(f"{path}.{name}", "is not a reviewed mutation operator")
+    if not value:
+        issues.add(path, "must contain at least one operator weight")
+        return
+    total = 0.0
+    for name, weight in value.items():
+        if name not in known:
+            continue
+        parsed = _number(issues, weight, f"{path}.{name}", 0, math.inf)
+        if parsed is not None:
+            total += parsed
+    if total <= 0:
+        issues.add(path, "weight sum must be positive")
+
+
+def _annotate_parameter_effects(
+    value: dict[str, Any], context: DecisionContext
+) -> dict[str, Any]:
+    """Normalize executable controls and attach their durable semantic audit."""
+
+    effects = action_catalog()["parameter_effects"]
+    for action in value["actions"]:
+        action_type = action["type"]
+        parameters: dict[str, Any] = {}
+        algorithm: str | None = None
+        if action_type == "start_lane":
+            algorithm = str(action["spec"]["algorithm"])
+            parameters = action["spec"]["parameters"]
+        elif action_type == "patch_lane":
+            algorithm = context.lane_algorithms.get(str(action["lane_id"]))
+            parameters = action["patch"]
+        elif action_type == "fork_lane":
+            algorithm = context.lane_algorithms.get(str(action["lane_id"]))
+        if MUTATION_WEIGHTS_PARAMETER in parameters:
+            weights = parameters[MUTATION_WEIGHTS_PARAMETER]
+            total = sum(float(weight) for weight in weights.values())
+            parameters[MUTATION_WEIGHTS_PARAMETER] = {
+                name: float(weights.get(name, 0.0)) / total
+                for name in MUTATION_OPERATORS
+            }
+        effective = copy.deepcopy(parameters)
+        action["effective_parameters"] = effective
+        action["ignored_parameters"] = {}
+        action["rejected_parameters"] = {}
+        action["parameter_effects"] = {
+            name: effects[name]
+            for name in effective
+            if name in effects
+        }
+        if algorithm is not None:
+            action["implemented_controls"] = sorted(
+                ALGORITHM_PARAMETERS[algorithm]
+            )
+    return value
 
 
 def _evaluation_window(issues: _Issues, value: Any, path: str) -> None:

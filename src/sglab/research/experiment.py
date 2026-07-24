@@ -15,7 +15,7 @@ from .app_server_protocol import generate_protocol_preflight
 from .auth import auth_is_imported, director_work
 from .campaign import campaign_status, target_definition_sha256
 from .candidates import CandidateArchive
-from .catalog import EXPERIMENT_ALGORITHMS, action_catalog
+from .catalog import action_catalog
 from .director import ActiveDirector
 from .lanes import (
     LaneManager,
@@ -33,7 +33,124 @@ from .snapshot import SnapshotBuilder
 from .store import ResearchStore, new_id
 from .validation import DecisionContext
 
-MAX_EXPERIMENT_GRAPH_ORDER = 20
+MAX_EXPERIMENT_GRAPH_ORDER = 22
+ADAPTIVE_EXPERIMENT_ALGORITHMS = (
+    "simulated_annealing",
+    "iterated_local_search_tabu",
+)
+PHASE_A_BENCHMARK_EVIDENCE = {
+    "scope": "order 20, seed 24072026, 300 evaluations per case",
+    "warning": (
+        "Single deterministic smoke samples; cap-64 counts were truncated "
+        "during search and are not exact."
+    ),
+    "instrumented_cases": [
+        {"cap": 64, "policy": "uniform", "candidates_per_second": 701, "best": [0, 3, 48, 0, 30]},
+        {"cap": 64, "policy": "targeted", "candidates_per_second": 521, "best": [0, 4, 48, 0, 30]},
+        {"cap": 64, "policy": "mixed", "candidates_per_second": 581, "best": [0, 3, 48, 0, 30]},
+        {"cap": 10_000, "policy": "uniform", "candidates_per_second": 463, "best": [0, 5, 72, 0, 30]},
+        {"cap": 10_000, "policy": "targeted", "candidates_per_second": 351, "best": [0, 3, 48, 0, 30]},
+        {"cap": 10_000, "policy": "mixed", "candidates_per_second": 407, "best": [0, 3, 48, 0, 30]},
+    ],
+}
+
+
+def run_mutation_policy_benchmark(
+    *, evaluations: int = 300
+) -> dict[str, Any]:
+    """Deterministic order-20 matrix; never starts a provider or app-server."""
+
+    if not 100 <= evaluations <= 2_000:
+        raise ValueError("mutation benchmark evaluations must be in [100, 2,000]")
+    policies = {
+        "uniform": {
+            "uniform_two_edge_switch": 1.0,
+            "forbidden_cycle_break_switch": 0.0,
+        },
+        "targeted": {
+            "uniform_two_edge_switch": 0.0,
+            "forbidden_cycle_break_switch": 1.0,
+        },
+        "mixed": {
+            "uniform_two_edge_switch": 0.5,
+            "forbidden_cycle_break_switch": 0.5,
+        },
+    }
+    rows = []
+    for witness_cap in (64, 10_000):
+        for policy, weights in policies.items():
+            for instrumentation_enabled in (True, False):
+                spec = LaneSpec(
+                    lane_id=(
+                        f"benchmark-{policy}-{witness_cap}-"
+                        f"{int(instrumentation_enabled)}"
+                    ),
+                    campaign_id="phase-a-mutation-benchmark",
+                    target="erdos_gyarfas",
+                    algorithm="iterated_local_search_tabu",
+                    graph_family="connected_cubic",
+                    seed=24072026,
+                    parameters={
+                        "order": 20,
+                        "batch_candidates": evaluations,
+                        "witness_cap": witness_cap,
+                        "tabu_tenure": 48,
+                        "perturbation_interval": 200,
+                        "mutation_weights": weights,
+                    },
+                    resource_share=1.0,
+                )
+                result = run_bounded_lane_batch(
+                    spec,
+                    max_evaluations=evaluations,
+                    max_wall_seconds=120,
+                    instrumentation_enabled=instrumentation_enabled,
+                )
+                timing = result["timing"]
+                counters = timing.get("counters_seconds", {})
+                witness_seconds = counters.get("witness_counting")
+                rows.append(
+                    {
+                        "policy": policy,
+                        "witness_cap": witness_cap,
+                        "instrumentation_enabled": instrumentation_enabled,
+                        "candidates_per_second": result["throughput"],
+                        "witness_counting_seconds": witness_seconds,
+                        "witness_counting_percentage": (
+                            100.0
+                            * float(witness_seconds)
+                            / max(float(timing["search_loop_seconds"]), 1e-9)
+                            if witness_seconds is not None
+                            else None
+                        ),
+                        "accepted_moves": result["operator_statistics"][
+                            "accepted"
+                        ],
+                        "global_records": result["operator_statistics"][
+                            "improvements"
+                        ],
+                        "operator_yield": result["operator_statistics"][
+                            "operator_yield"
+                        ],
+                        "operator_statistics": result["operator_statistics"][
+                            "mutation_operators"
+                        ],
+                        "best_score": result["best_score"],
+                        "score_counts_truncated_by_witness_cap": result[
+                            "metrics"
+                        ]["score_counts_truncated_by_witness_cap"],
+                        "exact_verifier_result": result["verifier_result"],
+                        "peak_rss_bytes": result["peak_rss_bytes"],
+                    }
+                )
+    return {
+        "order": 20,
+        "seed": 24072026,
+        "evaluations_per_case": evaluations,
+        "cases": rows,
+        "authenticated_model_calls": 0,
+        "app_server_started": False,
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,6 +213,21 @@ class OneBatchExperiment:
             phase="first",
         )
         return committed
+
+    async def request_batch_decision(
+        self,
+        batch_index: int,
+        prepared_state: tuple[dict[str, Any], DecisionContext] | None = None,
+    ) -> CommittedExperimentDecision:
+        if batch_index not in {1, 2, 3}:
+            raise ValueError("adaptive campaign batch index must be 1, 2, or 3")
+        snapshot, context = prepared_state or self.publish_state()
+        return await self._request_and_commit(
+            snapshot=snapshot,
+            context=context,
+            reason=f"adaptive_campaign_choose_batch_{batch_index}",
+            phase="batch",
+        )
 
     def execute_one_batch(
         self, committed: CommittedExperimentDecision
@@ -179,6 +311,29 @@ class OneBatchExperiment:
                 float(action["evaluation_window"]["max_wall_seconds"]),
             ),
         )
+        spent_before = int(
+            self.store.connection.execute(
+                """
+                SELECT COALESCE(SUM(end_high_water-start_high_water), 0)
+                FROM lane_metric_windows WHERE campaign_id=?
+                """,
+                (self.campaign_id,),
+            ).fetchone()[0]
+        )
+        plateau = result["metrics"]["plateau_signal"]
+        plateau["remaining_evaluation_budget"] = max(
+            0,
+            3 * self.evaluation_cap
+            - spent_before
+            - int(result["evaluation_count"]),
+        )
+        plateau["active"] = (
+            int(plateau["evaluations_since_last_global_record"])
+            >= int(plateau["evaluation_threshold"])
+            and int(plateau["accepted_moves_since_last_global_record"]) > 0
+            and float(plateau["diversity"]) >= 0.25
+            and int(plateau["remaining_evaluation_budget"]) > 0
+        )
         ended_at = utc_now()
         checkpoint = dict(result.pop("checkpoint"))
         relative_checkpoint = (
@@ -223,7 +378,29 @@ class OneBatchExperiment:
             }
         )
         if candidate_id is None:
-            raise RuntimeError("bounded batch did not retain its best candidate")
+            retained = self.store.connection.execute(
+                """
+                SELECT candidate_id FROM campaign_candidates
+                WHERE campaign_id=? AND graph_sha256=?
+                """,
+                (
+                    self.campaign_id,
+                    hashlib.sha256(
+                        str(checkpoint["graph6"]).encode("ascii")
+                    ).hexdigest(),
+                ),
+            ).fetchone()
+            if retained is None:
+                retained = self.store.connection.execute(
+                    """
+                    SELECT candidate_id FROM campaign_candidates
+                    WHERE campaign_id=? ORDER BY created_at, rowid LIMIT 1
+                    """,
+                    (self.campaign_id,),
+                ).fetchone()
+            if retained is None:
+                raise RuntimeError("campaign candidate archive is empty")
+            candidate_id = str(retained["candidate_id"])
         add_external_timing(
             result["metrics"],
             "sqlite_persistence",
@@ -246,7 +423,9 @@ class OneBatchExperiment:
             "action_applied_at": pre_search["applied_at"],
             "batch_started_at": started_at,
         }
-        outcome_relative = Path("experiment") / "batch-outcome.json"
+        outcome_relative = (
+            Path("experiment") / f"batch-outcome-{action_id}.json"
+        )
         atomic_write_json(self.campaign_dir / outcome_relative, result)
         outcome_payload = (self.campaign_dir / outcome_relative).read_bytes()
         result["outcome_artifact_ref"] = str(outcome_relative)
@@ -267,6 +446,11 @@ class OneBatchExperiment:
             failed=False,
             detail="one bounded experiment batch completed",
         )
+        self._persist_sequence_state(
+            event="batch_outcome_persisted",
+            decision_batch_id=committed.decision_batch_id,
+            action_id=action_id,
+        )
         return result
 
     async def request_second_decision(
@@ -281,6 +465,18 @@ class OneBatchExperiment:
             phase="second",
         )
         return committed
+
+    async def request_final_analysis(
+        self,
+        prepared_state: tuple[dict[str, Any], DecisionContext] | None = None,
+    ) -> CommittedExperimentDecision:
+        snapshot, context = prepared_state or self.publish_state()
+        return await self._request_and_commit(
+            snapshot=snapshot,
+            context=context,
+            reason="adaptive_campaign_final_analysis",
+            phase="final",
+        )
 
     async def _request_and_commit(
         self,
@@ -327,6 +523,10 @@ class OneBatchExperiment:
         )
         if not statuses or any(status != "accepted" for status in statuses.values()):
             raise RuntimeError(f"experiment decision was not fully accepted: {statuses}")
+        self._persist_sequence_state(
+            event="decision_committed",
+            decision_batch_id=decision_batch_id,
+        )
         raw = self._raw_decision(evidence.turn_record_ids[0], evidence.decision)
         return CommittedExperimentDecision(
             decision_batch_id=decision_batch_id,
@@ -343,16 +543,16 @@ class OneBatchExperiment:
     def _validate_experiment_decision(
         self, decision: dict[str, Any], phase: str
     ) -> None:
-        if phase == "first":
+        if phase in {"first", "batch"}:
             actions = decision["actions"]
             if len(actions) != 1 or actions[0]["type"] != "start_lane":
                 raise RuntimeError(
-                    "first experiment decision must contain exactly one "
+                    "search-batch decision must contain exactly one "
                     "start_lane action"
                 )
             action = actions[0]
             spec = action["spec"]
-            if spec["algorithm"] not in EXPERIMENT_ALGORITHMS:
+            if spec["algorithm"] not in ADAPTIVE_EXPERIMENT_ALGORITHMS:
                 raise RuntimeError(
                     "first decision selected a non-experiment algorithm"
                 )
@@ -360,6 +560,13 @@ class OneBatchExperiment:
                 raise RuntimeError("first decision exceeds the local evaluation cap")
             if int(spec["parameters"]["order"]) > MAX_EXPERIMENT_GRAPH_ORDER:
                 raise RuntimeError("first decision exceeds the graph-order cap")
+            if int(spec["parameters"]["order"]) not in {20, 22} and phase == "batch":
+                raise RuntimeError("adaptive campaign order must be 20 or 22")
+            if (
+                phase == "batch"
+                and int(spec["parameters"]["witness_cap"]) not in {64, 10_000}
+            ):
+                raise RuntimeError("adaptive campaign witness cap must be 64 or 10000")
             window = action["evaluation_window"]
             if int(window["max_candidate_delta"]) > self.evaluation_cap:
                 raise RuntimeError(
@@ -368,7 +575,7 @@ class OneBatchExperiment:
             if float(window["max_wall_seconds"]) > self.wall_seconds_cap:
                 raise RuntimeError("first decision wall window exceeds the cap")
             return
-        if phase != "second":
+        if phase not in {"second", "final"}:
             raise ValueError(f"unknown experiment decision phase: {phase}")
         assessment = str(decision["campaign_assessment"]).strip()
         if not assessment.startswith(
@@ -406,6 +613,72 @@ class OneBatchExperiment:
             raise KeyError(action_id)
         return str(row["lease_expires_at"])
 
+    def _persist_sequence_state(
+        self,
+        *,
+        event: str,
+        decision_batch_id: str,
+        action_id: str | None = None,
+    ) -> None:
+        counts = {
+            "successful_turns": int(
+                self.store.connection.execute(
+                    """
+                    SELECT count(*) FROM app_server_turns
+                    WHERE campaign_id=? AND status='completed_valid'
+                    """,
+                    (self.campaign_id,),
+                ).fetchone()[0]
+            ),
+            "committed_decisions": int(
+                self.store.connection.execute(
+                    """
+                    SELECT count(*) FROM director_action_batches
+                    WHERE campaign_id=? AND validation_status='accepted'
+                    """,
+                    (self.campaign_id,),
+                ).fetchone()[0]
+            ),
+            "persisted_batches": int(
+                self.store.connection.execute(
+                    """
+                    SELECT count(*) FROM lane_metric_windows
+                    WHERE campaign_id=?
+                    """,
+                    (self.campaign_id,),
+                ).fetchone()[0]
+            ),
+        }
+        if counts["successful_turns"] > 4 or counts["persisted_batches"] > 3:
+            raise RuntimeError("adaptive campaign hard count limit exceeded")
+        state_path = (
+            self.campaign_dir
+            / "experiment"
+            / "campaign-sequence-state.json"
+        )
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_json(
+            state_path,
+            {
+                "schema_version": 1,
+                "campaign_id": self.campaign_id,
+                "last_durable_event": event,
+                "decision_batch_id": decision_batch_id,
+                "action_id": action_id,
+                **counts,
+                "next_safe_transition": (
+                    "stop"
+                    if counts["successful_turns"] == 4
+                    else (
+                        "request_next_decision"
+                        if counts["persisted_batches"]
+                        == counts["committed_decisions"]
+                        else "execute_committed_batch"
+                    )
+                ),
+            },
+        )
+
 
 def build_experiment_prompt(
     snapshot: dict[str, Any],
@@ -414,19 +687,19 @@ def build_experiment_prompt(
     evaluation_cap: int,
     wall_seconds_cap: int = 120,
 ) -> str:
-    if turn_index not in {0, 1}:
-        raise RuntimeError("the experiment permits exactly two Director turns")
-    if turn_index == 0:
+    if turn_index not in {0, 1, 2, 3}:
+        raise RuntimeError("the adaptive campaign permits exactly four turns")
+    if turn_index < 3:
         contract = {
-            "phase": "choose_one_bounded_experiment",
+            "phase": f"choose_bounded_batch_{turn_index + 1}",
             "required_actions": "exactly one start_lane",
-            "allowed_algorithms": list(EXPERIMENT_ALGORITHMS),
-            "allowed_graph_families": [
-                item["id"] for item in action_catalog()["graph_families"]
-            ],
+            "allowed_algorithms": list(ADAPTIVE_EXPERIMENT_ALGORITHMS),
+            "allowed_graph_families": ["connected_cubic"],
+            "allowed_graph_orders": [20, 22],
+            "allowed_witness_caps": [64, 10_000],
             "maximum_batch_evaluations": evaluation_cap,
             "maximum_batch_wall_seconds": wall_seconds_cap,
-            "maximum_graph_order": MAX_EXPERIMENT_GRAPH_ORDER,
+            "maximum_total_campaign_evaluations": 30_000,
             "prohibited": [
                 "tools",
                 "commands",
@@ -438,15 +711,15 @@ def build_experiment_prompt(
         }
     else:
         contract = {
-            "phase": "assess_the_measured_outcome",
+            "phase": "final_analysis_after_three_measured_batches",
             "required_assessment_prefix": [
                 "CONTINUE:",
                 "CHANGE_STRATEGY:",
                 "STOP:",
             ],
             "execution_contract": (
-                "Return a schema-valid proposed next action batch. It will be "
-                "persisted but not dispatched. If recommending STOP, use one "
+                "Return a schema-valid final analysis. It will be persisted "
+                "but never dispatched. If recommending STOP, use one "
                 "set_review_trigger action as the inert schema-required action."
             ),
             "prohibited": [
@@ -464,6 +737,7 @@ def build_experiment_prompt(
         ),
         "experiment_contract": contract,
         "available_action_and_parameter_catalog": action_catalog(),
+        "phase_a_static_benchmark_evidence": PHASE_A_BENCHMARK_EVIDENCE,
         "committed_research_snapshot": snapshot,
         "admissible_evidence_ids": snapshot.get("available_evidence_ids", []),
         "required_response": "Return only the existing Director decision schema.",
@@ -512,31 +786,72 @@ def run_phase_a_audit(workspace: Path) -> dict[str, Any]:
         wall_seconds_cap=10,
     )
     try:
-        first_state = experiment.publish_state()
-        first_snapshot_id = str(first_state[0]["snapshot_id"])
-        provider.decisions[first_snapshot_id] = _phase_a_first_decision(
-            first_snapshot_id
+        decisions: list[CommittedExperimentDecision] = []
+        outcomes: list[dict[str, Any]] = []
+        snapshot_ids: list[str] = []
+        feedback_proofs: list[bool] = []
+        for batch_index in (1, 2, 3):
+            state = experiment.publish_state()
+            snapshot = state[0]
+            snapshot_id = str(snapshot["snapshot_id"])
+            snapshot_ids.append(snapshot_id)
+            previous_action_ids = {
+                str(outcome["action_id"]) for outcome in outcomes
+            }
+            observed = {
+                str(item["action_id"]): item
+                for item in snapshot["recent_actions"]
+                if str(item["action_id"]) in previous_action_ids
+            }
+            feedback_proofs.extend(
+                observed[str(outcome["action_id"])]["observed_effect"][
+                    "outcome_artifact_sha256"
+                ]
+                == outcome["outcome_artifact_sha256"]
+                for outcome in outcomes
+            )
+            evidence_ids = [
+                str(observed[action_id]["evidence_id"])
+                for action_id in sorted(observed)
+            ]
+            provider.decisions[snapshot_id] = _phase_a_batch_decision(
+                snapshot_id, batch_index, evidence_ids
+            )
+            decision = asyncio.run(
+                experiment.request_batch_decision(batch_index, state)
+            )
+            decisions.append(decision)
+            outcomes.append(experiment.execute_one_batch(decision))
+        final_state = experiment.publish_state()
+        final_snapshot = final_state[0]
+        final_snapshot_id = str(final_snapshot["snapshot_id"])
+        snapshot_ids.append(final_snapshot_id)
+        final_feedback = {
+            str(item["action_id"]): item
+            for item in final_snapshot["recent_actions"]
+            if str(item["action_id"])
+            in {str(outcome["action_id"]) for outcome in outcomes}
+        }
+        feedback_proofs.extend(
+            final_feedback[str(outcome["action_id"])]["observed_effect"][
+                "outcome_artifact_sha256"
+            ]
+            == outcome["outcome_artifact_sha256"]
+            for outcome in outcomes
         )
-        first = asyncio.run(experiment.request_first_decision(first_state))
-        outcome = experiment.execute_one_batch(first)
-        second_state = experiment.publish_state()
-        second_snapshot = second_state[0]
-        feedback = next(
-            item
-            for item in second_snapshot["recent_actions"]
-            if item["action_id"]
-            == first.validated_decision["actions"][0]["action_id"]
+        provider.decisions[final_snapshot_id] = _phase_a_final_decision(
+            final_snapshot_id,
+            [
+                str(final_feedback[str(outcome["action_id"])]["evidence_id"])
+                for outcome in outcomes
+            ],
         )
-        second_snapshot_id = str(second_snapshot["snapshot_id"])
-        provider.decisions[second_snapshot_id] = _phase_a_second_decision(
-            second_snapshot_id,
-            str(feedback["evidence_id"]),
-        )
-        second = asyncio.run(experiment.request_second_decision(second_state))
+        final = asyncio.run(experiment.request_final_analysis(final_state))
+        decisions.append(final)
         store.finish_campaign(
             campaign_id,
             terminal_kind="stopped_by_operator",
-            detail="Phase A completed after the second persisted replay decision",
+            detail="Phase A completed after four decisions and three batches",
         )
         integrity = str(
             store.connection.execute("PRAGMA integrity_check").fetchone()[0]
@@ -568,26 +883,32 @@ def run_phase_a_audit(workspace: Path) -> dict[str, Any]:
             ),
         }
         status = campaign_status(root, campaign_id)
+        sequence_state = json.loads(
+            (
+                campaign_dir
+                / "experiment"
+                / "campaign-sequence-state.json"
+            ).read_text(encoding="utf-8")
+        )
         report = {
             "phase": "A",
             "provider": "ReplayDecisionProvider",
             "authenticated_model_calls": 0,
             "campaign_id": campaign_id,
-            "first_decision_batch_id": first.decision_batch_id,
-            "second_decision_batch_id": second.decision_batch_id,
-            "first_snapshot_id": first_snapshot_id,
-            "second_snapshot_id": second_snapshot_id,
-            "decision_before_search": bool(
+            "decision_batch_ids": [
+                decision.decision_batch_id for decision in decisions
+            ],
+            "snapshot_ids": snapshot_ids,
+            "thread_ids": [decision.thread_id for decision in decisions],
+            "decision_before_search": all(
                 outcome["decision_before_search"][
                     "first_graph_evaluation_count"
                 ]
                 == 0
+                for outcome in outcomes
             ),
-            "batch_outcome_serialized_to_second_state": (
-                feedback["observed_effect"]["evaluation_count"]
-                == outcome["evaluation_count"]
-            ),
-            "batch": {
+            "outcomes_serialized_to_next_states": all(feedback_proofs),
+            "batches": [{
                 key: outcome[key]
                 for key in (
                     "algorithm",
@@ -607,8 +928,9 @@ def run_phase_a_audit(workspace: Path) -> dict[str, Any]:
                     "verifier_result",
                     "termination_reason",
                 )
-            },
+            } for outcome in outcomes],
             "counts": counts,
+            "resume_safe_sequence_state": sequence_state,
             "sqlite_integrity_check": integrity,
             "dashboard": {
                 "director_decision": status.get("assessment") is not None,
@@ -618,26 +940,38 @@ def run_phase_a_audit(workspace: Path) -> dict[str, Any]:
                 ),
                 "batch_progress": bool(
                     status.get("lanes")
-                    and status["lanes"][0]["telemetry_high_water"] == 300
+                    and status["lanes"][0]["telemetry_high_water"] <= 300
                 ),
                 "final_outcome": any(
-                    (action.get("observed_effect") or {}).get("evaluation_count")
-                    == 300
+                    0
+                    < int(
+                        (action.get("observed_effect") or {}).get(
+                            "evaluation_count", 0
+                        )
+                    )
+                    <= 300
                     for action in status.get("actions", [])
                 ),
             },
             "recommended_evaluation_cap": max(
                 500,
-                min(10_000, int(float(outcome["throughput"]) * 30)),
+                min(
+                    10_000,
+                    int(max(float(item["throughput"]) for item in outcomes) * 30),
+                ),
             ),
             "failures": [],
         }
         report["ok"] = (
             report["decision_before_search"]
-            and report["batch_outcome_serialized_to_second_state"]
+            and report["outcomes_serialized_to_next_states"]
             and integrity == "ok"
             and counts
-            == {"turns": 2, "decision_batches": 2, "search_batches": 1}
+            == {"turns": 4, "decision_batches": 4, "search_batches": 3}
+            and len(set(report["thread_ids"])) == 1
+            and sequence_state["next_safe_transition"] == "stop"
+            and sequence_state["successful_turns"] == 4
+            and sequence_state["persisted_batches"] == 3
             and all(report["dashboard"].values())
         )
         if not report["ok"]:
@@ -752,21 +1086,22 @@ async def _run_authenticated_experiment(
         campaign_dir=campaign_dir,
         evaluation_cap=evaluation_cap,
     )
-    first: CommittedExperimentDecision | None = None
-    second: CommittedExperimentDecision | None = None
-    outcome: dict[str, Any] | None = None
+    decisions: list[CommittedExperimentDecision] = []
+    outcomes: list[dict[str, Any]] = []
     shutdown_mode: str | None = None
     try:
         await director.start()
-        first = await experiment.request_first_decision()
-        outcome = experiment.execute_one_batch(first)
-        second = await experiment.request_second_decision()
-        if first.thread_id != second.thread_id:
+        for batch_index in (1, 2, 3):
+            decision = await experiment.request_batch_decision(batch_index)
+            decisions.append(decision)
+            outcomes.append(experiment.execute_one_batch(decision))
+        decisions.append(await experiment.request_final_analysis())
+        if len({decision.thread_id for decision in decisions}) != 1:
             raise RuntimeError("Director decisions used different threads")
         store.finish_campaign(
             campaign_id,
             terminal_kind="stopped_by_operator",
-            detail="Stopped after persisting the second experiment decision",
+            detail="Stopped after A4; no fourth search batch was dispatched",
         )
     finally:
         manager.shutdown()
@@ -777,9 +1112,9 @@ async def _run_authenticated_experiment(
         stderr_path.parent.mkdir(parents=True, exist_ok=True)
         stderr_path.write_text(client.stderr_text, encoding="utf-8")
         stderr_path.chmod(0o600)
-    if first is None or second is None or outcome is None:
+    if len(decisions) != 4 or len(outcomes) != 3:
         store.close()
-        raise RuntimeError("authenticated experiment did not complete")
+        raise RuntimeError("authenticated adaptive campaign did not complete")
     turns = [
         dict(row)
         for row in store.connection.execute(
@@ -807,37 +1142,54 @@ async def _run_authenticated_experiment(
     integrity = str(
         store.connection.execute("PRAGMA integrity_check").fetchone()[0]
     )
-    second_feedback = next(
-        item
-        for item in second.snapshot["recent_actions"]
-        if item["action_id"] == outcome["action_id"]
-    )
+    feedback_proofs = []
+    for decision_index, decision in enumerate(decisions[1:], start=1):
+        expected_outcomes = outcomes[:decision_index]
+        available = {
+            str(item["action_id"]): item
+            for item in decision.snapshot["recent_actions"]
+        }
+        feedback_proofs.extend(
+            available[str(outcome["action_id"])]["observed_effect"][
+                "outcome_artifact_sha256"
+            ]
+            == outcome["outcome_artifact_sha256"]
+            for outcome in expected_outcomes
+        )
     correlations, protocol_observations = _wire_correlations(
         campaign_dir, turns
+    )
+    sequence_state = json.loads(
+        (
+            campaign_dir / "experiment" / "campaign-sequence-state.json"
+        ).read_text(encoding="utf-8")
     )
     report = {
         "campaign_id": campaign_id,
         "codex_version": preflight["codex_version_output"],
-        "thread_id": first.thread_id,
-        "turn_ids": [first.turn_id, second.turn_id],
-        "turn_record_ids": [first.turn_record_id, second.turn_record_id],
+        "thread_id": decisions[0].thread_id,
+        "turn_ids": [decision.turn_id for decision in decisions],
+        "turn_record_ids": [
+            decision.turn_record_id for decision in decisions
+        ],
         "final_agent_item_ids": [
             turn["final_agent_item_id"] for turn in turns
         ],
         "request_turn_item_correlations": correlations,
-        "first_raw_decision": first.raw_decision,
-        "first_validated_decision": first.validated_decision,
-        "first_decision_batch_id": first.decision_batch_id,
-        "batch_outcome": outcome,
-        "second_snapshot_id": second.snapshot["snapshot_id"],
-        "second_feedback_evidence": second_feedback,
-        "second_raw_decision": second.raw_decision,
-        "second_validated_decision": second.validated_decision,
-        "second_decision_batch_id": second.decision_batch_id,
+        "raw_decisions": [decision.raw_decision for decision in decisions],
+        "validated_decisions": [
+            decision.validated_decision for decision in decisions
+        ],
+        "decision_batch_ids": [
+            decision.decision_batch_id for decision in decisions
+        ],
+        "batch_outcomes": outcomes,
+        "outcome_comparisons": _outcome_comparisons(outcomes),
         "usage": [_turn_usage(turn) for turn in turns],
         "model_inferences": len(turns),
         "decision_batches": decision_count,
         "search_batches": search_batch_count,
+        "resume_safe_sequence_state": sequence_state,
         "unsupported_server_requests": client.unsupported_server_requests,
         "tool_calls": protocol_observations["tool_calls"],
         "retrying_errors": protocol_observations["retrying_errors"],
@@ -846,33 +1198,32 @@ async def _run_authenticated_experiment(
         "graceful_shutdown": shutdown_mode == "graceful",
         "shutdown_mode": shutdown_mode,
         "sqlite_integrity_check": integrity,
-        "decision_before_search": (
+        "decision_before_each_batch": all(
             outcome["decision_before_search"]["first_graph_evaluation_count"]
             == 0
+            for outcome in outcomes
         ),
-        "outcome_feedback_to_llm": (
-            second_feedback["observed_effect"]["outcome_artifact_sha256"]
-            == outcome["outcome_artifact_sha256"]
-        ),
-        "second_batch_not_executed": search_batch_count == 1,
+        "outcomes_fed_back_to_llm": all(feedback_proofs),
+        "fourth_batch_not_executed": search_batch_count == 3,
         "failures": [],
     }
     required = (
-        report["model_inferences"] == 2
+        report["model_inferences"] == 4
         and all(turn["status"] == "completed_valid" for turn in turns)
-        and report["decision_batches"] == 2
-        and report["search_batches"] == 1
+        and report["decision_batches"] == 4
+        and report["search_batches"] == 3
         and report["unsupported_server_requests"] == 0
         and not report["tool_calls"]
         and not report["retrying_errors"]
-        and report["turn_start_requests"] == 2
+        and report["turn_start_requests"] == 4
         and all(report["final_agent_item_ids"])
         and report["skills_isolated"]
         and report["graceful_shutdown"]
         and integrity == "ok"
-        and report["decision_before_search"]
-        and report["outcome_feedback_to_llm"]
-        and report["second_batch_not_executed"]
+        and report["decision_before_each_batch"]
+        and report["outcomes_fed_back_to_llm"]
+        and report["fourth_batch_not_executed"]
+        and sequence_state["next_safe_transition"] == "stop"
     )
     report["ok"] = required
     if not required:
@@ -887,27 +1238,108 @@ async def _run_authenticated_experiment(
     return {**report, "report_path": str(output)}
 
 
+def _outcome_comparisons(
+    outcomes: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    baseline = (0, 3, 48, 0, 30)
+    values = []
+    for index, outcome in enumerate(outcomes):
+        score = tuple(outcome["best_score"]["ordering_key"])
+        previous = (
+            tuple(outcomes[index - 1]["best_score"]["ordering_key"])
+            if index
+            else None
+        )
+        values.append(
+            {
+                "batch_index": index + 1,
+                "best_score": list(score),
+                "improved_over_previous_batch": (
+                    score < previous if previous is not None else None
+                ),
+                "improved_over_best_phase_a_static_baseline": score < baseline,
+                "continuing_previous_configuration": (
+                    "not_measured_counterfactual"
+                ),
+                "statistical_superiority_claimed": False,
+            }
+        )
+    return values
+
+
 def _phase_a_first_decision(snapshot_id: str) -> dict[str, Any]:
-    action = _common_replay_action("phase-a-start", "start_lane")
+    return _phase_a_batch_decision(snapshot_id, 1, [])
+
+
+def _phase_a_batch_decision(
+    snapshot_id: str,
+    batch_index: int,
+    evidence_ids: list[str],
+) -> dict[str, Any]:
+    action = _common_replay_action(
+        f"phase-a-start-{batch_index}", "start_lane"
+    )
+    action["evidence_ids"] = evidence_ids
+    configurations = {
+        1: (
+            "simulated_annealing",
+            20260724,
+            {
+                "temperature": 1.0,
+                "cooling": 0.995,
+                "restart_threshold": 1000,
+                "mutation_weights": {
+                    "uniform_two_edge_switch": 1.0,
+                    "forbidden_cycle_break_switch": 0.0,
+                },
+            },
+        ),
+        2: (
+            "iterated_local_search_tabu",
+            20260725,
+            {
+                "tabu_tenure": 32,
+                "perturbation_interval": 50,
+                "mutation_weights": {
+                    "uniform_two_edge_switch": 0.0,
+                    "forbidden_cycle_break_switch": 1.0,
+                },
+            },
+        ),
+        3: (
+            "simulated_annealing",
+            20260726,
+            {
+                "temperature": 0.5,
+                "cooling": 0.999,
+                "restart_threshold": 1000,
+                "mutation_weights": {
+                    "uniform_two_edge_switch": 0.5,
+                    "forbidden_cycle_break_switch": 0.5,
+                },
+            },
+        ),
+    }
+    algorithm, seed, extras = configurations[batch_index]
     action["spec"] = {
-        "algorithm": "simulated_annealing",
+        "algorithm": algorithm,
         "graph_family": "connected_cubic",
-        "seed": 20260724,
+        "seed": seed,
         "parameters": {
-            "order": 10,
+            "order": 20,
             "batch_candidates": 300,
-            "witness_cap": 16,
-            "temperature": 1.0,
-            "cooling": 0.995,
-            "restart_threshold": 1000,
-            "promotion_penalty": 1000,
+            "witness_cap": 64,
+            **extras,
         },
         "resource_share": 1.0,
     }
     return {
         "schema_version": "1.0",
         "snapshot_id": snapshot_id,
-        "campaign_assessment": "Run one small deterministic replay batch.",
+        "campaign_assessment": (
+            f"Run deterministic replay batch {batch_index} using measured "
+            "prior outcomes."
+        ),
         "hypothesis_updates": [],
         "actions": [action],
         "next_review": {
@@ -946,6 +1378,18 @@ def _phase_a_second_decision(
             "events": ["meaningful_improvement"],
         },
     }
+
+
+def _phase_a_final_decision(
+    snapshot_id: str, evidence_ids: list[str]
+) -> dict[str, Any]:
+    value = _phase_a_second_decision(snapshot_id, evidence_ids[0])
+    value["actions"][0]["evidence_ids"] = evidence_ids
+    value["campaign_assessment"] = (
+        "STOP: all three bounded replay outcomes were measured; no fourth "
+        "batch is authorized."
+    )
+    return value
 
 
 def _common_replay_action(

@@ -10,6 +10,8 @@ from .catalog import (
     ALGORITHMS,
     DIAGNOSTICS,
     GRAPH_FAMILIES,
+    MUTATION_OPERATORS,
+    MUTATION_WEIGHTS_PARAMETER,
     PARAMETER_DOMAINS,
     REVIEW_EVENTS,
 )
@@ -133,6 +135,15 @@ def director_decision_schema() -> dict[str, Any]:
         )
         for name, domain in PARAMETER_DOMAINS.items()
     }
+    parameter_properties[MUTATION_WEIGHTS_PARAMETER] = {
+        "type": ["object", "null"],
+        "additionalProperties": False,
+        "required": list(MUTATION_OPERATORS),
+        "properties": {
+            name: {"type": "number", "minimum": 0}
+            for name in MUTATION_OPERATORS
+        },
+    }
     parameter_schema = {
         "type": "object",
         "additionalProperties": False,
@@ -166,8 +177,15 @@ def director_decision_schema() -> dict[str, Any]:
             name: {**domain, "type": [domain["type"], "null"]}
             for name, domain in PARAMETER_DOMAINS.items()
             if name != "order"
+        }
+        | {
+            MUTATION_WEIGHTS_PARAMETER: parameter_properties[
+                MUTATION_WEIGHTS_PARAMETER
+            ]
         },
-        "required": [name for name in PARAMETER_DOMAINS if name != "order"],
+        "required": [
+            name for name in parameter_properties if name != "order"
+        ],
     }
     action_variants = [
         variant(

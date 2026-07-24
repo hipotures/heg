@@ -26,7 +26,6 @@ def spec() -> LaneSpec:
             "temperature": 1.0,
             "cooling": 0.999,
             "restart_threshold": 1000,
-            "promotion_penalty": 0,
         },
         resource_share=1,
         created_by_action_id="bootstrap",

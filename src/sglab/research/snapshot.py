@@ -12,6 +12,7 @@ from ..model import BitGraph
 from ..state import utc_now
 from ..targets import target_summary
 from .lanes import LaneManager
+from .catalog import action_catalog
 from .protocol import MAX_SNAPSHOT_BYTES, canonical_json
 from .store import ResearchStore, new_id
 from .validation import DecisionContext
@@ -88,6 +89,7 @@ class SnapshotBuilder:
             "verification": verification,
             "recent_actions": recent_actions,
             "hypotheses": hypotheses,
+            "implemented_director_controls": action_catalog(),
             "available_evidence_ids": sorted(evidence)[:512],
         }
         canonical_json(snapshot, max_bytes=MAX_SNAPSHOT_BYTES)
@@ -203,6 +205,7 @@ class SnapshotBuilder:
             """
             SELECT a.action_id, a.action_type, a.target_lane_id,
                    a.expected_lane_version, a.expected_effect,
+                   a.parameters_json, a.hypothesis_ids_json,
                    a.evaluation_window_json, a.validation_status,
                    o.application_status, o.resulting_lane_id,
                    o.resulting_lane_version, o.observed_effect_json,
@@ -219,6 +222,11 @@ class SnapshotBuilder:
         for row in rows:
             evidence_id = f"action:{row['action_id']}"
             evidence.add(evidence_id)
+            observed_effect = (
+                _compact_observed_effect(json.loads(row["observed_effect_json"]))
+                if row["observed_effect_json"]
+                else None
+            )
             values.append(
                 {
                     "evidence_id": evidence_id,
@@ -227,6 +235,21 @@ class SnapshotBuilder:
                     "target_lane_id": row["target_lane_id"],
                     "expected_lane_version": row["expected_lane_version"],
                     "expected_effect": row["expected_effect"],
+                    "previous_director_hypothesis_ids": json.loads(
+                        row["hypothesis_ids_json"]
+                    ),
+                    "effective_parameters": json.loads(
+                        row["parameters_json"]
+                    ).get("effective_parameters", {}),
+                    "ignored_parameters": json.loads(
+                        row["parameters_json"]
+                    ).get("ignored_parameters", {}),
+                    "rejected_parameters": json.loads(
+                        row["parameters_json"]
+                    ).get("rejected_parameters", {}),
+                    "parameter_effects": json.loads(
+                        row["parameters_json"]
+                    ).get("parameter_effects", {}),
                     "evaluation_window": json.loads(
                         row["evaluation_window_json"]
                     ),
@@ -235,15 +258,36 @@ class SnapshotBuilder:
                     "resulting_lane_id": row["resulting_lane_id"],
                     "resulting_lane_version": row["resulting_lane_version"],
                     "observed_effect": (
-                        json.loads(row["observed_effect_json"])
-                        if row["observed_effect_json"]
-                        else None
+                        observed_effect
                     ),
                     "expectation_met": (
                         bool(row["expectation_met"])
                         if row["expectation_met"] is not None
                         else None
                     ),
+                    "measured_outcome_against_expected_signal": {
+                        "expected_signal": row["expected_effect"],
+                        "measured_outcome": (
+                            {
+                                key: observed_effect[key]
+                                for key in (
+                                    "outcome_artifact_sha256",
+                                    "evaluation_count",
+                                    "best_score",
+                                    "termination_reason",
+                                )
+                                if observed_effect is not None
+                                and key in observed_effect
+                            }
+                            if observed_effect is not None
+                            else None
+                        ),
+                        "expectation_met": (
+                            bool(row["expectation_met"])
+                            if row["expectation_met"] is not None
+                            else None
+                        ),
+                    },
                     "failure_kind": row["failure_kind"],
                     "failure_detail": row["failure_detail"],
                     "applied_at": row["applied_at"],
@@ -404,6 +448,57 @@ def _checkpoint_id_from_ref(value: Any) -> str | None:
     if not value:
         return None
     return Path(str(value)).stem
+
+
+def _compact_observed_effect(value: dict[str, Any]) -> dict[str, Any]:
+    """Remove graph bodies, checkpoints and duplicated raw metrics from prompts."""
+
+    allowed = {
+        "algorithm",
+        "parameters",
+        "seed",
+        "graph_family",
+        "graph_order",
+        "evaluation_count",
+        "throughput",
+        "elapsed_seconds",
+        "peak_rss_bytes",
+        "initial_score",
+        "best_score",
+        "score_trajectory_summary",
+        "operator_statistics",
+        "mutation_ancestry",
+        "timing",
+        "best_candidate_identifier",
+        "verifier_result",
+        "termination_reason",
+        "decision_before_search",
+        "outcome_artifact_ref",
+        "outcome_artifact_sha256",
+        "lane_id",
+        "decision_batch_id",
+        "action_id",
+        "metric_window_id",
+        "checkpoint_id",
+    }
+    compact = {key: value[key] for key in allowed if key in value}
+    metrics = value.get("metrics")
+    if isinstance(metrics, dict):
+        for key in (
+            "best_evaluation",
+            "plateau_evaluations",
+            "plateau_signal",
+            "global_record_count",
+            "accepted",
+            "duplicates",
+            "diversity",
+            "actual_restart_occurred",
+            "actual_restart_count",
+            "score_counts_truncated_by_witness_cap",
+        ):
+            if key in metrics:
+                compact[key] = metrics[key]
+    return compact
 
 
 def _parse_time(value: str) -> datetime:

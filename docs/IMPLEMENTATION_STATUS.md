@@ -2,6 +2,29 @@
 
 Last implementation audit: **2026-07-24**.
 
+## Adaptive multi-batch Director — deterministic Phase A complete
+
+The Director action space is now semantically enforced: ILS-tabu rejects
+`restart_threshold`, `promotion_penalty` is campaign metadata rather than an
+executable control, accepted actions durably record effective/ignored/rejected
+parameters and parameter effects, and snapshots list implemented controls per
+algorithm.
+
+Search lanes support normalized weighted choice between the existing uniform
+connected-cubic two-edge switch and a safe switch targeted at an edge of a
+detected forbidden-cycle witness. Telemetry now includes per-operator uses,
+accepted moves, global records and yield, a deterministic plateau signal,
+witness truncation, actual restarts, bounded ancestry, timing and
+expected-versus-measured outcome context.
+
+The no-model adaptive replay completed four decisions and exactly three
+300-evaluation order-20 batches on one replay thread. Each decision was
+durable before its batch, every measured prior outcome appeared in the next
+snapshot, A4 received all three outcomes, no B4 was created, the dashboard
+exposed the state, and SQLite integrity was `ok`. The authenticated runner is
+prepared with the same four-turn/three-batch hard gates but has not been run.
+See `docs/reports/M6_ADAPTIVE_CAMPAIGN_PHASE_A.md`.
+
 ## Search timing and mutation ancestry — offline complete
 
 The authenticated order-20 ILS-tabu configuration was reproduced without

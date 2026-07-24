@@ -66,11 +66,17 @@ PARAMETER_DOMAINS: dict[str, dict[str, Any]] = {
         "minimum": 1,
         "maximum": 1_000_000,
     },
-    "promotion_penalty": {
-        "type": "integer",
-        "minimum": 0,
-        "maximum": 1_000_000_000,
-    },
+}
+
+MUTATION_OPERATORS = (
+    "uniform_two_edge_switch",
+    "forbidden_cycle_break_switch",
+)
+MUTATION_WEIGHTS_PARAMETER = "mutation_weights"
+CAMPAIGN_METADATA_FIELDS = {
+    "promotion_penalty": (
+        "Campaign-ranking metadata only; it is never passed to a search lane."
+    )
 }
 
 ALGORITHM_PARAMETERS = {
@@ -78,7 +84,6 @@ ALGORITHM_PARAMETERS = {
         "order",
         "batch_candidates",
         "witness_cap",
-        "promotion_penalty",
     },
     "simulated_annealing": {
         "order",
@@ -87,7 +92,7 @@ ALGORITHM_PARAMETERS = {
         "temperature",
         "cooling",
         "restart_threshold",
-        "promotion_penalty",
+        MUTATION_WEIGHTS_PARAMETER,
     },
     "iterated_local_search": {
         "order",
@@ -95,8 +100,7 @@ ALGORITHM_PARAMETERS = {
         "witness_cap",
         "tabu_tenure",
         "perturbation_interval",
-        "restart_threshold",
-        "promotion_penalty",
+        MUTATION_WEIGHTS_PARAMETER,
     },
     "iterated_local_search_tabu": {
         "order",
@@ -104,8 +108,7 @@ ALGORITHM_PARAMETERS = {
         "witness_cap",
         "tabu_tenure",
         "perturbation_interval",
-        "restart_threshold",
-        "promotion_penalty",
+        MUTATION_WEIGHTS_PARAMETER,
     },
 }
 
@@ -116,8 +119,27 @@ PATCHABLE_PARAMETERS = {
 
 
 def action_catalog() -> dict[str, Any]:
+    parameter_effects = {
+        "order": "Graph order used for seed generation.",
+        "batch_candidates": "Maximum candidate evaluations in one lane batch.",
+        "witness_cap": (
+            "Per-forbidden-length witness-count cap; capped counts are not exact."
+        ),
+        "temperature": "Initial simulated-annealing acceptance temperature.",
+        "cooling": "Multiplicative simulated-annealing cooling factor.",
+        "restart_threshold": (
+            "Simulated annealing reseeds after this many evaluations."
+        ),
+        "tabu_tenure": "Maximum recent candidate hashes retained by tabu search.",
+        "perturbation_interval": (
+            "ILS-tabu permits a perturbation acceptance at this cadence."
+        ),
+        MUTATION_WEIGHTS_PARAMETER: (
+            "Normalized selection probabilities over reviewed safe mutations."
+        ),
+    }
     return {
-        "catalog_version": "1.0",
+        "catalog_version": "1.1",
         "algorithms": list(ALGORITHMS),
         "graph_families": [
             {"id": family, "engine_mode": mode}
@@ -127,6 +149,15 @@ def action_catalog() -> dict[str, Any]:
         "diagnostics": list(DIAGNOSTICS),
         "review_events": list(REVIEW_EVENTS),
         "parameter_domains": PARAMETER_DOMAINS,
+        "mutation_operators": list(MUTATION_OPERATORS),
+        "mutation_weights_contract": {
+            "known_operators_only": True,
+            "minimum_weight": 0.0,
+            "positive_sum_required": True,
+            "normalized_before_execution": True,
+        },
+        "parameter_effects": parameter_effects,
+        "campaign_metadata_fields": CAMPAIGN_METADATA_FIELDS,
         "algorithm_parameters": {
             algorithm: sorted(parameters)
             for algorithm, parameters in ALGORITHM_PARAMETERS.items()

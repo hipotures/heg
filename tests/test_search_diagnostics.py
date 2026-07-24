@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from unittest.mock import patch
+from random import Random
 import unittest
 
+from sglab.model import find_cycles_of_length_bounded
 from sglab.research.lanes import LaneSpec, run_bounded_lane_batch
+from sglab.targets import TARGETS
 
 
 def _spec(*, evaluations: int = 1_000) -> LaneSpec:
@@ -20,8 +23,6 @@ def _spec(*, evaluations: int = 1_000) -> LaneSpec:
             "witness_cap": 16,
             "tabu_tenure": 32,
             "perturbation_interval": 50,
-            "restart_threshold": 1_000,
-            "promotion_penalty": 10,
         },
         resource_share=1.0,
     )
@@ -138,6 +139,89 @@ class SearchDiagnosticsTests(unittest.TestCase):
             disabled["throughput"],
             enabled["throughput"] * 0.5,
             "disabled diagnostics regressed throughput by more than 50%",
+        )
+
+    def test_operator_weights_are_applied_and_reported(self) -> None:
+        uniform_spec = _spec(evaluations=200)
+        uniform_spec.parameters["mutation_weights"] = {
+            "uniform_two_edge_switch": 1.0,
+            "forbidden_cycle_break_switch": 0.0,
+        }
+        targeted_spec = _spec(evaluations=200)
+        targeted_spec.parameters["mutation_weights"] = {
+            "uniform_two_edge_switch": 0.0,
+            "forbidden_cycle_break_switch": 1.0,
+        }
+        uniform = run_bounded_lane_batch(
+            uniform_spec, max_evaluations=200, max_wall_seconds=10
+        )
+        targeted = run_bounded_lane_batch(
+            targeted_spec, max_evaluations=200, max_wall_seconds=10
+        )
+        self.assertEqual(
+            set(uniform["operator_statistics"]["mutation_operators"]),
+            {"uniform_two_edge_switch"},
+        )
+        self.assertEqual(
+            set(targeted["operator_statistics"]["mutation_operators"]),
+            {"forbidden_cycle_break_switch"},
+        )
+        self.assertEqual(
+            uniform["operator_statistics"]["mutation_operators"][
+                "uniform_two_edge_switch"
+            ]["uses"],
+            200,
+        )
+        self.assertEqual(
+            targeted["operator_statistics"]["mutation_operators"][
+                "forbidden_cycle_break_switch"
+            ]["uses"],
+            200,
+        )
+
+    def test_targeted_switch_removes_a_forbidden_witness_edge_safely(
+        self,
+    ) -> None:
+        plugin = TARGETS["erdos_gyarfas"]
+        graph = plugin.generate_seed(
+            Random(17), {"order": 20, "mode": "cubic_first"}
+        )
+        witness_edges = set()
+        for length in plugin.forbidden_lengths(graph.n):
+            witnesses, _complete = find_cycles_of_length_bounded(
+                graph, length, 64, 50_000
+            )
+            for witness in witnesses:
+                witness_edges.update(
+                    tuple(
+                        sorted(
+                            (
+                                witness[index],
+                                witness[(index + 1) % len(witness)],
+                            )
+                        )
+                    )
+                    for index in range(len(witness))
+                )
+        candidate = graph
+        for seed in range(64):
+            candidate = plugin.mutate(
+                graph,
+                Random(seed),
+                {
+                    "mode": "cubic_first",
+                    "mutation_operator": "forbidden_cycle_break_switch",
+                },
+            )
+            if candidate != graph:
+                break
+        self.assertNotEqual(candidate, graph)
+        removed = set(graph.edges()) - set(candidate.edges())
+        self.assertEqual(len(removed), 2)
+        self.assertTrue(removed & witness_edges)
+        self.assertTrue(candidate.is_connected())
+        self.assertTrue(
+            all(candidate.degree(vertex) == 3 for vertex in range(candidate.n))
         )
 
 

@@ -10,7 +10,7 @@ import tempfile
 import unittest
 
 from sglab.research.campaign import campaign_status, target_definition_sha256
-from sglab.research.experiment import OneBatchExperiment
+from sglab.research.experiment import OneBatchExperiment, run_phase_a_audit
 from sglab.research.lanes import (
     LaneManager,
     LaneSpec,
@@ -54,7 +54,10 @@ def _first_decision(snapshot_id: str) -> dict:
             "temperature": 1.0,
             "cooling": 0.995,
             "restart_threshold": 1000,
-            "promotion_penalty": 1000,
+            "mutation_weights": {
+                "uniform_two_edge_switch": 1,
+                "forbidden_cycle_break_switch": 1,
+            },
         },
         "resource_share": 1.0,
     }
@@ -101,6 +104,25 @@ def _second_decision(snapshot_id: str, evidence_id: str) -> dict:
 
 
 class OneBatchExperimentTests(unittest.TestCase):
+    def test_adaptive_phase_a_runs_four_turns_three_batches_and_no_fourth(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            report = run_phase_a_audit(Path(directory))
+        self.assertTrue(report["ok"], report["failures"])
+        self.assertEqual(
+            report["counts"],
+            {"turns": 4, "decision_batches": 4, "search_batches": 3},
+        )
+        self.assertTrue(report["decision_before_search"])
+        self.assertTrue(report["outcomes_serialized_to_next_states"])
+        self.assertEqual(len(set(report["thread_ids"])), 1)
+        self.assertEqual(report["sqlite_integrity_check"], "ok")
+        self.assertEqual(
+            report["resume_safe_sequence_state"]["next_safe_transition"],
+            "stop",
+        )
+
     def test_every_allowed_experiment_algorithm_runs_one_bounded_batch(
         self,
     ) -> None:
@@ -114,7 +136,6 @@ class OneBatchExperimentTests(unittest.TestCase):
             "iterated_local_search_tabu": {
                 "tabu_tenure": 32,
                 "perturbation_interval": 50,
-                "restart_threshold": 1000,
             },
         }
         for algorithm, extras in parameters.items():
@@ -131,7 +152,6 @@ class OneBatchExperimentTests(unittest.TestCase):
                             "order": 10,
                             "batch_candidates": 100,
                             "witness_cap": 16,
-                            "promotion_penalty": 1000,
                             **extras,
                         },
                         resource_share=1.0,
@@ -183,6 +203,21 @@ class OneBatchExperimentTests(unittest.TestCase):
                 first = asyncio.run(
                     experiment.request_first_decision(first_state)
                 )
+                persisted_action = json.loads(
+                    store.connection.execute(
+                        """
+                        SELECT parameters_json FROM director_actions
+                        WHERE action_id='phase-a-start'
+                        """
+                    ).fetchone()[0]
+                )
+                for field in (
+                    "effective_parameters",
+                    "ignored_parameters",
+                    "rejected_parameters",
+                    "parameter_effects",
+                ):
+                    self.assertIn(field, persisted_action)
                 outcome = experiment.execute_one_batch(first)
                 self.assertEqual(outcome["evaluation_count"], 300)
                 self.assertEqual(

@@ -306,11 +306,19 @@ class SyntheticControlProvider:
             "order": order,
             "batch_candidates": 2_000,
             "witness_cap": 64,
-            "restart_threshold": 20_000,
-            "promotion_penalty": 1_000,
+            "mutation_weights": {
+                "uniform_two_edge_switch": 1.0,
+                "forbidden_cycle_break_switch": 0.0,
+            },
         }
         if algorithm == "simulated_annealing":
-            parameters.update({"temperature": 1.0, "cooling": 0.995})
+            parameters.update(
+                {
+                    "temperature": 1.0,
+                    "cooling": 0.995,
+                    "restart_threshold": 20_000,
+                }
+            )
         else:
             parameters.update(
                 {"tabu_tenure": 64, "perturbation_interval": 500}
@@ -353,14 +361,17 @@ class SyntheticControlProvider:
             choices.append("fork")
         choice = self.rng.choice(choices)
         if choice == "patch":
+            patch = (
+                {"temperature": self.rng.uniform(0.1, 4.0)}
+                if lane["algorithm"] == "simulated_annealing"
+                else {"tabu_tenure": self.rng.randint(16, 256)}
+            )
             action = self._common("patch_lane")
             action.update(
                 {
                     "lane_id": lane_id,
                     "expected_lane_version": lane_version,
-                    "patch": {
-                        "restart_threshold": self.rng.randint(1_000, 50_000)
-                    },
+                    "patch": patch,
                 }
             )
             return action
@@ -378,6 +389,11 @@ class SyntheticControlProvider:
             )
             return action
         if choice == "fork":
+            patch = (
+                {"temperature": self.rng.uniform(0.1, 4.0)}
+                if lane["algorithm"] == "simulated_annealing"
+                else {"tabu_tenure": self.rng.randint(16, 256)}
+            )
             action = self._common("fork_lane")
             action.update(
                 {
@@ -387,11 +403,7 @@ class SyntheticControlProvider:
                     "variants": [
                         {
                             "name": "random-control",
-                            "patch": {
-                                "restart_threshold": self.rng.randint(
-                                    1_000, 50_000
-                                )
-                            },
+                            "patch": patch,
                             "resource_share": 0.25,
                         }
                     ],

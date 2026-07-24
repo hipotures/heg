@@ -14,11 +14,15 @@ def lane_spec(lane_id: str, algorithm: str, share: float = 0.5) -> LaneSpec:
         "order": 8,
         "batch_candidates": 100,
         "witness_cap": 4,
-        "restart_threshold": 1000,
-        "promotion_penalty": 0,
     }
     if algorithm == "simulated_annealing":
-        parameters.update({"temperature": 1.0, "cooling": 0.999})
+        parameters.update(
+            {
+                "temperature": 1.0,
+                "cooling": 0.999,
+                "restart_threshold": 1000,
+            }
+        )
     else:
         parameters.update({"tabu_tenure": 32, "perturbation_interval": 16})
     return LaneSpec(
