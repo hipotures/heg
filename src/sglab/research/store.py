@@ -1244,6 +1244,377 @@ class ResearchStore:
             )
             return cursor.rowcount == 1
 
+    def retain_campaign_candidate(
+        self,
+        *,
+        candidate_id: str,
+        campaign_id: str,
+        lane_id: str,
+        lane_version: int,
+        checkpoint_ref: str | None,
+        graph6: str,
+        graph_sha256: str,
+        score: dict[str, Any],
+        artifact_ref: str,
+        artifact_sha256: str,
+    ) -> bool:
+        with self.transaction() as database:
+            cursor = database.execute(
+                """
+                INSERT OR IGNORE INTO campaign_candidates
+                (candidate_id, campaign_id, lane_id, lane_version,
+                 checkpoint_ref, graph6, graph_sha256, score_json, state,
+                 artifact_ref, artifact_sha256, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'retained', ?, ?, ?)
+                """,
+                (
+                    candidate_id,
+                    campaign_id,
+                    lane_id,
+                    lane_version,
+                    checkpoint_ref,
+                    graph6,
+                    graph_sha256,
+                    json.dumps(score, sort_keys=True),
+                    artifact_ref,
+                    artifact_sha256,
+                    utc_now(),
+                ),
+            )
+            return cursor.rowcount == 1
+
+    def prune_campaign_candidates(
+        self, campaign_id: str, maximum: int
+    ) -> list[str]:
+        if maximum < 1:
+            raise ValueError("candidate maximum must be positive")
+        with self.transaction() as database:
+            rows = database.execute(
+                """
+                SELECT candidate_id, artifact_ref FROM campaign_candidates
+                WHERE campaign_id=? AND state='retained'
+                  AND candidate_id NOT IN (
+                    SELECT candidate_id FROM campaign_verification_jobs
+                    WHERE campaign_id=?
+                  )
+                ORDER BY created_at DESC, rowid DESC
+                LIMIT -1 OFFSET ?
+                """,
+                (campaign_id, campaign_id, maximum),
+            ).fetchall()
+            if rows:
+                database.executemany(
+                    "DELETE FROM campaign_candidates WHERE candidate_id=?",
+                    ((row["candidate_id"],) for row in rows),
+                )
+            return [str(row["artifact_ref"]) for row in rows]
+
+    def campaign_candidate(self, candidate_id: str) -> dict[str, Any]:
+        row = self.connection.execute(
+            "SELECT * FROM campaign_candidates WHERE candidate_id=?",
+            (candidate_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(candidate_id)
+        return dict(row)
+
+    def queue_verification_action(
+        self,
+        *,
+        action_id: str,
+        candidate_ids: list[str],
+        priority: int,
+        job_ids: list[str],
+    ) -> bool:
+        if len(candidate_ids) != len(job_ids) or not candidate_ids:
+            raise ValueError("verification action candidate/job mismatch")
+        with self.transaction() as database:
+            if database.execute(
+                "SELECT 1 FROM director_action_outcomes WHERE action_id=?",
+                (action_id,),
+            ).fetchone():
+                return False
+            action = database.execute(
+                """
+                SELECT campaign_id FROM director_actions
+                WHERE action_id=? AND validation_status='accepted'
+                """,
+                (action_id,),
+            ).fetchone()
+            if action is None:
+                raise KeyError(action_id)
+            placeholders = ",".join("?" for _ in candidate_ids)
+            candidates = database.execute(
+                f"""
+                SELECT candidate_id, state FROM campaign_candidates
+                WHERE campaign_id=? AND candidate_id IN ({placeholders})
+                """,
+                (action["campaign_id"], *candidate_ids),
+            ).fetchall()
+            if len(candidates) != len(candidate_ids):
+                raise RuntimeError("verification action references missing candidate")
+            forbidden = {
+                str(row["candidate_id"])
+                for row in candidates
+                if row["state"] in {"rejected", "certified"}
+            }
+            if forbidden:
+                raise RuntimeError(
+                    f"candidate is not eligible for verification: {sorted(forbidden)}"
+                )
+            now = utc_now()
+            for candidate_id, job_id in zip(
+                candidate_ids, job_ids, strict=True
+            ):
+                existing = database.execute(
+                    """
+                    SELECT state, certification_status
+                    FROM campaign_verification_jobs
+                    WHERE campaign_id=? AND candidate_id=?
+                    """,
+                    (action["campaign_id"], candidate_id),
+                ).fetchone()
+                if existing is None:
+                    database.execute(
+                        """
+                        INSERT INTO campaign_verification_jobs
+                        (verification_job_id, campaign_id, candidate_id,
+                         requested_by_action_id, priority, state, created_at)
+                        VALUES (?, ?, ?, ?, ?, 'queued', ?)
+                        """,
+                        (
+                            job_id,
+                            action["campaign_id"],
+                            candidate_id,
+                            action_id,
+                            priority,
+                            now,
+                        ),
+                    )
+                elif existing["state"] in {"unknown", "failed"}:
+                    database.execute(
+                        """
+                        UPDATE campaign_verification_jobs
+                        SET requested_by_action_id=?, priority=?, state='queued',
+                            certification_status=NULL,
+                            certification_artifact_ref=NULL, started_at=NULL,
+                            completed_at=NULL
+                        WHERE campaign_id=? AND candidate_id=?
+                        """,
+                        (
+                            action_id,
+                            priority,
+                            action["campaign_id"],
+                            candidate_id,
+                        ),
+                    )
+                database.execute(
+                    """
+                    UPDATE campaign_candidates
+                    SET state='promoted', promoted_at=COALESCE(promoted_at, ?)
+                    WHERE candidate_id=?
+                    """,
+                    (now, candidate_id),
+                )
+            database.execute(
+                """
+                INSERT INTO director_action_outcomes
+                (action_outcome_id, action_id, campaign_id,
+                 application_status, observed_effect_json, applied_at)
+                VALUES (?, ?, ?, 'applied', ?, ?)
+                """,
+                (
+                    new_id("action-outcome"),
+                    action_id,
+                    action["campaign_id"],
+                    json.dumps(
+                        {
+                            "candidate_ids": candidate_ids,
+                            "verification_job_ids": job_ids,
+                        },
+                        sort_keys=True,
+                    ),
+                    now,
+                ),
+            )
+            database.execute(
+                """
+                UPDATE research_campaigns
+                SET state_version=state_version+1, updated_at=?
+                WHERE campaign_id=?
+                """,
+                (now, action["campaign_id"]),
+            )
+            return True
+
+    def pending_candidate_actions(
+        self, campaign_id: str
+    ) -> list[dict[str, Any]]:
+        rows = self.connection.execute(
+            """
+            SELECT a.* FROM director_actions a
+            LEFT JOIN director_action_outcomes o ON o.action_id=a.action_id
+            WHERE a.campaign_id=? AND a.validation_status='accepted'
+              AND a.action_type IN ('promote_candidate',
+                                    'schedule_verification')
+              AND o.action_id IS NULL
+            ORDER BY a.priority DESC, a.created_at, a.action_id
+            """,
+            (campaign_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def pending_auxiliary_actions(
+        self, campaign_id: str
+    ) -> list[dict[str, Any]]:
+        rows = self.connection.execute(
+            """
+            SELECT a.* FROM director_actions a
+            LEFT JOIN director_action_outcomes o ON o.action_id=a.action_id
+            WHERE a.campaign_id=? AND a.validation_status='accepted'
+              AND a.action_type IN ('request_diagnostic',
+                                    'set_review_trigger')
+              AND o.action_id IS NULL
+            ORDER BY a.priority DESC, a.created_at, a.action_id
+            """,
+            (campaign_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def queued_verification_jobs(
+        self, campaign_id: str, limit: int
+    ) -> list[dict[str, Any]]:
+        rows = self.connection.execute(
+            """
+            SELECT * FROM campaign_verification_jobs
+            WHERE campaign_id=? AND state='queued'
+            ORDER BY priority DESC, created_at, verification_job_id LIMIT ?
+            """,
+            (campaign_id, limit),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def mark_verification_started(self, job_id: str) -> bool:
+        with self.transaction() as database:
+            cursor = database.execute(
+                """
+                UPDATE campaign_verification_jobs
+                SET state='running', started_at=?
+                WHERE verification_job_id=? AND state='queued'
+                """,
+                (utc_now(), job_id),
+            )
+            return cursor.rowcount == 1
+
+    def complete_verification_job(
+        self,
+        *,
+        job_id: str,
+        status: str,
+        artifact_ref: str,
+    ) -> bool:
+        """Commit M4 result; return true only for the first certified success."""
+
+        with self.transaction() as database:
+            job = database.execute(
+                """
+                SELECT * FROM campaign_verification_jobs
+                WHERE verification_job_id=? AND state='running'
+                """,
+                (job_id,),
+            ).fetchone()
+            if job is None:
+                return False
+            if status == "COUNTEREXAMPLE_VERIFIED":
+                job_state = "completed"
+                candidate_state = "certified"
+            elif status == "INVALID_CANDIDATE":
+                job_state = "completed"
+                candidate_state = "rejected"
+            elif status in {
+                "UNKNOWN_TIMEOUT",
+                "UNKNOWN_MEMORY_LIMIT",
+                "TOOL_FAILURE",
+            }:
+                job_state = "unknown"
+                candidate_state = "retained"
+            else:
+                job_state = "failed"
+                candidate_state = "retained"
+            now = utc_now()
+            database.execute(
+                """
+                UPDATE campaign_verification_jobs
+                SET state=?, certification_artifact_ref=?,
+                    certification_status=?, completed_at=?
+                WHERE verification_job_id=?
+                """,
+                (job_state, artifact_ref, status, now, job_id),
+            )
+            database.execute(
+                """
+                UPDATE campaign_candidates
+                SET state=?, certification_status=?,
+                    certification_artifact_ref=?
+                WHERE candidate_id=?
+                """,
+                (
+                    candidate_state,
+                    status,
+                    artifact_ref,
+                    job["candidate_id"],
+                ),
+            )
+            terminal = False
+            if status == "COUNTEREXAMPLE_VERIFIED":
+                campaign = database.execute(
+                    """
+                    SELECT state FROM research_campaigns WHERE campaign_id=?
+                    """,
+                    (job["campaign_id"],),
+                ).fetchone()
+                if campaign is not None and campaign["state"] not in {
+                    "succeeded_certified_counterexample",
+                    "completed_deadline_reached",
+                    "stopped_by_operator",
+                }:
+                    database.execute(
+                        """
+                        UPDATE research_campaigns
+                        SET state='succeeded_certified_counterexample',
+                            state_version=state_version+1,
+                            certified_candidate_id=?,
+                            certification_artifact_ref=?, updated_at=?
+                        WHERE campaign_id=?
+                        """,
+                        (
+                            job["candidate_id"],
+                            artifact_ref,
+                            now,
+                            job["campaign_id"],
+                        ),
+                    )
+                    database.execute(
+                        """
+                        INSERT INTO campaign_terminal_events
+                        (terminal_event_id, campaign_id, terminal_kind,
+                         certified_candidate_id, verification_job_id,
+                         artifact_ref, created_at)
+                        VALUES (?, ?, 'succeeded_certified_counterexample',
+                                ?, ?, ?, ?)
+                        """,
+                        (
+                            new_id("terminal"),
+                            job["campaign_id"],
+                            job["candidate_id"],
+                            job_id,
+                            artifact_ref,
+                            now,
+                        ),
+                    )
+                    terminal = True
+            return terminal
+
     def pending_accepted_actions(self, campaign_id: str) -> list[dict[str, Any]]:
         rows = self.connection.execute(
             """

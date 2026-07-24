@@ -1,0 +1,45 @@
+{
+  "schema_version": "1.0",
+  "milestone": "M6.5",
+  "status": "offline_complete",
+  "date": "2026-07-24",
+  "candidate_archive": {
+    "default_retained_limit": 256,
+    "canonical_graph_hashes": true,
+    "graph_body_in_director_snapshot": false
+  },
+  "verification_broker": {
+    "default_queue_limit": 32,
+    "default_concurrency": 1,
+    "default_broker_memory_bytes": 1073741824,
+    "default_verifier_memory_bytes": 536870912,
+    "paths": [
+      "python-reference-dfs",
+      "cpp17-bitset-dfs"
+    ],
+    "m4_only_terminal_authority": true
+  },
+  "typed_action_executors": {
+    "lane_runtime": 6,
+    "candidate_m4_broker": 2,
+    "scientific_dispatcher": 2,
+    "total": 10
+  },
+  "focused_gate": {
+    "tests": 3,
+    "status": "passed",
+    "wall_seconds": 0.24,
+    "real_negative_candidate": "K4",
+    "real_negative_status": "INVALID_CANDIDATE",
+    "terminal_events": 0
+  },
+  "full_suite": {
+    "command": "make test",
+    "tests": 65,
+    "status": "passed",
+    "seconds": 12.247
+  },
+  "static_check": "passed",
+  "hidden_witness_positive_control_pending": true,
+  "m6_complete": false
+}

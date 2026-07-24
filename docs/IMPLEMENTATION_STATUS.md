@@ -101,6 +101,33 @@ Production still requires the app-server authentication gate and one live
 campaign demonstrating the same loop. M4 brokering and the later recovery,
 operator, dashboard, replay, and soak milestones remain pending.
 
+### M6.5 retained candidates and M4 broker — offline milestone complete
+
+Improvement events can now retain a bounded, hashed campaign candidate outside
+the model prompt. Snapshots expose only candidate IDs and structural/score
+summaries; graph bodies and paths are never model-controlled. Candidate
+promotion and verification scheduling create a bounded, priority-ordered M4
+queue.
+
+The broker runs the existing bounded Python reference verifier and independent
+C++17 verifier in a dedicated process, re-reads and validates the persisted
+two-path manifest, and maps timeout/memory/tool failures to non-terminal
+unknown states. Only a complete `COUNTEREXAMPLE_VERIFIED` manifest from both
+expected implementations can quiesce lanes and atomically create the campaign
+success terminal event. Director text, heuristic score, one verifier, malformed
+output, or timeout cannot do so.
+
+Reviewed deterministic diagnostics and explicit review-trigger actions are
+also implemented, so all ten typed action variants have bounded executors.
+The real M4 focused gate rejects K4 as `INVALID_CANDIDATE`, preserves both
+verifier reports, and proves the campaign remains running with zero terminal
+events. The full suite passes 65 tests. See
+`docs/reports/M6_M4_BROKER.md`.
+
+A positive certified terminal path will be demonstrated later with the
+required deliberately false/hidden-witness control target, never by claiming a
+result for the open research target.
+
 ## M0 — complete
 
 - installable standard `src/` package and CLI entry point;

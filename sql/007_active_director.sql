@@ -129,6 +129,28 @@ CREATE TABLE IF NOT EXISTS research_lanes (
 CREATE INDEX IF NOT EXISTS idx_research_lanes_campaign_state
     ON research_lanes(campaign_id, state, updated_at);
 
+CREATE TABLE IF NOT EXISTS campaign_candidates (
+    candidate_id TEXT PRIMARY KEY,
+    campaign_id TEXT NOT NULL REFERENCES research_campaigns(campaign_id),
+    lane_id TEXT NOT NULL REFERENCES research_lanes(lane_id),
+    lane_version INTEGER NOT NULL,
+    checkpoint_ref TEXT,
+    graph6 TEXT NOT NULL,
+    graph_sha256 TEXT NOT NULL,
+    score_json TEXT NOT NULL,
+    state TEXT NOT NULL,
+    artifact_ref TEXT NOT NULL,
+    artifact_sha256 TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    promoted_at TEXT,
+    certification_status TEXT,
+    certification_artifact_ref TEXT,
+    UNIQUE(campaign_id, graph_sha256)
+);
+
+CREATE INDEX IF NOT EXISTS idx_campaign_candidates_score
+    ON campaign_candidates(campaign_id, state, created_at);
+
 CREATE TABLE IF NOT EXISTS lane_revisions (
     lane_revision_id TEXT PRIMARY KEY,
     lane_id TEXT NOT NULL REFERENCES research_lanes(lane_id),

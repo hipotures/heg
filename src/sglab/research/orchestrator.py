@@ -5,12 +5,15 @@ from typing import Any
 import asyncio
 
 from .actions import LaneActionDispatcher
+from .candidates import CandidateArchive
 from .effects import EffectEvaluator
+from .diagnostics import ScientificActionDispatcher
 from .lanes import LaneManager
 from .providers import DecisionProvider
 from .snapshot import SnapshotBuilder
 from .store import ResearchStore, new_id
 from .triggers import TriggerBatch, TriggerEngine
+from .verification_broker import M4VerificationBroker
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +38,9 @@ class ActiveResearchOrchestrator:
         provider: DecisionProvider,
         triggers: TriggerEngine,
         campaign_id: str,
+        candidates: CandidateArchive | None = None,
+        verification: M4VerificationBroker | None = None,
+        scientific_actions: ScientificActionDispatcher | None = None,
         inference_poll_seconds: float = 0.01,
     ):
         if not 0 < inference_poll_seconds <= 1:
@@ -46,6 +52,9 @@ class ActiveResearchOrchestrator:
         self.provider = provider
         self.triggers = triggers
         self.campaign_id = campaign_id
+        self.candidates = candidates
+        self.verification = verification
+        self.scientific_actions = scientific_actions
         self.inference_poll_seconds = inference_poll_seconds
         self.effects = EffectEvaluator(store, campaign_id)
         self._cycle_lock = asyncio.Lock()
@@ -62,11 +71,22 @@ class ActiveResearchOrchestrator:
             if event is None:
                 break
             events.append(event)
+            if event.get("kind") == "improvement" and self.candidates is not None:
+                self.candidates.observe_improvement(event)
             runtime = self.manager.lanes.get(str(event["lane_id"]))
             recent = runtime.telemetry.recent() if runtime is not None else {}
             self.triggers.observe_lane_event(event, recent_metrics=recent)
         for event in self.dispatcher.drain_control_events():
             self.triggers.offer(str(event["reason"]))
+        if self.verification is not None:
+            for event in self.verification.pump():
+                self.triggers.offer(str(event["reason"]))
+        if self.scientific_actions is not None:
+            self.scientific_actions.dispatch_pending()
+            for contract in self.scientific_actions.drain_review_contracts():
+                self.triggers.configure(contract)
+            for event in self.scientific_actions.drain_events():
+                self.triggers.offer(str(event["reason"]))
         for evaluation in self.effects.evaluate_ready():
             met = evaluation["expectation_met"]
             if met is True:

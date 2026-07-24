@@ -8,6 +8,7 @@ import json
 import os
 
 from ..resources import current_rss_bytes
+from ..model import BitGraph
 from ..state import utc_now
 from .lanes import LaneManager
 from .protocol import MAX_SNAPSHOT_BYTES, canonical_json
@@ -287,6 +288,46 @@ class SnapshotBuilder:
     def _global_best(
         self, evidence: set[str]
     ) -> tuple[dict[str, Any] | None, set[str]]:
+        rows = self.store.connection.execute(
+            """
+            SELECT * FROM campaign_candidates
+            WHERE campaign_id=? AND state!='rejected'
+            ORDER BY created_at DESC LIMIT 256
+            """,
+            (self.campaign_id,),
+        ).fetchall()
+        if rows:
+            candidates = [
+                (row, json.loads(row["score_json"])) for row in rows
+            ]
+            best_row, best_score = min(
+                candidates,
+                key=lambda item: tuple(item[1]["ordering_key"]),
+            )
+            candidate_ids = {
+                str(row["candidate_id"]) for row, _ in candidates
+            }
+            for candidate_id in candidate_ids:
+                evidence.add(f"candidate-summary:{candidate_id}")
+            candidate_id = str(best_row["candidate_id"])
+            graph = BitGraph.from_graph6(str(best_row["graph6"]))
+            return (
+                {
+                    "candidate_id": candidate_id,
+                    "evidence_id": f"candidate-summary:{candidate_id}",
+                    "lane_id": best_row["lane_id"],
+                    "score": best_score,
+                    "order": graph.n,
+                    "size": graph.size(),
+                    "minimum_degree": graph.minimum_degree(),
+                    "checkpoint_id": best_row["checkpoint_ref"],
+                    "certification_status": best_row[
+                        "certification_status"
+                    ]
+                    or "not_submitted",
+                },
+                candidate_ids,
+            )
         improvements = [
             item
             for runtime in self.manager.lanes.values()

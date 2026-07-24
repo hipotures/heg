@@ -69,3 +69,19 @@ draining bounded lane queues, persisting telemetry, applying already committed
 actions, and evaluating completed interventions. Rationale: worker processes
 search independently, but an undrained bounded event queue would eventually
 back-pressure them and violate the active-control requirement.
+
+## D-010 — 2026-07-24 — retain graph bodies outside Director snapshots
+
+Decision: store at most 256 ordinary retained candidates as hashed graph6
+artifacts and database rows, while exposing only stable IDs and bounded
+structural summaries to the Director. Rationale: the model may choose among
+admissible scientific objects but must never supply graph bodies or file paths
+to the verifier.
+
+## D-011 — 2026-07-24 — M4 manifest is the sole success capability
+
+Decision: only the bounded production M4 broker may call the terminal
+transaction, and only after re-reading a persisted manifest containing both
+complete expected independent implementations. Rationale: no Director action
+type includes campaign success, and heuristic scores, prose, single-verifier
+results, timeouts, malformed output, and disagreements remain non-terminal.
