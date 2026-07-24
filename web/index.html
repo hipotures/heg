@@ -37,31 +37,27 @@
     <div>Engineering telemetry — not a mathematical claim.</div>
   </header>
   <main>
-    <section class="wide">
-      <h2>Live run</h2>
-      <div id="metrics" class="metrics"></div>
-    </section>
     <section>
-      <h2>Start a bounded run</h2>
-      <form id="run-form">
-        <label>Target<select name="target"><option>erdos_gyarfas</option></select></label>
-        <label>Order<input name="order" type="number" min="4" max="128" value="32"></label>
-        <label>Mode<select name="mode"><option>cubic_first</option><option>minimal_structure_mixed_degree</option><option>unrestricted_min_degree_3</option></select></label>
-        <label>Algorithm<select name="algorithm"><option>simulated_annealing</option><option>iterated_local_search</option></select></label>
-        <label>Workers<input name="workers" type="number" min="1" max="256" value="1"></label>
-        <label>Seed<input name="seed" type="number" min="0" value="1"></label>
-        <label>Time (seconds)<input name="wall_seconds" type="number" min="1" max="604800" value="60"></label>
-        <label>Memory high bytes<input name="memory_high_bytes" type="number" min="0" value="0"></label>
-        <label>Memory bytes<input name="memory_limit_bytes" type="number" min="0" value="0"></label>
-        <label>Notes<input name="notes" maxlength="500"></label>
+      <h2>AI research campaign</h2>
+      <form id="campaign-form">
+        <label>Installed target<input name="target" value="erdos_gyarfas" readonly></label>
+        <label>Stop condition<select name="stop_mode"><option value="time_limit">Run for</option><option value="until_success">Run until certified counterexample</option></select></label>
+        <label id="duration-label">Duration<input name="duration" value="1h" pattern="[0-9.]+[smhd]?"></label>
       </form>
       <div class="controls">
-        <button id="start">Start</button><button data-action="PAUSE">Pause</button>
-        <button data-action="RESUME">Resume</button><button data-action="STOP">Stop</button>
+        <button id="start-campaign">Start campaign</button><button data-campaign-action="PAUSE">Emergency pause</button>
+        <button data-campaign-action="RESUME">Resume</button><button data-campaign-action="STOP">Emergency stop</button>
       </div>
       <p id="notice" class="notice"></p>
     </section>
-    <section><h2>Recent events</h2><pre id="logs">Loading…</pre></section>
+    <section><h2>Campaign status</h2><div id="campaign-metrics" class="metrics"></div></section>
+    <section class="wide"><h2>Director assessment and hypotheses</h2><div id="assessment"></div><div id="hypotheses"></div></section>
+    <section class="wide"><h2>AI decisions and measured effects</h2><div id="actions"></div></section>
+    <section class="wide"><h2>Concurrent search lanes</h2><div id="lanes"></div></section>
+    <section class="wide"><h2>Parameter revision timeline</h2><div id="revisions"></div></section>
+    <section class="wide"><h2>Persistent app-server turns</h2><div id="turns"></div></section>
+    <section><h2>Recent legacy events</h2><pre id="logs">Loading…</pre></section>
+    <section><h2>Legacy run telemetry</h2><div id="metrics" class="metrics"></div></section>
     <section class="wide"><h2>Best candidates</h2><div id="candidates"></div></section>
     <section class="wide"><h2>Experiments</h2><div id="runs"></div></section>
   </main>
@@ -81,8 +77,63 @@ function table(rows, columns) {
 }
 async function refresh() {
   try {
-    const [state, logs, candidates, runs] = await Promise.all([
-      api('/api/status'), api('/api/logs?limit=50'), api('/api/candidates?limit=50'), api('/api/runs')
+    const [state, campaign, logs, candidates, runs] = await Promise.all([
+      api('/api/status'), api('/api/research-campaign'), api('/api/logs?limit=50'), api('/api/candidates?limit=50'), api('/api/runs')
+    ]);
+    const campaignValues = [
+      ['State', campaign.state || 'IDLE'], ['Campaign', campaign.campaign_id || '—'],
+      ['Target', campaign.target || 'erdos_gyarfas'], ['Stop mode', campaign.stop_mode || '—'],
+      ['Deadline', campaign.deadline_at || '—'], ['Active lanes', campaign.active_lane_count || 0],
+      ['Director auth', campaign.auth_imported ? 'imported' : 'not imported'],
+      ['Director thread', campaign.director_session?.thread_id || '—'],
+      ['Director connection', campaign.director_session?.state || '—'],
+      ['Fault', campaign.fault_kind || '—'],
+      ['Verifier queued', campaign.verification?.queued || 0],
+      ['Verifier running', campaign.verification?.running || 0],
+      ['Certified', campaign.verification?.certified || 0],
+      ['Coordinator RSS', `${((campaign.resources?.coordinator_rss_bytes || 0) / 1048576).toFixed(1)} MiB`],
+      ['Campaign DB', `${((campaign.resources?.database_bytes || 0) / 1048576).toFixed(2)} MiB`],
+      ['Disk free', `${((campaign.resources?.disk_free_bytes || 0) / 1073741824).toFixed(1)} GiB`]
+    ];
+    document.getElementById('campaign-metrics').innerHTML = campaignValues.map(([label, value]) => `<div class="metric"><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join('');
+    document.getElementById('assessment').innerHTML = `<p>${esc(campaign.assessment?.campaign_assessment || 'No Director assessment yet.')}</p>`;
+    document.getElementById('hypotheses').innerHTML = table(campaign.hypotheses || [], [
+      ['Hypothesis', r => esc(r.hypothesis_id)], ['Statement', r => esc(r.statement)],
+      ['Confidence', r => Number(r.confidence || 0).toFixed(2)], ['Status', r => esc(r.status)],
+      ['Updated', r => esc(r.created_at)]
+    ]);
+    document.getElementById('actions').innerHTML = table(campaign.actions || [], [
+      ['Action', r => esc(r.action_type)], ['Lane', r => esc(r.target_lane_id || 'portfolio')],
+      ['Parameters', r => esc(JSON.stringify(r.parameters || {}))],
+      ['Expected', r => esc(r.expected_effect)], ['Application', r => esc(r.application_status || 'pending')],
+      ['Observed', r => esc(JSON.stringify(r.observed_effect || {}))],
+      ['Expectation met', r => esc(r.expectation_met === null ? 'pending' : Boolean(r.expectation_met))]
+    ]);
+    document.getElementById('lanes').innerHTML = table(campaign.lanes || [], [
+      ['Lane', r => esc(r.lane_id)], ['State', r => esc(r.state)],
+      ['Version', r => esc(r.lane_version)], ['Algorithm', r => esc(r.algorithm)],
+      ['Parameters', r => esc(JSON.stringify(r.parameters || {}))],
+      ['Candidates', r => esc(r.telemetry_high_water || 0)],
+      ['Throughput', r => Number(r.metrics?.candidates_per_second || 0).toFixed(1)],
+      ['Score slope', r => Number(r.metrics?.score_slope || 0).toFixed(5)],
+      ['Diversity', r => Number(r.metrics?.diversity || 0).toFixed(3)],
+      ['Duplicates', r => Number(r.metrics?.duplicate_rate || 0).toFixed(3)],
+      ['Share', r => Number(r.resource_share || 0).toFixed(2)],
+      ['Generation', r => esc(r.process_generation || 0)]
+    ]);
+    document.getElementById('revisions').innerHTML = table(campaign.revisions || [], [
+      ['Lane', r => esc(r.lane_id)], ['Action', r => esc(r.action_id || 'recovery')],
+      ['Version', r => `${esc(r.old_lane_version)} → ${esc(r.new_lane_version)}`],
+      ['Before', r => esc(JSON.stringify(r.old_parameters || {}))],
+      ['After', r => esc(JSON.stringify(r.new_parameters || {}))],
+      ['Applied', r => esc(r.applied_at)]
+    ]);
+    document.getElementById('turns').innerHTML = table(campaign.turns || [], [
+      ['Thread / turn', r => `${esc(r.thread_id)} / ${esc(r.turn_id || 'pending')}`],
+      ['Status', r => esc(r.status)], ['Latency', r => `${Number(r.wall_seconds || 0).toFixed(2)} s`],
+      ['Input / cached', r => `${esc(r.input_tokens || 0)} / ${esc(r.cached_input_tokens || 0)}`],
+      ['Output / reasoning', r => `${esc(r.output_tokens || 0)} / ${esc(r.reasoning_output_tokens || 0)}`],
+      ['Total', r => esc(r.total_tokens || 0)], ['Fault', r => esc(r.error_kind || '—')]
     ]);
     const values = [
       ['Status', state.status], ['Run', state.run_id || '—'], ['Target', state.target || '—'],
@@ -123,14 +174,18 @@ async function refresh() {
     ]);
   } catch (error) { document.getElementById('notice').textContent = error.message; }
 }
-document.getElementById('start').addEventListener('click', async () => {
-  const data = Object.fromEntries(new FormData(document.getElementById('run-form')));
-  for (const key of ['order','workers','seed','wall_seconds','memory_high_bytes','memory_limit_bytes']) data[key] = Number(data[key]);
-  try { const result = await api('/api/runs', {method: 'POST', body: JSON.stringify(data)}); document.getElementById('notice').textContent = `Started PID ${result.pid}`; }
+const campaignForm = document.getElementById('campaign-form');
+campaignForm.elements.stop_mode.addEventListener('change', () => {
+  document.getElementById('duration-label').hidden = campaignForm.elements.stop_mode.value === 'until_success';
+});
+document.getElementById('start-campaign').addEventListener('click', async () => {
+  const stopMode = campaignForm.elements.stop_mode.value;
+  const data = {stop_mode: stopMode, duration: stopMode === 'time_limit' ? campaignForm.elements.duration.value : null};
+  try { const result = await api('/api/research-campaign', {method: 'POST', body: JSON.stringify(data)}); document.getElementById('notice').textContent = `Campaign started in PID ${result.pid}`; }
   catch (error) { document.getElementById('notice').textContent = error.message; }
 });
-for (const button of document.querySelectorAll('button[data-action]')) button.addEventListener('click', async () => {
-  try { const result = await api('/api/control', {method: 'POST', body: JSON.stringify({action: button.dataset.action})}); document.getElementById('notice').textContent = `${result.action} request ${result.version} accepted`; }
+for (const button of document.querySelectorAll('button[data-campaign-action]')) button.addEventListener('click', async () => {
+  try { const result = await api('/api/research-campaign/control', {method: 'POST', body: JSON.stringify({action: button.dataset.campaignAction})}); document.getElementById('notice').textContent = `${result.action} request ${result.version} accepted`; }
   catch (error) { document.getElementById('notice').textContent = error.message; }
 });
 document.addEventListener('click', async event => {

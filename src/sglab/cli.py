@@ -23,6 +23,14 @@ from .research.auth import (
     director_home,
     import_authorized_auth,
 )
+from .research.campaign import (
+    ResearchCampaignRunner,
+    campaign_status,
+    parse_duration,
+    request_campaign_control,
+)
+from .research.export import export_campaign
+from .research.store import ResearchStore
 from .search import ALGORITHMS, MODES, SearchConfig, config_from_run, run_search
 from .sat import run_pysat_cegar
 from .state import (
@@ -409,6 +417,70 @@ def cmd_ai_director(args: Namespace) -> int:
     return 0
 
 
+def cmd_research_campaign(args: Namespace) -> int:
+    workspace = _workspace(args.workspace)
+    command = args.research_campaign_command
+    if command == "start":
+        duration = parse_duration(args.time_limit) if args.time_limit else None
+        stop_mode = "until_success" if args.until_success else "time_limit"
+        report = ResearchCampaignRunner(
+            workspace=workspace,
+            stop_mode=stop_mode,
+            duration_seconds=duration,
+        ).run()
+        print(json.dumps(report, indent=2, sort_keys=True))
+        return 0
+    if command == "resume":
+        current = campaign_status(workspace, args.campaign_id)
+        if current.get("state") in {"IDLE", "NOT_FOUND", "SCHEMA_UNAVAILABLE"}:
+            raise SystemExit("research campaign not found")
+        report = ResearchCampaignRunner(
+            workspace=workspace,
+            stop_mode=str(current["stop_mode"]),
+            campaign_id=str(current["campaign_id"]),
+        ).run()
+        print(json.dumps(report, indent=2, sort_keys=True))
+        return 0
+    if command == "status":
+        print(
+            json.dumps(
+                campaign_status(workspace, args.campaign_id),
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0
+    if command in {"pause", "continue", "stop"}:
+        current = campaign_status(workspace)
+        if not current.get("campaign_id") or current.get("state") in {
+            "succeeded_certified_counterexample",
+            "completed_deadline_reached",
+            "stopped_by_operator",
+        }:
+            raise SystemExit("no active research campaign")
+        action = {"pause": "PAUSE", "continue": "RESUME", "stop": "STOP"}[command]
+        report = request_campaign_control(workspace, action)
+        print(json.dumps(report, sort_keys=True))
+        return 0
+    current = campaign_status(workspace, args.campaign_id)
+    campaign_id = current.get("campaign_id")
+    if not campaign_id:
+        raise SystemExit("research campaign not found")
+    campaign_dir_value = (
+        current.get("process", {}).get("campaign_dir")
+        or str(workspace / "research-campaigns" / str(campaign_id))
+    )
+    with ResearchStore(workspace / "results.sqlite3") as store:
+        report = export_campaign(
+            store=store,
+            campaign_id=str(campaign_id),
+            campaign_dir=Path(str(campaign_dir_value)),
+            output=_workspace(args.output),
+        )
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0
+
+
 def build_parser() -> ArgumentParser:
     parser = ArgumentParser(prog="sglab")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -520,6 +592,34 @@ def build_parser() -> ArgumentParser:
     director_inspect = ai_director_commands.add_parser("inspect-session")
     director_inspect.add_argument("--workspace", required=True)
     director_inspect.set_defaults(func=cmd_ai_director)
+
+    research_campaign = subparsers.add_parser("research-campaign")
+    campaign_commands = research_campaign.add_subparsers(
+        dest="research_campaign_command", required=True
+    )
+    campaign_start = campaign_commands.add_parser("start")
+    campaign_stop_mode = campaign_start.add_mutually_exclusive_group(required=True)
+    campaign_stop_mode.add_argument("--time-limit")
+    campaign_stop_mode.add_argument("--until-success", action="store_true")
+    campaign_start.add_argument("--workspace", required=True)
+    campaign_start.set_defaults(func=cmd_research_campaign)
+    campaign_status_parser = campaign_commands.add_parser("status")
+    campaign_status_parser.add_argument("--workspace", required=True)
+    campaign_status_parser.add_argument("--campaign-id")
+    campaign_status_parser.set_defaults(func=cmd_research_campaign)
+    campaign_resume = campaign_commands.add_parser("resume")
+    campaign_resume.add_argument("--workspace", required=True)
+    campaign_resume.add_argument("--campaign-id", required=True)
+    campaign_resume.set_defaults(func=cmd_research_campaign)
+    for name in ("pause", "continue", "stop"):
+        campaign_control = campaign_commands.add_parser(name)
+        campaign_control.add_argument("--workspace", required=True)
+        campaign_control.set_defaults(func=cmd_research_campaign)
+    campaign_export = campaign_commands.add_parser("export")
+    campaign_export.add_argument("--workspace", required=True)
+    campaign_export.add_argument("--campaign-id")
+    campaign_export.add_argument("--output", required=True)
+    campaign_export.set_defaults(func=cmd_research_campaign)
 
     return parser
 

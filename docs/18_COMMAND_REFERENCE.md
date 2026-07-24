@@ -1,7 +1,32 @@
 # Command Reference
 
-All commands accept `--help`. Durations accept seconds or a suffix `s`, `m`, or
-`h`.
+All commands accept `--help`. Durations accept seconds or a suffix `s`, `m`,
+`h`, or `d` where supported.
+
+## Active AI research campaign
+
+```bash
+sglab ai-director preflight --workspace ./workspace
+sglab ai-director auth-import --workspace ./workspace \
+  --from-codex-home /explicit/authorized/codex/home
+sglab ai-director inspect-session --workspace ./workspace
+
+sglab research-campaign start --workspace ./workspace --time-limit 24h
+sglab research-campaign start --workspace ./workspace --until-success
+sglab research-campaign status --workspace ./workspace
+sglab research-campaign pause --workspace ./workspace
+sglab research-campaign continue --workspace ./workspace
+sglab research-campaign stop --workspace ./workspace
+sglab research-campaign resume --workspace ./workspace \
+  --campaign-id <campaign-id>
+sglab research-campaign export --workspace ./workspace \
+  --campaign-id <campaign-id> --output ./campaign.zip
+```
+
+Normal campaign start exposes no scientific tuning flags. The installed target
+is read-only, and the AI Director chooses algorithms, graph sizes, lane count,
+seeds, mutation parameters, resource shares, and review cadence. `run` below
+is retained as the legacy fixed-configuration engine command.
 
 ## Workspace and diagnosis
 
@@ -15,6 +40,9 @@ external tools. `init` creates the bounded artifact layout and a WAL-mode
 SQLite database.
 
 ## Search
+
+The following is the legacy parameterized research-engine interface, not the
+normal Active Director campaign interface.
 
 ```bash
 sglab run \
@@ -79,6 +107,9 @@ The dashboard exposes:
 - `GET /api/artifact/<candidate-id>.<graph6|json|svg>`
 - `POST /api/control`
 - `POST /api/runs`
+- `GET /api/research-campaign`
+- `POST /api/research-campaign`
+- `POST /api/research-campaign/control`
 
 Set `SGLAB_WEB_TOKEN` to require `Authorization: Bearer ...` for every API
 request. Open the page as `http://127.0.0.1:8080/#token=<value>`; URL fragments

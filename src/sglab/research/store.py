@@ -114,6 +114,113 @@ class ResearchStore:
                 raise RuntimeError("stale campaign state")
             return expected_version + 1
 
+    def finish_campaign(
+        self,
+        campaign_id: str,
+        *,
+        terminal_kind: str,
+        detail: str | None = None,
+    ) -> bool:
+        """Latch an operational terminal state without impersonating M4."""
+
+        if terminal_kind not in {
+            "completed_deadline_reached",
+            "stopped_by_operator",
+        }:
+            raise ValueError("unsupported operational terminal state")
+        now = utc_now()
+        with self.transaction() as database:
+            campaign = database.execute(
+                """
+                SELECT state, stop_mode FROM research_campaigns
+                WHERE campaign_id=?
+                """,
+                (campaign_id,),
+            ).fetchone()
+            if campaign is None:
+                raise KeyError(campaign_id)
+            if campaign["state"] in {
+                "succeeded_certified_counterexample",
+                "completed_deadline_reached",
+                "stopped_by_operator",
+            }:
+                return False
+            if (
+                terminal_kind == "completed_deadline_reached"
+                and campaign["stop_mode"] != "time_limit"
+            ):
+                raise RuntimeError("until-success campaigns have no deadline terminal")
+            database.execute(
+                """
+                UPDATE research_campaigns
+                SET state=?, state_version=state_version+1, updated_at=?,
+                    fault_kind=NULL, fault_detail=?
+                WHERE campaign_id=?
+                """,
+                (terminal_kind, now, detail[:2000] if detail else None, campaign_id),
+            )
+            database.execute(
+                """
+                INSERT INTO campaign_terminal_events
+                (terminal_event_id, campaign_id, terminal_kind,
+                 certified_candidate_id, verification_job_id,
+                 artifact_ref, created_at)
+                VALUES (?, ?, ?, NULL, NULL, NULL, ?)
+                """,
+                (new_id("terminal"), campaign_id, terminal_kind, now),
+            )
+            return True
+
+    def set_campaign_coordination_state(
+        self,
+        campaign_id: str,
+        *,
+        expected_version: int,
+        state: str,
+        fault_kind: str | None = None,
+        fault_detail: str | None = None,
+    ) -> int:
+        if state not in {"running", "paused_by_operator", "paused_fault"}:
+            raise ValueError("invalid coordination state")
+        paused = state != "running"
+        now = utc_now()
+        with self.transaction() as database:
+            cursor = database.execute(
+                """
+                UPDATE research_campaigns
+                SET state=?, state_version=state_version+1, updated_at=?,
+                    fault_kind=?, fault_detail=?
+                WHERE campaign_id=? AND state_version=?
+                """,
+                (
+                    state,
+                    now,
+                    fault_kind,
+                    fault_detail[:2000] if fault_detail else None,
+                    campaign_id,
+                    expected_version,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("stale campaign state")
+            if paused:
+                database.execute(
+                    """
+                    UPDATE research_lanes SET state='paused', updated_at=?
+                    WHERE campaign_id=? AND state='running'
+                    """,
+                    (now, campaign_id),
+                )
+            else:
+                database.execute(
+                    """
+                    UPDATE research_lanes SET state='running', updated_at=?
+                    WHERE campaign_id=? AND state='paused'
+                    """,
+                    (now, campaign_id),
+                )
+            return expected_version + 1
+
     def record_snapshot(
         self,
         *,

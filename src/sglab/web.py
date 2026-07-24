@@ -15,6 +15,12 @@ import sys
 
 from .resources import recommended_workers
 from .locations import asset_path
+from .research.auth import auth_is_imported
+from .research.campaign import (
+    campaign_status,
+    parse_duration,
+    request_campaign_control,
+)
 from .search import ALGORITHMS, MODES
 from .state import atomic_write_json, next_control, read_json, utc_now
 
@@ -34,6 +40,7 @@ class DashboardServer(ThreadingHTTPServer):
         self.static_dir = static_dir.resolve()
         self.token = token
         self.runner: Popen[bytes] | None = None
+        self.campaign_runner: Popen[bytes] | None = None
         self.launch_lock = Lock()
         super().__init__(address, DashboardHandler)
 
@@ -129,6 +136,69 @@ class DashboardServer(ThreadingHTTPServer):
         atomic_write_json(self.workspace / "launch.json", {**payload, **request})
         return 202, {"accepted": True, "pid": self.runner.pid, **request}
 
+    def start_campaign(self, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        with self.launch_lock:
+            if (
+                self.campaign_runner is not None
+                and self.campaign_runner.poll() is None
+            ) or _research_campaign_is_live(self):
+                return 409, {"error": "a research campaign is already active"}
+            if not auth_is_imported(self.workspace / ".sglab"):
+                return 409, {
+                    "error": (
+                        "Director authentication has not been explicitly imported"
+                    )
+                }
+            if set(payload) - {"stop_mode", "duration"}:
+                return 400, {"error": "unsupported campaign input"}
+            stop_mode = payload.get("stop_mode")
+            command = [
+                sys.executable,
+                "-m",
+                "sglab",
+                "research-campaign",
+                "start",
+                "--workspace",
+                str(self.workspace),
+            ]
+            if stop_mode == "time_limit":
+                duration = payload.get("duration")
+                if not isinstance(duration, str):
+                    return 400, {"error": "duration must be a string"}
+                try:
+                    parse_duration(duration)
+                except ValueError as error:
+                    return 400, {"error": str(error)}
+                command.extend(("--time-limit", duration))
+            elif stop_mode == "until_success":
+                if payload.get("duration") not in (None, ""):
+                    return 400, {
+                        "error": "until-success does not accept a duration"
+                    }
+                command.append("--until-success")
+            else:
+                return 400, {"error": "invalid campaign stop mode"}
+            logs = self.workspace / "logs"
+            logs.mkdir(parents=True, exist_ok=True)
+            runner_log = logs / "research-campaign-runner.log"
+            if runner_log.is_file() and runner_log.stat().st_size >= 16 * 1024 * 1024:
+                os.replace(runner_log, runner_log.with_suffix(".log.1"))
+            with runner_log.open("ab") as log:
+                self.campaign_runner = Popen(
+                    command,
+                    stdin=DEVNULL,
+                    stdout=log,
+                    stderr=log,
+                    start_new_session=True,
+                    env=os.environ.copy(),
+                )
+            return 202, {
+                "accepted": True,
+                "pid": self.campaign_runner.pid,
+                "target": "erdos_gyarfas",
+                "stop_mode": stop_mode,
+            }
+
 
 class DashboardHandler(BaseHTTPRequestHandler):
     server: DashboardServer
@@ -215,6 +285,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     default={"status": "IDLE", "updated_at": utc_now()},
                 ),
             )
+            return
+        if parsed.path == "/api/research-campaign":
+            self._json(200, campaign_status(self.server.workspace))
             return
         if parsed.path == "/api/logs":
             limit = _query_limit(parsed.query, default=50, maximum=500)
@@ -319,6 +392,23 @@ class DashboardHandler(BaseHTTPRequestHandler):
             status, response = self.server.start_run(payload)
             self._json(status, response)
             return
+        if parsed.path == "/api/research-campaign":
+            status, response = self.server.start_campaign(payload)
+            self._json(status, response)
+            return
+        if parsed.path == "/api/research-campaign/control":
+            action = payload.get("action")
+            if action not in {"PAUSE", "RESUME", "STOP"}:
+                self._json(400, {"error": "unsupported action"})
+                return
+            if not _research_campaign_is_live(self.server):
+                self._json(409, {"error": "no active research campaign"})
+                return
+            request = request_campaign_control(
+                self.server.workspace, str(action)
+            )
+            self._json(202, {"accepted": True, **request})
+            return
         if parsed.path != "/api/control":
             self._json(404, {"error": "not found"})
             return
@@ -368,6 +458,32 @@ def _workspace_run_is_live(server: DashboardServer) -> bool:
     except (OSError, PermissionError):
         return False
     return b"sglab" in command
+
+
+def _research_campaign_is_live(server: DashboardServer) -> bool:
+    state = campaign_status(server.workspace)
+    if state.get("state") in {
+        None,
+        "IDLE",
+        "NOT_FOUND",
+        "SCHEMA_UNAVAILABLE",
+        "succeeded_certified_counterexample",
+        "completed_deadline_reached",
+        "stopped_by_operator",
+    }:
+        return False
+    try:
+        pid = int(state.get("process", {}).get("pid", 0))
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        command = Path(f"/proc/{pid}/cmdline").read_bytes()
+    except (OSError, PermissionError):
+        return False
+    return b"research-campaign" in command and b"sglab" in command
 
 
 def _query_limit(query: str, *, default: int, maximum: int) -> int | None:

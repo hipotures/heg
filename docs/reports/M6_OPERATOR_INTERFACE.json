@@ -1,0 +1,30 @@
+{
+  "date": "2026-07-24",
+  "milestone": "M6.7 operator campaign and dashboard",
+  "status": "offline_complete",
+  "m6_complete": false,
+  "normal_operator_inputs": [
+    "time_limit",
+    "until_success"
+  ],
+  "installed_target": "erdos_gyarfas",
+  "production_provider": "direct_codex_app_server_json_rpc_stdio",
+  "legacy_parameterized_run_preserved": true,
+  "dashboard_framework": "python_http_server_static_html_javascript",
+  "verification": {
+    "full_tests_passed": 74,
+    "full_tests_seconds": 13.467,
+    "doctor": "passed",
+    "compile_check": "passed",
+    "benchmark_smoke": "passed",
+    "dashboard_smoke": "passed"
+  },
+  "pending": [
+    "explicit_auth_import",
+    "authenticated_live_turn_and_resume",
+    "hidden_witness_active_control_campaign",
+    "equal_budget_controller_comparison",
+    "provider_outage_hardening",
+    "two_hour_active_director_soak"
+  ]
+}

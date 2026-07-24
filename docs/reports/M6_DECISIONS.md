@@ -99,3 +99,20 @@ Decision: create campaign export databases with SQLite Online Backup API into
 a temporary snapshot, run `PRAGMA integrity_check`, and only then add them to
 the bounded deterministic archive. Rationale: copying the main file can omit
 committed WAL state and produce a scientifically incomplete bundle.
+
+## D-014 — 2026-07-24 — separate normal campaign from legacy tuning
+
+Decision: expose a new foreground `research-campaign` composition root and
+keep the parameterized `run` engine as a separately documented legacy
+interface. The normal CLI and dashboard accept only the installed target plus
+one stop contract. Rationale: backward compatibility does not require leaking
+algorithm, graph, worker, mutation, allocation, or cadence choices back to the
+operator.
+
+## D-015 — 2026-07-24 — supervise Director turns asynchronously
+
+Decision: keep the current Director turn in an asyncio task owned by the
+campaign supervisor, while the orchestrator itself continues pumping lane and
+verification events. Rationale: deadline and emergency controls must remain
+observable even during a long inference turn; a resulting campaign-version
+change makes any returned old action batch stale by construction.

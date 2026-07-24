@@ -76,6 +76,33 @@ The graph6 and JSON forms must be cross-hashed in the manifest.
 
 The master processes each monotonically increasing version once.
 
+Active campaigns use a separate
+`research-campaign-control.json` file with the same monotonic shape so legacy
+run controls cannot be mistaken for campaign controls. The workspace also
+contains `active-research-campaign.json`, a small operational pointer with the
+campaign ID, campaign directory, coordinator PID, and start time. SQLite
+remains authoritative for campaign state.
+
+Active campaign files live under:
+
+```text
+workspace/research-campaigns/<campaign-id>/
+  candidates/
+  diagnostics/
+  director/requests/
+  director/responses/
+  director/wire/
+  lane-checkpoints/
+  snapshots/
+  verification/
+  exports/
+```
+
+The shared `results.sqlite3` schema v7 records campaigns, persistent sessions
+and turns, snapshots and triggers, lanes/revisions/windows, action
+batches/outcomes, hypotheses, retained candidates, verification jobs, and
+terminal events. Only the campaign supervisor writes these records.
+
 ## Candidate record
 
 ```json

@@ -12,6 +12,47 @@
 
 ## Starting
 
+### Active AI research campaign
+
+Import an existing Codex login only after explicit authorization:
+
+```bash
+sglab ai-director auth-import \
+  --workspace ./workspace \
+  --from-codex-home /explicit/authorized/codex/home
+```
+
+Then choose exactly one stop contract:
+
+```bash
+sglab research-campaign start --workspace ./workspace --time-limit 24h
+sglab research-campaign start --workspace ./workspace --until-success
+```
+
+Both commands run in the foreground. The installed target is immutable for the
+campaign; the Director chooses scientific parameters and concurrent lane
+allocation. Authentication is kept under the private application directory
+and is excluded from exports.
+
+Operational commands:
+
+```bash
+sglab research-campaign status --workspace ./workspace
+sglab research-campaign pause --workspace ./workspace
+sglab research-campaign continue --workspace ./workspace
+sglab research-campaign stop --workspace ./workspace
+sglab research-campaign resume --workspace ./workspace \
+  --campaign-id <campaign-id>
+sglab research-campaign export --workspace ./workspace \
+  --campaign-id <campaign-id> --output ./campaign.zip
+```
+
+Pause, resume, and stop are emergency operational controls, not scientific
+inputs. A stopped campaign is an abnormal terminal result. Only M4
+certification produces scientific success.
+
+### Legacy fixed-configuration run
+
 ```bash
 sglab run \
   --target erdos_gyarfas \
@@ -76,6 +117,11 @@ On startup:
 - recover SQLite WAL;
 - offer resume or finalize-as-crashed;
 - never overwrite the previous run directory.
+
+For an Active Director campaign, use `research-campaign resume`. Recovery
+checks SQLite integrity and checkpoint hashes, resumes the same persisted
+app-server thread, restores lane RNG/checkpoint state, requeues interrupted
+verification, and redispatches only accepted actions without outcomes.
 
 ## Incident: memory pressure
 

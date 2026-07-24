@@ -103,6 +103,50 @@ class WebAssetsTests(unittest.TestCase):
             server.server_close()
             thread.join(timeout=2)
 
+    def test_campaign_api_has_only_stop_contract_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            auth = workspace / ".sglab" / "director" / "codex-home" / "auth.json"
+            auth.parent.mkdir(parents=True)
+            auth.write_text("{}\n", encoding="utf-8")
+            server = create_server(workspace, "127.0.0.1", 0)
+            thread = Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            connection = HTTPConnection(*server.server_address, timeout=2)
+            connection.request("GET", "/api/research-campaign")
+            response = connection.getresponse()
+            self.assertEqual(response.status, 200)
+            self.assertEqual(json.loads(response.read())["state"], "IDLE")
+            connection.request(
+                "POST",
+                "/api/research-campaign",
+                body=json.dumps(
+                    {
+                        "stop_mode": "time_limit",
+                        "duration": "1h",
+                        "workers": 8,
+                    }
+                ),
+                headers={"Content-Type": "application/json"},
+            )
+            response = connection.getresponse()
+            self.assertEqual(response.status, 400)
+            self.assertIn(b"unsupported campaign input", response.read())
+            connection.request(
+                "POST",
+                "/api/research-campaign",
+                body=json.dumps(
+                    {"stop_mode": "until_success", "duration": "1h"}
+                ),
+                headers={"Content-Type": "application/json"},
+            )
+            response = connection.getresponse()
+            self.assertEqual(response.status, 400)
+            self.assertIn(b"does not accept a duration", response.read())
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
 
 if __name__ == "__main__":
     unittest.main()

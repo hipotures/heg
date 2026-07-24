@@ -44,3 +44,11 @@ the latest persisted checkpoint because worker events were ordered telemetry
 then checkpoint. Worker emission is now checkpoint-first at each safe
 boundary. Recovery proves identical checkpoint ID/SHA/high-water before new
 progress.
+
+## I-007 — resolved — operator controls blocked by awaited Director turn
+
+The first production composition draft awaited `orchestrator.tick()` directly,
+which could delay deadline and emergency control handling for the full
+inference timeout. The supervisor now owns the turn as an asynchronous task.
+Campaign controls are checked independently; cancellation durably fails the
+interrupted turn, and optimistic campaign versions reject late decisions.

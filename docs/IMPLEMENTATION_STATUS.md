@@ -153,6 +153,35 @@ homes. The full suite passes 69 tests. See
 The authenticated process-kill proof must still resume the actual persisted
 app-server thread and is intentionally pending the explicit auth gate.
 
+### M6.7 operator campaign and dashboard — offline milestone complete
+
+The production foreground supervisor now assembles the persistent app-server
+provider, event-driven orchestrator, bounded concurrent lane manager, retained
+candidate archive, scientific diagnostics, and M4 verification broker around
+one durable campaign. A nonblocking workspace lock prevents a second campaign
+coordinator. Deadline, emergency pause/resume/stop, and M4-success states are
+checked outside the Director turn task, so operational controls remain
+responsive while inference is running.
+
+The normal CLI and HTTP start contracts accept exactly one operator choice:
+`--time-limit` or `--until-success`. The installed Erdős–Gyárfás target is
+read-only; normal inputs expose no order, algorithm, worker, seed, mutation,
+lane-allocation, or Director-cadence controls. The old parameterized `run`
+command remains available as an explicitly legacy engine interface.
+
+The standard-library dashboard now reports the persistent Director session and
+turns, usage and latency, assessment and hypotheses, typed decisions and
+measured effects, lane parameters and telemetry, revision history, verifier
+queue, stop contract, resources, and fault state. Campaign exports still use
+the SQLite Online Backup path and omit credentials.
+
+The focused operator/API tests, full 74-test suite, and all five repository
+gates pass. See `docs/reports/M6_OPERATOR_INTERFACE.md`. This remains an
+offline milestone:
+authenticated production turns, the hidden-witness live acceptance,
+multi-controller study, outage hardening, and the two-hour Active Director
+soak remain pending.
+
 ## M0 — complete
 
 - installable standard `src/` package and CLI entry point;

@@ -26,6 +26,39 @@
                            minimal HTTP dashboard
 ```
 
+## Active Director campaign path
+
+The normal AI research path is additive to the legacy fixed-configuration
+coordinator:
+
+```text
+operator stop contract
+        |
+        v
+campaign supervisor ----> persistent codex app-server JSON-RPC thread
+        |                              |
+        |                              v
+        |                    typed, evidence-bound actions
+        v                              |
+concurrent stateful lanes <------------+
+        |
+        +----> bounded candidate archive ----> M4 two-path verifier
+        |
+        +----> SQLite single writer + immutable snapshots/checkpoints
+```
+
+`src/sglab/research/campaign.py` owns the foreground lifecycle and is the only
+production composition root. The Director is a thin inference provider: it
+has no tools, shell, browser, project instructions, plugins, MCP resources, or
+write access. Search lane processes continue independently while a Director
+turn is pending. Accepted actions are committed before delivery and applied at
+checkpoint boundaries.
+
+Only the M4 broker may create
+`succeeded_certified_counterexample`. The supervisor may create the deadline
+or operator-stop terminal states, but has no API for claiming mathematical
+success.
+
 ## Processes
 
 ### Master
@@ -61,8 +94,10 @@ Each worker:
 Finalist verification is isolated from search workers. The Python reference
 path runs in a child process and the C++ path runs as a bounded subprocess;
 the coordinator only launches them and records their reports. The optional
-SAT experiment is a separate command and process. There is no AI service,
-network client, or LLM call in the runtime data path. Exact paths may call:
+SAT experiment is a separate command and process. The legacy path has no AI
+service or LLM call. The Active Director adds one isolated Codex App Server
+inference subprocess outside the candidate-evaluation loop. Exact paths may
+call:
 
 - the Python reference verifier;
 - the C++ exact cycle checker;
