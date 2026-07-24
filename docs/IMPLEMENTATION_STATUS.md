@@ -2,6 +2,33 @@
 
 Last implementation audit: **2026-07-24**.
 
+## Reduced context-mode screen — deterministic Phase A complete
+
+The replacement measurement screen now has exactly three fail-closed slots in
+the fixed order S2 (fresh stateless A4), P1 (fresh persistent A1), and P2
+(persistent A4 on the P1 thread). It has no fourth slot, compaction operation,
+search lane, batch, candidate evaluation, or action dispatch. Decisions remain
+`measurement_only` and are never executed. A 300-second per-turn hard timeout
+persists incomplete correlation, uses `turn/interrupt`, drains late events, and
+prevents every later slot after a failure.
+
+S2 and P2 use byte-identical A4 scientific state, prompt, output schema,
+canonical evidence registry, action space, target, budget, artifact references,
+and complete request template. Their only intended difference is P1 history
+retained by the P2 thread. The A4 state is 16,709 bytes, ancestry is 5,611
+bytes, historical outcomes are 3,593 bytes, and the conservative complete
+client-input estimate is 9,771 tokens; all hard context gates pass.
+
+Focused evidence/lifecycle/timeout tests and two complete 125-test safe-suite
+runs pass. The one installed-app-server compliance test was deliberately
+excluded because this phase prohibits starting the installed server.
+`make doctor`, `make check`, `make benchmark-smoke`, `make dashboard-smoke`,
+and v8-to-v9 migration/integrity checks on an SQLite Online Backup pass.
+Historical failure artifacts and the P1 response retain their recorded hashes,
+and offline P1 revalidation remains schema-valid and semantically valid. No
+auth access, model inference, installed App Server start, or graph-search batch
+occurred. See `docs/reports/M6_REDUCED_CONTEXT_SCREEN_PHASE_A.md`.
+
 ## Context-screen deterministic failure fixes complete
 
 The aborted persistent P1 output was revalidated offline without changing the

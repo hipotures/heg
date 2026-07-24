@@ -140,6 +140,8 @@ class AppServerTurnResult:
     item_types: tuple[tuple[str, str], ...] = ()
     reasoning_item_ids: tuple[str, ...] = ()
     latest_event_sequence: int = 0
+    first_item_latency_seconds: float | None = None
+    final_answer_latency_seconds: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -479,6 +481,10 @@ class AppServerClient:
         output_schema: dict[str, Any] | None,
         on_delta: Callable[[str], None] | None,
     ) -> AppServerTurnResult:
+        loop = asyncio.get_running_loop()
+        turn_started = loop.time()
+        first_item_latency: float | None = None
+        final_answer_latency: float | None = None
         params: dict[str, Any] = {
             "threadId": session.thread_id,
             "input": [{"type": "text", "text": text}],
@@ -520,6 +526,8 @@ class AppServerClient:
                 raise AppServerError(f"duplicate turn/start itemId: {item_id}")
             started_item_ids.add(item_id)
             item_types[item_id] = str(item.get("type") or "unknown")
+        if item_types:
+            first_item_latency = loop.time() - turn_started
         self._emit_turn_event(
             "started",
             method="turn/start",
@@ -551,6 +559,8 @@ class AppServerClient:
                     raise AppServerError(f"delta references unknown itemId: {item_id}")
                 delta_item_ids.add(item_id)
                 item_types.setdefault(item_id, "agentMessage")
+                if first_item_latency is None:
+                    first_item_latency = loop.time() - turn_started
                 self._emit_turn_event(
                     "in_progress",
                     method=method,
@@ -571,6 +581,8 @@ class AppServerClient:
                 started_item_ids.add(item_id)
                 item_type = str(item.get("type") or "unknown")
                 item_types[item_id] = item_type
+                if first_item_latency is None:
+                    first_item_latency = loop.time() - turn_started
                 self._emit_turn_event(
                     "in_progress",
                     method=method,
@@ -588,6 +600,8 @@ class AppServerClient:
                 completed_item_ids.add(item_id)
                 item_type = str(item.get("type") or "unknown")
                 item_types[item_id] = item_type
+                if first_item_latency is None:
+                    first_item_latency = loop.time() - turn_started
                 self._emit_turn_event(
                     "in_progress",
                     method=method,
@@ -603,6 +617,9 @@ class AppServerClient:
                         if item.get("phase") == "final_answer":
                             final_messages.append(value)
                             final_agent_item_id = item_id
+                            final_answer_latency = (
+                                loop.time() - turn_started
+                            )
                         else:
                             fallback_messages.append(value)
             elif method == "thread/tokenUsage/updated":
@@ -749,6 +766,8 @@ class AppServerClient:
                 )
             ),
             latest_event_sequence=self._active_event_sequence,
+            first_item_latency_seconds=first_item_latency,
+            final_answer_latency_seconds=final_answer_latency,
         )
 
     def _turn_request_sent(

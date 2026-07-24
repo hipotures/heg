@@ -708,7 +708,7 @@ def build_parser() -> ArgumentParser:
     context_screen_run.add_argument("--source-workspace", required=True)
     context_screen_run.add_argument("--codex", default="codex")
     context_screen_run.add_argument(
-        "--turn-timeout-seconds", type=float, default=900.0
+        "--turn-timeout-seconds", type=float, default=300.0
     )
     context_screen_run.set_defaults(func=cmd_ai_experiment)
     experiment_run = ai_experiment_commands.add_parser("run")

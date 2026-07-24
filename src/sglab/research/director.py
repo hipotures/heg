@@ -42,6 +42,8 @@ class DirectorEvidence:
     turn_record_ids: tuple[str, ...]
     thread_id: str
     turn_id: str
+    first_item_latency_seconds: float | None = None
+    final_answer_latency_seconds: float | None = None
 
 
 def base_instructions() -> str:
@@ -499,6 +501,12 @@ class ActiveDirector:
             turn_record_ids=all_turns,
             thread_id=self.session.thread_id,
             turn_id=result.turn_id,
+            first_item_latency_seconds=(
+                result.first_item_latency_seconds
+            ),
+            final_answer_latency_seconds=(
+                result.final_answer_latency_seconds
+            ),
         )
 
     async def _prepare_context_boundary(self) -> None:

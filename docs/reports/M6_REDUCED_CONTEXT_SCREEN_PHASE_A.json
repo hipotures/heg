@@ -1,0 +1,123 @@
+{
+  "schema_version": "1.0",
+  "date": "2026-07-24",
+  "phase": "deterministic_preparation",
+  "initial_commit": "fd151508fafe9ec5b69ac5af444dc43ee5297e27",
+  "planning_untouched": true,
+  "boundaries": {
+    "auth_json_read_or_copied": false,
+    "model_inferences": 0,
+    "installed_app_server_starts": 0,
+    "historical_failed_thread_reused": false,
+    "preserved_artifacts_modified": false,
+    "search_batches": 0,
+    "lanes": 0,
+    "action_dispatches": 0,
+    "candidate_evaluations": 0,
+    "compaction_operations": 0,
+    "tool_calls": 0
+  },
+  "preserved_artifacts": {
+    "failure_report_sha256": "dba6963f017a134beb5a8b04aa3f5a4d3db653dd0b44e230b95fc9d855fd5d2f",
+    "p1_response_sha256": "860a5ca9344ac713a82654f3a077cb7a5e2244ffb504f09796abf901fa55c804",
+    "rollout_sha256": "ec3837ec17808f080cfab915fe18dee073d13993bdc11cdc866aa3e6ddea3614",
+    "persistent_P1_schema_valid": true,
+    "persistent_P1_semantic_revalidation": "valid"
+  },
+  "sqlite": {
+    "production_schema_version": 9,
+    "online_backup_sha256": "e121468da08aab95237592c2a774633bef6562cb251e67196dc82f29714937af",
+    "backup_before_migration_user_version": 8,
+    "backup_before_migration_integrity": "ok",
+    "backup_after_migration_user_version": 9,
+    "backup_after_migration_integrity": "ok",
+    "original_database_sha256_after_test": "9333d63394baa8ab3a98a8c2236fcaa7ccff77b727e8a1d2c8115dc166c20a29"
+  },
+  "slots": [
+    {
+      "id": "S2",
+      "mode": "stateless_turns",
+      "source": "A4",
+      "thread": "fresh"
+    },
+    {
+      "id": "P1",
+      "mode": "persistent_thread",
+      "source": "A1",
+      "thread": "fresh"
+    },
+    {
+      "id": "P2",
+      "mode": "persistent_thread",
+      "source": "A4",
+      "thread": "same_as_P1"
+    }
+  ],
+  "fourth_slot_exists": false,
+  "turn_timeout_seconds": 300,
+  "s2_p2_equivalence": {
+    "all_equal": true,
+    "director_state_sha256": "cb714203abc8ead33c746704a1f9ed01c67f19c6d1c08217ee74b4c8da77fe0b",
+    "prompt_sha256": "839ca51fb2a458b6f54702d99c8f91811d211c1c85e11df3d2c15a30f6831f05",
+    "output_schema_sha256": "cf577dcde83b7f33e2106f327aaa970d4878e1635c7cf1f5b2dba4e3c06b1049",
+    "evidence_registry_sha256": "0c230a07895c9da021e5111a08e4797e4452a01c88e6cd62556f310a018a8f1a",
+    "allowed_action_space_sha256": "02e9e228b098f8cd32611cfc77fd9574f4b24e5cf1fa0852784ee4144fe02e10",
+    "target_metadata_sha256": "6db3a2a05e6ad7e66100f3c337618023eed19095e7d94ac4272fce2373f72ce5",
+    "campaign_budget_sha256": "31e7fad5b6cb280aab8dfbc86ebd356fdd65e9821da0b542c5f7cfaa0527ce84",
+    "artifact_references_sha256": "1110750775df3b4efc47316f3a93443e5eb05490c151e28e2fd04c5ff385c32a",
+    "complete_request_template_sha256": "b865409f85458bfdf3678682091bb8d05403d6b1b0f67b321e74d289f614edc8"
+  },
+  "context_budgets": {
+    "limits": {
+      "director_state_bytes": 32768,
+      "ancestry_bytes": 8192,
+      "historical_outcomes_bytes": 12288,
+      "estimated_client_owned_tokens": 12000
+    },
+    "S2": {
+      "director_state_bytes": 16709,
+      "ancestry_bytes": 5611,
+      "historical_outcomes_bytes": 3593,
+      "prompt_bytes": 17544,
+      "output_schema_bytes": 20855,
+      "complete_request_bytes": 40377,
+      "estimated_client_owned_tokens": 9771
+    },
+    "P1": {
+      "director_state_bytes": 3033,
+      "ancestry_bytes": 65,
+      "historical_outcomes_bytes": 2,
+      "prompt_bytes": 3868,
+      "output_schema_bytes": 20855,
+      "complete_request_bytes": 25421,
+      "estimated_client_owned_tokens": 6352
+    },
+    "P2": {
+      "director_state_bytes": 16709,
+      "ancestry_bytes": 5611,
+      "historical_outcomes_bytes": 3593,
+      "prompt_bytes": 17544,
+      "output_schema_bytes": 20855,
+      "complete_request_bytes": 40377,
+      "estimated_client_owned_tokens": 9771
+    },
+    "all_pass": true
+  },
+  "verification": {
+    "focused_tests": "passed",
+    "safe_suite_pass_1": {
+      "tests": 125,
+      "result": "passed"
+    },
+    "safe_suite_pass_2": {
+      "tests": 125,
+      "result": "passed"
+    },
+    "installed_app_server_compliance_test": "deliberately_omitted",
+    "make_doctor": "passed",
+    "make_check": "passed",
+    "make_benchmark_smoke": "passed",
+    "make_dashboard_smoke": "passed"
+  },
+  "ready_for_phase_b_authorization": true
+}

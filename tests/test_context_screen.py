@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
+import sys
 import tempfile
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -17,6 +18,9 @@ from sglab.research.context_screen import (
     semantic_decision_rubric,
 )
 from sglab.research.validation import validate_decision
+
+
+FAKE = Path(__file__).parent / "fixtures" / "fake_app_server.py"
 
 
 def source_snapshot(snapshot_id: str, *, outcome: bool) -> dict:
@@ -181,7 +185,7 @@ def measurement_decision(snapshot_id: str) -> dict:
 
 
 class ContextScreenTests(unittest.TestCase):
-    def test_phase_a_has_exactly_four_bounded_no_search_slots(self) -> None:
+    def test_phase_a_has_exactly_three_bounded_no_search_slots(self) -> None:
         with (
             tempfile.TemporaryDirectory() as source_directory,
             tempfile.TemporaryDirectory() as output_directory,
@@ -193,12 +197,14 @@ class ContextScreenTests(unittest.TestCase):
                 output, source_workspace=source
             )
             self.assertTrue(report["ok"])
-            self.assertEqual(report["inference_slots"], ["P1", "P2", "S1", "S2"])
-            self.assertEqual(report["inference_slot_count"], 4)
-            self.assertFalse(report["fifth_inference_slot_exists"])
+            self.assertEqual(report["inference_slots"], ["S2", "P1", "P2"])
+            self.assertEqual(report["inference_slot_count"], 3)
+            self.assertFalse(report["fourth_inference_slot_exists"])
             self.assertEqual(report["search_batch_slots"], 0)
+            self.assertEqual(report["lane_creation_slots"], 0)
+            self.assertEqual(report["action_dispatch_slots"], 0)
+            self.assertEqual(report["candidate_evaluation_slots"], 0)
             self.assertEqual(report["compaction_operations_scheduled"], 0)
-            self.assertTrue(report["deterministic_test_flake_fixed"])
             self.assertTrue(
                 all(
                     request["measurement_only"]
@@ -207,8 +213,23 @@ class ContextScreenTests(unittest.TestCase):
                 )
             )
             self.assertTrue(
-                all(report["pairwise_identical_inputs"].values())
+                report["s2_p2_equivalence"]["all_equal"]
             )
+            self.assertEqual(
+                report["requests"][0]["slot"], "S2"
+            )
+            self.assertTrue(
+                (output / "context-screen-equivalence.json").is_file()
+            )
+            for request in report["requests"]:
+                self.assertLessEqual(request["director_state_bytes"], 32 * 1024)
+                self.assertLessEqual(request["ancestry_bytes"], 8 * 1024)
+                self.assertLessEqual(
+                    request["historical_outcomes_bytes"], 12 * 1024
+                )
+                self.assertLessEqual(
+                    request["client_owned_estimated_tokens"], 12_000
+                )
             self.assertFalse(
                 (
                     output
@@ -298,6 +319,13 @@ class ContextScreenTests(unittest.TestCase):
             self.assertFalse(
                 (output / "arms" / "persistent" / "results.sqlite3").exists()
             )
+            with self.assertRaisesRegex(ValueError, "between 1 and 300"):
+                run_authenticated_context_screen(
+                    output,
+                    source_workspace=source,
+                    codex="must-not-start",
+                    turn_timeout_seconds=301,
+                )
 
     def test_prompt_contains_only_v2_scientific_state(self) -> None:
         prompt = json.loads(
@@ -338,31 +366,178 @@ class ContextScreenTests(unittest.TestCase):
             ]
         )
         self.assertEqual(run.ai_experiment_command, "context-screen-run")
+        self.assertEqual(run.turn_timeout_seconds, 300.0)
 
 
 class ContextScreenFailureTests(unittest.IsolatedAsyncioTestCase):
-    async def test_persistent_failure_prevents_every_later_slot(self) -> None:
-        failed = AsyncMock(side_effect=RuntimeError("P2 failed"))
+    def arm_result(self, mode: str, *, completed: bool) -> dict:
+        return {
+            "mode": mode,
+            "turns": [],
+            "completed": completed,
+        }
+
+    async def test_s2_failure_prevents_p1_and_p2(self) -> None:
+        failed = AsyncMock(
+            return_value=self.arm_result(
+                "stateless_turns", completed=False
+            )
+        )
         with patch(
             "sglab.research.context_screen._run_screen_arm", failed
         ):
-            with self.assertRaisesRegex(RuntimeError, "P2 failed"):
-                await _run_screen_arms(
-                    arm_roots={
-                        "persistent_thread": Path("/tmp/persistent"),
-                        "stateless_turns": Path("/tmp/stateless"),
-                    },
-                    states={},
-                    codex="must-not-start",
-                    preflight={},
-                    protocol_hash="a" * 64,
-                    turn_timeout_seconds=10,
-                )
+            stateless, persistent = await _run_screen_arms(
+                arm_roots={
+                    "persistent_thread": Path("/tmp/persistent"),
+                    "stateless_turns": Path("/tmp/stateless"),
+                },
+                states={},
+                codex="must-not-start",
+                preflight={},
+                protocol_hash="a" * 64,
+                turn_timeout_seconds=10,
+            )
         self.assertEqual(failed.await_count, 1)
         self.assertEqual(
             failed.await_args.kwargs["mode"],
-            "persistent_thread",
+            "stateless_turns",
         )
+        self.assertFalse(stateless["completed"])
+        self.assertEqual(persistent["failure"]["kind"], "not_started")
+
+    async def test_successful_order_is_s2_then_p1_p2(self) -> None:
+        completed = AsyncMock(
+            side_effect=[
+                self.arm_result("stateless_turns", completed=True),
+                self.arm_result("persistent_thread", completed=True),
+            ]
+        )
+        with patch(
+            "sglab.research.context_screen._run_screen_arm", completed
+        ):
+            await _run_screen_arms(
+                arm_roots={
+                    "persistent_thread": Path("/tmp/persistent"),
+                    "stateless_turns": Path("/tmp/stateless"),
+                },
+                states={},
+                codex="must-not-start",
+                preflight={},
+                protocol_hash="a" * 64,
+                turn_timeout_seconds=300,
+            )
+        self.assertEqual(completed.await_count, 2)
+        self.assertEqual(
+            completed.await_args_list[0].kwargs["slots"],
+            (("S2", "A4"),),
+        )
+        self.assertEqual(
+            completed.await_args_list[1].kwargs["slots"],
+            (("P1", "A1"), ("P2", "A4")),
+        )
+
+    async def run_fake_screen(
+        self, mode: str
+    ) -> tuple[dict, dict]:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            states = {
+                "A1": source_snapshot("snapshot-a1", outcome=False),
+                "A4": source_snapshot("snapshot-a4", outcome=True),
+            }
+            return await _run_screen_arms(
+                arm_roots={
+                    "stateless_turns": root / "stateless",
+                    "persistent_thread": root / "persistent",
+                },
+                states=states,
+                codex=(
+                    sys.executable,
+                    str(FAKE),
+                    f"--fake-mode={mode}",
+                ),
+                preflight={
+                    "codex_version_output": "fake",
+                    "codex_executable_sha256": "a" * 64,
+                },
+                protocol_hash="b" * 64,
+                turn_timeout_seconds=0.15,
+                usage_wait_seconds=0.05,
+                timeout_drain_seconds=0.05,
+            )
+
+    async def test_fake_server_success_is_three_measurements_only(self) -> None:
+        stateless, persistent = await self.run_fake_screen(
+            "director-screen-success"
+        )
+        self.assertTrue(stateless["completed"])
+        self.assertTrue(persistent["completed"])
+        turns = [*stateless["turns"], *persistent["turns"]]
+        self.assertEqual([turn["slot"] for turn in turns], ["S2", "P1", "P2"])
+        self.assertTrue(
+            all(turn["measurement_only"] and not turn["executed"] for turn in turns)
+        )
+        self.assertEqual(
+            stateless["turns"][0]["director_state_sha256"],
+            persistent["turns"][1]["director_state_sha256"],
+        )
+        self.assertEqual(
+            stateless["turns"][0]["evidence_registry_sha256"],
+            persistent["turns"][1]["evidence_registry_sha256"],
+        )
+        self.assertEqual(
+            persistent["turns"][0]["thread_id"],
+            persistent["turns"][1]["thread_id"],
+        )
+        for arm in (stateless, persistent):
+            self.assertEqual(arm["search_batches"], 0)
+            self.assertEqual(arm["search_lanes"], 0)
+            self.assertEqual(arm["action_dispatches"], 0)
+            self.assertEqual(arm["candidate_evaluations"], 0)
+            self.assertEqual(arm["compaction_operations"], 0)
+            self.assertEqual(arm["sqlite_integrity_check"], "ok")
+
+    async def test_p1_timeout_prevents_p2(self) -> None:
+        stateless, persistent = await self.run_fake_screen(
+            "director-screen-timeout-a1"
+        )
+        self.assertTrue(stateless["completed"])
+        self.assertFalse(persistent["completed"])
+        self.assertEqual(
+            [turn["slot"] for turn in persistent["turns"]], ["P1"]
+        )
+        self.assertIn(
+            persistent["turns"][0]["lifecycle_status"],
+            {"timed_out", "aborted"},
+        )
+
+    async def test_s2_timeout_prevents_persistent_arm_start(self) -> None:
+        stateless, persistent = await self.run_fake_screen(
+            "director-screen-timeout-first"
+        )
+        self.assertFalse(stateless["completed"])
+        self.assertEqual(
+            [turn["slot"] for turn in stateless["turns"]], ["S2"]
+        )
+        self.assertEqual(persistent["failure"]["kind"], "not_started")
+        self.assertEqual(persistent["turns"], [])
+
+    async def test_p2_timeout_and_late_abort_are_durable(self) -> None:
+        stateless, persistent = await self.run_fake_screen(
+            "director-screen-late-abort-second"
+        )
+        self.assertTrue(stateless["completed"])
+        self.assertFalse(persistent["completed"])
+        self.assertEqual(
+            [turn["slot"] for turn in persistent["turns"]],
+            ["P1", "P2"],
+        )
+        p2 = persistent["turns"][1]
+        self.assertEqual(p2["lifecycle_status"], "aborted")
+        self.assertFalse(p2["final_answer_presence"])
+        self.assertFalse(p2["usage_presence"])
+        self.assertIsNone(p2["usage"]["server_reported_total_tokens"])
+        self.assertEqual(len(p2["reasoning_item_ids"]), 2)
 
 
 if __name__ == "__main__":

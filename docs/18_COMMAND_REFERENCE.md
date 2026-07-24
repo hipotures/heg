@@ -19,7 +19,7 @@ sglab ai-experiment context-screen-phase-a \
 sglab ai-experiment context-screen-run \
   --workspace ./context-screen \
   --source-workspace ./preserved-phase-b \
-  --turn-timeout-seconds 900
+  --turn-timeout-seconds 300
 sglab ai-experiment run --workspace ./new-private-workspace \
   --evaluation-cap <cap-from-phase-a> \
   --context-mode persistent_thread
@@ -48,11 +48,13 @@ state. The normal `research-campaign start` interface deliberately does not
 expose this A/B-test setting.
 
 `context-screen-phase-a` is deterministic and performs no authentication or
-model turn. `context-screen-run` is a separate four-turn, zero-search
-measurement command. It refuses to start unless the persistent and stateless
-arm workspaces each contain an independently authorized private auth import.
-Its per-turn timeout is explicit and bounded to 1–900 seconds; timeout sends
-the installed `turn/interrupt` operation and never starts the next arm.
+model turn. It prepares exactly S2, P1 and P2 in that order. S2 is a fresh
+stateless A4 turn; P1 creates the persistent A1 thread; P2 submits the same A4
+state as S2 on the P1 thread. `context-screen-run` is the separate three-slot,
+zero-search measurement command. It refuses to start unless the persistent and
+stateless arm workspaces each contain an independently authorized private auth
+import. Its per-turn timeout is explicit and bounded to 1–300 seconds; timeout
+sends the installed `turn/interrupt` operation and never starts a later slot.
 
 Normal campaign start exposes no scientific tuning flags. The installed target
 is read-only, and the AI Director chooses algorithms, graph sizes, lane count,

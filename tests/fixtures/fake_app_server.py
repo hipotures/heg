@@ -20,6 +20,7 @@ def send(value: dict) -> None:
 
 
 P2_SHAPE = MODE in {"p2-timeout", "p2-late-abort"}
+DIRECTOR_SCREEN = MODE.startswith("director-screen")
 thread_id = (
     "019f953e-5817-7c21-ae03-79c0ad6942eb"
     if P2_SHAPE
@@ -39,6 +40,60 @@ reasoning_item_ids = (
     else ("reasoning-1", "reasoning-2")
 )
 skills_enabled = True
+turn_count = 0
+
+
+def screen_snapshot_id(params: dict) -> str:
+    inputs = params.get("input", [])
+    if not inputs or not isinstance(inputs[0], dict):
+        return "snapshot-missing"
+    try:
+        prompt = json.loads(str(inputs[0].get("text") or ""))
+    except json.JSONDecodeError:
+        return "snapshot-missing"
+    state = prompt.get("director_state_v2")
+    return (
+        str(state.get("source_snapshot_id"))
+        if isinstance(state, dict)
+        else "snapshot-missing"
+    )
+
+
+def screen_decision(snapshot_id: str) -> dict:
+    review = {
+        "min_wall_seconds": 30,
+        "max_wall_seconds": 120,
+        "candidate_delta": 1000,
+        "events": ["stagnation"],
+    }
+    return {
+        "schema_version": "1.0",
+        "snapshot_id": snapshot_id,
+        "campaign_assessment": (
+            "The truncated heuristic evidence is not exact certification."
+        ),
+        "hypothesis_updates": [],
+        "actions": [
+            {
+                "action_id": "measurement-review",
+                "type": "set_review_trigger",
+                "priority": 10,
+                "hypothesis_ids": [],
+                "evidence_ids": [snapshot_id],
+                "rationale": "Retain an inert measurement recommendation.",
+                "expected_effect": "No search is executed in this screen.",
+                "evaluation_window": {
+                    "max_wall_seconds": 120,
+                    "max_candidate_delta": 1000,
+                },
+                "idempotency_key": "measurement-review-key",
+                "lease_seconds": 300,
+                "fallback": {"on_precondition_failure": "reject"},
+                "review_trigger": review,
+            }
+        ],
+        "next_review": review,
+    }
 
 
 def usage_notification(
@@ -139,7 +194,11 @@ for line in sys.stdin:
             {
                 "id": request_id,
                 "result": {
-                    "model": "fake-model",
+                    "model": (
+                        params.get("model")
+                        if DIRECTOR_SCREEN and params.get("model")
+                        else "fake-model"
+                    ),
                     "reasoningEffort": "high",
                     "thread": {
                         "id": thread_id,
@@ -178,7 +237,11 @@ for line in sys.stdin:
             )
             continue
         send({"id": request_id, "result": {}})
-        if MODE in {"late-abort", "p2-late-abort"}:
+        if MODE in {
+            "late-abort",
+            "p2-late-abort",
+            "director-screen-late-abort-second",
+        }:
             time.sleep(0.02)
             send(
                 {
@@ -203,7 +266,11 @@ for line in sys.stdin:
                 }
             )
     elif method == "turn/start":
+        turn_count += 1
         params = request.get("params", {})
+        snapshot_id = screen_snapshot_id(params)
+        if DIRECTOR_SCREEN:
+            turn_id = f"turn-screen-{turn_count}"
         if params.get("environments") != [] or params.get(
             "runtimeWorkspaceRoots"
         ) != []:
@@ -228,12 +295,27 @@ for line in sys.stdin:
         if MODE == "malformed":
             print("{bad", flush=True)
             continue
+        screen_timeout = (
+            MODE == "director-screen-timeout-first"
+            or (
+                MODE == "director-screen-timeout-a1"
+                and snapshot_id == "snapshot-a1"
+            )
+            or (
+                MODE
+                in {
+                    "director-screen-timeout-second",
+                    "director-screen-late-abort-second",
+                }
+                and turn_count == 2
+            )
+        )
         if MODE in {
             "timeout",
             "late-abort",
             "p2-timeout",
             "p2-late-abort",
-        }:
+        } or screen_timeout:
             for item_id in reasoning_item_ids:
                 send(
                     {
@@ -258,7 +340,16 @@ for line in sys.stdin:
                     total_tokens=1,
                 )
             )
-        send({"id": "server-1", "method": "unknown/request", "params": {}})
+        if not DIRECTOR_SCREEN:
+            send({"id": "server-1", "method": "unknown/request", "params": {}})
+        final_text = json.dumps(
+            (
+                screen_decision(snapshot_id)
+                if DIRECTOR_SCREEN
+                else {"ok": True}
+            ),
+            separators=(",", ":"),
+        )
         send(
             {
                 "method": "item/started",
@@ -286,7 +377,7 @@ for line in sys.stdin:
                         if MODE == "bad-item-correlation"
                         else "item-1"
                     ),
-                    "delta": '{"ok":',
+                    "delta": final_text[: max(1, len(final_text) // 2)],
                 },
             }
         )
@@ -301,7 +392,7 @@ for line in sys.stdin:
                         "id": "item-1",
                         "type": "agentMessage",
                         "phase": "final_answer",
-                        "text": '{"ok":true}',
+                        "text": final_text,
                     },
                 },
             }
