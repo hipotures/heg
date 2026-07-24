@@ -156,6 +156,8 @@ sglab benchmark calibrate --minutes 15 --seeds 2 --target erdos_gyarfas \
   --output ./workspace/benchmarks
 sglab benchmark soak --hours 2 --order 32 --workers 12 \
   --workspace ./workspace-soak --output ./workspace-soak/benchmarks
+sglab benchmark active-director-controls \
+  --workspace ./workspace/m6-active-control --output ./docs/reports
 ```
 
 Reports preserve raw samples, p50/p90/p95/max, hardware metadata, peak RSS,
@@ -163,3 +165,9 @@ adjacent-order factors, and range forecasts. The soak command automatically
 exercises pause/resume and records bounded-queue and worker-recycle settings.
 Calibration cases run in separate processes; `--jobs` caps concurrency while
 the default reserves at least two logical CPU threads.
+
+`active-director-controls` is a control-only M6 research benchmark, not a
+normal campaign form. Its static, random, serial-AI compatibility, and Active
+AI arms use fixed equal envelopes. `--smoke` selects the fixed two-seed,
+ten-second integration profile; there are no algorithm, worker, graph-size,
+mutation, lane-allocation, or Director-cadence flags.

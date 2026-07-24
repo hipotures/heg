@@ -1,0 +1,40 @@
+{
+  "authenticated_comparison_complete": false,
+  "controllers": [
+    "static",
+    "random",
+    "serial_ai",
+    "active_ai"
+  ],
+  "date": "2026-07-24",
+  "fixed_budget": {
+    "action_schema_cap_per_turn": 12,
+    "director_turns": 4,
+    "full_seeds": 5,
+    "maximum_active_lanes": 8,
+    "smoke_seeds": 2,
+    "verifier_slots": 1,
+    "wall_seconds_full": 60,
+    "wall_seconds_smoke": 10
+  },
+  "normal_operator_interface_changed": false,
+  "serial_ai_compatibility": "same app-server Director with all lanes paused during inference",
+  "static_m4_control": {
+    "certified": 1,
+    "controller_turns": 3,
+    "lane_processes_durably_stopped": true,
+    "terminal_state": "succeeded_certified_counterexample",
+    "wall_budget_seconds": 15
+  },
+  "tests_passed": 84,
+  "repository_gates_passed": [
+    "make doctor",
+    "make test",
+    "make check",
+    "make benchmark-smoke",
+    "make dashboard-smoke"
+  ],
+  "status": "offline_harness_complete_live_results_pending",
+  "superiority_claim_made": false,
+  "target": "m6_hidden_witness_control_v1"
+}

@@ -210,6 +210,24 @@ has 81 passing tests. See `docs/reports/M6_HARDENING_CONTROL.md`. The control
 target has not yet been run with authenticated AI, so the live active-control
 acceptance, equal-budget comparison, and two-hour soak remain pending.
 
+### M6.9 equal-budget control harness — offline milestone complete
+
+The executable multi-seed harness now compares static deterministic, seeded
+random, serial-AI compatibility, and production Active app-server controllers
+through the same durable campaign and M4 boundaries. Every trial has the same
+wall, lane, verifier, Director-turn, and action-schema caps. The serial arm is
+the documented compatibility construction required by the baseline
+discrepancy: it pauses all lanes while the same app-server Director reasons
+and is never a production fallback.
+
+The normal campaign UI remains free of scientific tuning. The harness records
+M4 success/time, best-score time area, efficiency, structure/finalist yield,
+action effects/regret, stale actions, and provider usage, and it emits no
+superiority claim. A real-lane static control reached the hidden witness
+through M4, and the full suite now has 84 passing tests; the four-controller
+authenticated multi-seed run still requires the explicit auth gate. See
+`docs/reports/M6_CONTROL_STUDY_HARNESS.md`.
+
 ## M0 — complete
 
 - installable standard `src/` package and CLI entry point;

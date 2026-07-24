@@ -30,7 +30,11 @@ from .director import ActiveDirector
 from .export import export_campaign
 from .lanes import LaneManager
 from .orchestrator import ActiveResearchOrchestrator
-from .providers import AppServerDecisionProvider
+from .providers import (
+    AppServerDecisionProvider,
+    SerialAppServerDecisionProvider,
+    SyntheticControlProvider,
+)
 from .recovery import CampaignRecovery
 from .snapshot import SnapshotBuilder
 from .store import ResearchStore, new_id
@@ -45,6 +49,7 @@ TERMINAL_STATES = {
     "stopped_by_operator",
 }
 CONTROL_ACTIONS = {"PAUSE", "RESUME", "STOP"}
+CONTROLLER_MODES = {"active_ai", "serial_ai", "static", "random"}
 
 
 def parse_duration(value: str) -> float:
@@ -317,11 +322,20 @@ class ResearchCampaignRunner:
         target: str = "erdos_gyarfas",
         codex: str = "codex",
         poll_seconds: float = 0.05,
+        controller_mode: str = "active_ai",
+        controller_seed: int = 0,
+        maximum_director_turns: int | None = None,
     ):
         if stop_mode not in {"time_limit", "until_success"}:
             raise ValueError("invalid stop mode")
         if target not in TARGETS:
             raise ValueError(f"unsupported target: {target}")
+        if controller_mode not in CONTROLLER_MODES:
+            raise ValueError("unsupported campaign controller mode")
+        if maximum_director_turns is not None and not (
+            1 <= maximum_director_turns <= 1000
+        ):
+            raise ValueError("Director turn budget must be between 1 and 1000")
         if (
             campaign_id is None
             and (stop_mode == "time_limit") != (duration_seconds is not None)
@@ -334,6 +348,9 @@ class ResearchCampaignRunner:
         self.target = target
         self.codex = codex
         self.poll_seconds = poll_seconds
+        self.controller_mode = controller_mode
+        self.controller_seed = controller_seed
+        self.maximum_director_turns = maximum_director_turns
 
     def run(self) -> dict[str, Any]:
         with campaign_lock(self.workspace):
@@ -341,16 +358,28 @@ class ResearchCampaignRunner:
 
     async def _run(self) -> dict[str, Any]:
         application_data = self.workspace / ".sglab"
-        if not auth_is_imported(application_data):
+        uses_app_server = self.controller_mode in {"active_ai", "serial_ai"}
+        if uses_app_server and not auth_is_imported(application_data):
             raise RuntimeError(
                 "Director authentication is not imported; run "
                 "`sglab ai-director auth-import` with an explicitly authorized "
                 "Codex home"
             )
-        preflight = generate_protocol_preflight(self.codex)
-        atomic_write_json(
-            application_data / "director" / "preflight.json", preflight
+        preflight = (
+            generate_protocol_preflight(self.codex)
+            if uses_app_server
+            else {
+                "codex_version_output": "synthetic-control-v1",
+                "codex_executable_sha256": "synthetic-control",
+                "canonical_schema_hashes": {
+                    "director-decision-v1": "synthetic-control"
+                },
+            }
         )
+        if uses_app_server:
+            atomic_write_json(
+                application_data / "director" / "preflight.json", preflight
+            )
         store = ResearchStore(self.workspace / "results.sqlite3")
         campaign_id = self.campaign_id or new_id("campaign")
         campaign_dir = self.workspace / "research-campaigns" / campaign_id
@@ -406,10 +435,6 @@ class ResearchCampaignRunner:
             "started_at": utc_now(),
         }
         atomic_write_json(self.workspace / "active-research-campaign.json", pointer)
-        client_config = AppServerConfig(
-            application_data=application_data,
-            launcher=(self.codex,),
-        )
         protocol_hash = hashlib.sha256(
             json.dumps(
                 preflight["canonical_schema_hashes"],
@@ -417,19 +442,37 @@ class ResearchCampaignRunner:
                 separators=(",", ":"),
             ).encode("ascii")
         ).hexdigest()
-        def director_factory() -> ActiveDirector:
-            return ActiveDirector(
-                client=AppServerClient(client_config),
-                store=store,
-                campaign_id=campaign_id,
-                campaign_dir=campaign_dir,
-                codex_version=str(preflight["codex_version_output"]),
-                executable_sha256=str(preflight["codex_executable_sha256"]),
-                protocol_schema_sha256=protocol_hash,
+        if uses_app_server:
+            client_config = AppServerConfig(
+                application_data=application_data,
+                launcher=(self.codex,),
             )
 
-        director = director_factory()
-        provider = AppServerDecisionProvider(director)
+            def director_factory() -> ActiveDirector:
+                return ActiveDirector(
+                    client=AppServerClient(client_config),
+                    store=store,
+                    campaign_id=campaign_id,
+                    campaign_dir=campaign_dir,
+                    codex_version=str(preflight["codex_version_output"]),
+                    executable_sha256=str(preflight["codex_executable_sha256"]),
+                    protocol_schema_sha256=protocol_hash,
+                )
+
+            director = director_factory()
+            provider = (
+                AppServerDecisionProvider(director)
+                if self.controller_mode == "active_ai"
+                else SerialAppServerDecisionProvider(director, manager)
+            )
+        else:
+            director = SyntheticControlProvider(
+                store=store,
+                campaign_id=campaign_id,
+                mode=self.controller_mode,
+                seed=self.controller_seed,
+            )
+            provider = director
         candidates = CandidateArchive(
             store=store, campaign_id=campaign_id, campaign_dir=campaign_dir
         )
@@ -469,11 +512,22 @@ class ResearchCampaignRunner:
             await director.start(resume_thread_id=resume_thread_id)
             orchestrator.bootstrap()
             director_task: asyncio.Task[Any] | None = None
+            completed_director_turns = int(
+                store.connection.execute(
+                    """
+                    SELECT count(*) FROM app_server_turns
+                    WHERE campaign_id=? AND status='completed_valid'
+                    """,
+                    (campaign_id,),
+                ).fetchone()[0]
+            )
             while True:
                 if director_task is not None and director_task.done():
                     try:
-                        await director_task
+                        cycle = await director_task
                     except Exception:
+                        if not uses_app_server:
+                            raise
                         director = await self._recover_director(
                             current=director,
                             factory=director_factory,
@@ -484,6 +538,8 @@ class ResearchCampaignRunner:
                         provider.director = director
                         orchestrator.triggers.offer("recovery")
                     else:
+                        if cycle is not None:
+                            completed_director_turns += 1
                         if director.rollover_due():
                             await director.rollover()
                     director_task = None
@@ -523,7 +579,15 @@ class ResearchCampaignRunner:
                         terminal_kind="completed_deadline_reached",
                     )
                     break
-                if campaign["state"] == "running" and director_task is None:
+                turn_budget_available = (
+                    self.maximum_director_turns is None
+                    or completed_director_turns < self.maximum_director_turns
+                )
+                if (
+                    campaign["state"] == "running"
+                    and director_task is None
+                    and turn_budget_available
+                ):
                     director_task = asyncio.create_task(orchestrator.tick())
                 else:
                     orchestrator.pump_events()
@@ -547,6 +611,9 @@ class ResearchCampaignRunner:
                 await asyncio.gather(task, return_exceptions=True)
             verification.shutdown()
             manager.shutdown()
+            for _ in range(max(1, 4 * len(manager.lanes))):
+                if dispatcher.poll_once(timeout=0) is None:
+                    break
             await director.close()
             final = store.campaign(campaign_id)
             if final["state"] == "succeeded_certified_counterexample":

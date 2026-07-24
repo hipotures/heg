@@ -29,6 +29,7 @@ from .research.campaign import (
     parse_duration,
     request_campaign_control,
 )
+from .research.control_study import ControlStudyBudget, ControlStudyRunner
 from .research.export import export_campaign
 from .research.store import ResearchStore
 from .search import ALGORITHMS, MODES, SearchConfig, config_from_run, run_search
@@ -333,6 +334,27 @@ def cmd_sat(args: Namespace) -> int:
 
 
 def cmd_benchmark(args: Namespace) -> int:
+    if args.benchmark_command == "active-director-controls":
+        budget = (
+            ControlStudyBudget(wall_seconds=10, seeds=(1701, 2903))
+            if args.smoke
+            else ControlStudyBudget()
+        )
+        report = ControlStudyRunner(
+            workspace=_workspace(args.workspace),
+            output=_workspace(args.output),
+            budget=budget,
+        ).run()
+        print(
+            json.dumps(
+                {
+                    "json": report["json_report"],
+                    "markdown": report["markdown_report"],
+                },
+                indent=2,
+            )
+        )
+        return 0
     if args.benchmark_command == "calibrate":
         report = calibrate(args.minutes, seeds=args.seeds, jobs=args.jobs)
     elif args.benchmark_command == "soak":
@@ -580,6 +602,13 @@ def build_parser() -> ArgumentParser:
     soak_parser.add_argument("--workspace", required=True)
     soak_parser.add_argument("--output", required=True)
     soak_parser.set_defaults(func=cmd_benchmark)
+    director_controls = benchmark_commands.add_parser(
+        "active-director-controls"
+    )
+    director_controls.add_argument("--workspace", required=True)
+    director_controls.add_argument("--output", required=True)
+    director_controls.add_argument("--smoke", action="store_true")
+    director_controls.set_defaults(func=cmd_benchmark)
 
     ai_director = subparsers.add_parser("ai-director")
     ai_director_commands = ai_director.add_subparsers(

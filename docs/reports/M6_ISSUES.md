@@ -67,3 +67,11 @@ Each Director turn originally wrote the client's whole rolling wire buffer,
 which duplicated older protocol traffic and could grow quickly. The client now
 atomically drains the bounded buffer per turn, and the Director retains only
 the latest 64 diagnostic wire artifacts.
+
+## I-010 — resolved — nonexistent M5 serial-AI comparison arm
+
+The planning package required retaining an M5 AI controller, but the
+authoritative baseline had none. The comparison harness now labels and
+implements a compatibility arm using the same app-server Director while
+pausing search lanes during inference. It is confined to control studies and
+cannot replace the production Active Director.

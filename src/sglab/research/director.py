@@ -45,13 +45,34 @@ def base_instructions() -> str:
 
 
 def build_director_prompt(snapshot: dict[str, Any]) -> str:
+    target = snapshot.get("target")
+    acceptance_control = (
+        {
+            "purpose": "M6 active-control demonstration, not a research claim",
+            "required_before_verification": [
+                "keep at least two search lanes live concurrently",
+                "patch one running lane",
+                "fork or restart another lane",
+                "reallocate resources or replace a lane",
+                "use a later turn to evaluate a measured prior intervention",
+            ],
+            "instruction": (
+                "Do not schedule finalist verification until the committed "
+                "snapshot evidence demonstrates these interventions."
+            ),
+        }
+        if isinstance(target, dict)
+        and target.get("target_id") == "m6_hidden_witness_control_v1"
+        else None
+    )
     payload = {
         "objective": (
             "Actively manage the running concurrent search portfolio. "
             "Search may change while this turn is processed; target explicit "
             "lane versions from this committed snapshot."
         ),
-        "immutable_target": snapshot.get("target"),
+        "immutable_target": target,
+        "acceptance_control": acceptance_control,
         "campaign_stop_contract": snapshot.get("campaign"),
         "available_action_and_parameter_catalog": action_catalog(),
         "committed_research_snapshot": snapshot,

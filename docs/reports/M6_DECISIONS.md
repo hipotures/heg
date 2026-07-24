@@ -139,3 +139,19 @@ Decision: roll a Director thread after 24 completed turns or one million input
 tokens using a durable compact parent-linked brief, and retain at most 64
 per-turn wire logs. Rationale: SQLite/snapshots stay authoritative while
 conversation and diagnostic growth remain explicitly bounded.
+
+## D-019 — 2026-07-24 — serial-AI is an explicit compatibility control
+
+Decision: construct the missing serial-AI arm with the production app-server
+Director and typed action contract while pausing every lane during inference.
+Rationale: the authoritative baseline had no M5 AI provider to retain; this
+isolates the scientific value of asynchronous active control without
+inventing a hidden production fallback.
+
+## D-020 — 2026-07-24 — fixed comparison envelopes, descriptive claims only
+
+Decision: give all four hidden-witness control arms the same deadline,
+eight-lane ceiling, single verifier, four-Director-turn budget, and
+twelve-action-per-turn schema cap. Retain all failures and generate no
+AI-superiority conclusion. Rationale: one active demonstration is acceptance
+evidence, not a comparative scientific result.

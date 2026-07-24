@@ -54,6 +54,24 @@ For each algorithm and `n`:
 - CPU utilization;
 - peak RSS.
 
+## Active Director control study
+
+The M6 hidden-witness control uses the same fixed envelope for static,
+seeded-random, serial-AI compatibility, and Active app-server controllers:
+
+```bash
+sglab benchmark active-director-controls \
+  --workspace ./workspace/m6-active-control \
+  --output ./docs/reports
+```
+
+The full command uses five fixed seeds, a 60-second deadline per trial, at
+most eight lanes, one verifier slot, and four Director turns. `--smoke` uses
+two fixed seeds and ten seconds only for integration checks. It does not
+accept scientific tuning flags. The serial arm pauses lanes while the same
+app-server Director reasons because no historical M5 AI implementation
+existed in the authoritative baseline. Reports never infer AI superiority.
+
 ## Soak test
 
 Run for two hours with production-like worker count.
