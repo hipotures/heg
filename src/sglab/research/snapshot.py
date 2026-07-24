@@ -138,6 +138,15 @@ class SnapshotBuilder:
                 registry, kinds=frozenset({"hypothesis"})
             ),
             max_active_lanes=self.manager.max_active_lanes,
+            advisory_target_ids=evidence_registry_ids(
+                prepared.advisory_target_registry
+            ),
+            executable_target_ids=evidence_registry_ids(
+                prepared.executable_target_registry
+            ),
+            applicable_action_types=frozenset(
+                prepared.state["allowed_action_space"]["actions"]
+            ),
         )
         return snapshot, context
 
@@ -442,6 +451,7 @@ class SnapshotBuilder:
         return {
             "cpu_total": cpu_total,
             "cpu_available": max(0, cpu_total - active),
+            "max_active_lanes": self.manager.max_active_lanes,
             "memory_available_bytes": _memory_available_bytes(),
             "coordinator_rss_bytes": current_rss_bytes(),
             "lane_rss_bytes": sum(

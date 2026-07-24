@@ -44,7 +44,9 @@
       "request_id": "11",
       "final_item_id": "msg_0f54820d364b5a12016a63c3590f588191b924f837de864be2",
       "schema_validity": true,
-      "semantic_validity": false,
+      "semantic_validity": "indeterminate_due_to_action_applicability_contract_mismatch",
+      "S2_schema_valid": true,
+      "S2_original_semantic_validation": "indeterminate_due_to_action_applicability_contract_mismatch",
       "validation_issues": [
         {
           "path": "$.actions[0].lane_id",
@@ -52,6 +54,12 @@
         }
       ],
       "selected_action": "stop_lane",
+      "S2_selected_action": "stop_lane",
+      "S2_target_lane_visible_as_evidence": true,
+      "S2_target_lane_executable": false,
+      "S2_action_was_exposed_by_submitted_schema": true,
+      "corrected_action_space_revalidation": "invalid_action_should_not_have_been_offered",
+      "independent_model_quality_failure": false,
       "selected_algorithm": null,
       "measurement_only": true,
       "executed": false,
@@ -100,7 +108,7 @@
     "zero_compaction_operations": true,
     "zero_tool_calls": true,
     "usage_accounting_complete": false,
-    "semantic_validity_stateless_A4": false,
+    "semantic_validity_stateless_A4": "indeterminate_due_to_action_applicability_contract_mismatch",
     "semantic_validity_persistent_A4": "unavailable",
     "stateless_token_reduction_percent": null,
     "completion_reliability_comparison": "inconclusive",

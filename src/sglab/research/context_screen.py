@@ -38,6 +38,7 @@ SAFE_ITEM_TYPES = {"userMessage", "reasoning", "agentMessage"}
 
 def build_context_screen_prompt(snapshot: dict[str, Any]) -> str:
     state = prepare_director_state_v2(snapshot).state
+    applicable = state["allowed_action_space"]
     payload = {
         "objective": (
             "Return one structured scientific recommendation grounded only in "
@@ -64,6 +65,16 @@ def build_context_screen_prompt(snapshot: dict[str, Any]) -> str:
                 "Do not claim statistical superiority from this single pair.",
             ],
         },
+        "applicable_action_description": {
+            "actions": applicable["actions"],
+            "why_applicable": applicable["action_applicability"],
+            "active_executable_lane_ids": applicable[
+                "active_executable_lane_ids"
+            ],
+            "historical_lane_ids_are_evidence_not_execution_targets": (
+                applicable["historical_lane_ids"]
+            ),
+        },
         "director_state_v2": state,
         "required_response": (
             "Return only the existing Director decision schema. The action is "
@@ -83,14 +94,16 @@ def prepare_context_screen_phase_a(
     if root == source:
         raise ValueError("screen workspace must differ from preserved source")
     states, source_evidence = load_preserved_screen_states(source)
-    schema = director_decision_schema()
-    schema_bytes = canonical_json(schema, max_bytes=1024 * 1024)
     base = base_instructions()
     base_bytes = base.encode("utf-8")
     requests = []
     for label, mode, state_label in SCREEN_SLOTS:
         snapshot = states[state_label]
         prepared = prepare_director_state_v2(snapshot)
+        schema = director_decision_schema(
+            prepared.state["allowed_action_space"]
+        )
+        schema_bytes = canonical_json(schema, max_bytes=1024 * 1024)
         prompt = build_context_screen_prompt(snapshot)
         size = complete_context_size_report(
             prepared,
@@ -117,6 +130,26 @@ def prepare_context_screen_phase_a(
             "evidence_registry_sha256": (
                 prepared.evidence_registry_sha256
             ),
+            "advisory_target_registry_artifact_ref": (
+                "<runtime-advisory-target-registry-artifact>"
+            ),
+            "advisory_target_registry_sha256": (
+                prepared.advisory_target_registry_sha256
+            ),
+            "executable_target_registry_artifact_ref": (
+                "<runtime-executable-target-registry-artifact>"
+            ),
+            "executable_target_registry_sha256": (
+                prepared.executable_target_registry_sha256
+            ),
+            "applicable_action_space_artifact_ref": (
+                "<runtime-applicable-action-space-artifact>"
+            ),
+            "applicable_action_space_sha256": (
+                prepared.applicable_action_space_sha256
+            ),
+            "measurement_only": True,
+            "executed": False,
         }
         envelope_bytes = canonical_json(envelope, max_bytes=1024 * 1024)
         request = {
@@ -145,6 +178,21 @@ def prepare_context_screen_phase_a(
                 prepared.evidence_registry_sha256
             ),
             "evidence_registry": prepared.evidence_registry,
+            "advisory_target_registry_sha256": (
+                prepared.advisory_target_registry_sha256
+            ),
+            "advisory_target_registry": (
+                prepared.advisory_target_registry
+            ),
+            "executable_target_registry_sha256": (
+                prepared.executable_target_registry_sha256
+            ),
+            "executable_target_registry": (
+                prepared.executable_target_registry
+            ),
+            "applicable_action_space": prepared.state[
+                "allowed_action_space"
+            ],
             "allowed_action_space_sha256": _value_sha256(
                 prepared.state["allowed_action_space"]
             ),
@@ -179,8 +227,6 @@ def prepare_context_screen_phase_a(
             root / "request-templates" / f"{label}.json",
             {
                 **envelope,
-                "measurement_only": True,
-                "executed": False,
             },
         )
     by_slot = {value["slot"]: value for value in requests}
@@ -189,6 +235,8 @@ def prepare_context_screen_phase_a(
         "prompt_sha256",
         "output_schema_sha256",
         "evidence_registry_sha256",
+        "advisory_target_registry_sha256",
+        "executable_target_registry_sha256",
         "allowed_action_space_sha256",
         "target_metadata_sha256",
         "campaign_budget_sha256",
@@ -210,7 +258,7 @@ def prepare_context_screen_phase_a(
         "base_instructions_bytes": len(base_bytes),
         "developer_instructions": "",
         "personality": "none",
-        "output_schema_sha256": hashlib.sha256(schema_bytes).hexdigest(),
+        "output_schema_contract": "generated_per_submitted_action_space",
         "sandbox": "read-only",
         "approval_policy": "never",
         "environments": [],
@@ -267,6 +315,23 @@ def prepare_context_screen_phase_a(
         "candidate_evaluation_slots": 0,
         "compaction_operations_scheduled": 0,
         "requests": requests,
+        "applicable_actions_by_source_state": {
+            state_label: {
+                "actions": by_slot[label]["applicable_action_space"][
+                    "actions"
+                ],
+                "why_applicable": by_slot[label][
+                    "applicable_action_space"
+                ]["action_applicability"],
+                "active_executable_lane_ids": by_slot[label][
+                    "applicable_action_space"
+                ]["active_executable_lane_ids"],
+                "historical_lane_ids": by_slot[label][
+                    "applicable_action_space"
+                ]["historical_lane_ids"],
+            }
+            for label, state_label in (("P1", "A1"), ("S2", "A4"))
+        },
         "s2_p2_equivalence": equivalence_report,
         "all_states_under_32_kib": all(
             int(value["director_state_bytes"]) <= DIRECTOR_STATE_MAX_BYTES
@@ -932,9 +997,10 @@ def _measurement_turn(
     )
     prompt = build_context_screen_prompt(snapshot)
     prompt_bytes = prompt.encode("ascii")
-    schema_bytes = canonical_json(
-        director_decision_schema(), max_bytes=1024 * 1024
+    output_schema = director_decision_schema(
+        prepared.state["allowed_action_space"]
     )
+    schema_bytes = canonical_json(output_schema, max_bytes=1024 * 1024)
     action = (
         evidence.decision["actions"][0]
         if evidence.decision.get("actions")
@@ -999,11 +1065,29 @@ def _measurement_turn(
         "evidence_registry_sha256": (
             prepared.evidence_registry_sha256
         ),
+        "advisory_target_registry_sha256": (
+            prepared.advisory_target_registry_sha256
+        ),
+        "executable_target_registry_sha256": (
+            prepared.executable_target_registry_sha256
+        ),
+        "applicable_action_space": prepared.state[
+            "allowed_action_space"
+        ],
+        "applicable_action_space_sha256": (
+            prepared.applicable_action_space_sha256
+        ),
+        "active_executable_targets": sorted(
+            evidence_registry_ids(prepared.executable_target_registry)
+        ),
+        "historical_evidence_targets": prepared.state[
+            "allowed_action_space"
+        ]["historical_lane_ids"],
         "client_owned_estimated_tokens": complete_context_size_report(
             prepared,
             prompt=prompt,
             base_instructions=base_instructions(),
-            output_schema=director_decision_schema(),
+            output_schema=output_schema,
             mode=mode,
         )["client_owned_estimated_tokens"],
         "full_client_request_bytes": request_path.stat().st_size,
@@ -1084,9 +1168,10 @@ def _incomplete_measurement_turn(
     state_bytes = canonical_json(
         prepared.state, max_bytes=DIRECTOR_STATE_MAX_BYTES
     )
-    schema_bytes = canonical_json(
-        director_decision_schema(), max_bytes=1024 * 1024
+    output_schema = director_decision_schema(
+        prepared.state["allowed_action_space"]
     )
+    schema_bytes = canonical_json(output_schema, max_bytes=1024 * 1024)
     request_path = campaign_dir / str(row["request_artifact_ref"])
     wire_path = campaign_dir / str(row["wire_log_artifact_ref"])
     wire = (
@@ -1153,11 +1238,29 @@ def _incomplete_measurement_turn(
         "evidence_registry_sha256": (
             prepared.evidence_registry_sha256
         ),
+        "advisory_target_registry_sha256": (
+            prepared.advisory_target_registry_sha256
+        ),
+        "executable_target_registry_sha256": (
+            prepared.executable_target_registry_sha256
+        ),
+        "applicable_action_space": prepared.state[
+            "allowed_action_space"
+        ],
+        "applicable_action_space_sha256": (
+            prepared.applicable_action_space_sha256
+        ),
+        "active_executable_targets": sorted(
+            evidence_registry_ids(prepared.executable_target_registry)
+        ),
+        "historical_evidence_targets": prepared.state[
+            "allowed_action_space"
+        ]["historical_lane_ids"],
         "client_owned_estimated_tokens": complete_context_size_report(
             prepared,
             prompt=prompt,
             base_instructions=base_instructions(),
-            output_schema=director_decision_schema(),
+            output_schema=output_schema,
             mode=mode,
         )["client_owned_estimated_tokens"],
         "full_client_request_bytes": (
@@ -1360,6 +1463,15 @@ def decision_context_for_snapshot(
             registry, kinds=frozenset({"hypothesis"})
         ),
         max_active_lanes=1,
+        advisory_target_ids=evidence_registry_ids(
+            prepared.advisory_target_registry
+        ),
+        executable_target_ids=evidence_registry_ids(
+            prepared.executable_target_registry
+        ),
+        applicable_action_types=frozenset(
+            prepared.state["allowed_action_space"]["actions"]
+        ),
     )
 
 
@@ -1712,6 +1824,9 @@ def _phase_a_plan_fingerprint(report: dict[str, Any]) -> str:
                     "prompt_sha256",
                     "output_schema_sha256",
                     "evidence_registry_sha256",
+                    "advisory_target_registry_sha256",
+                    "executable_target_registry_sha256",
+                    "allowed_action_space_sha256",
                     "measurement_only",
                     "executed",
                     "dispatch_scheduled",

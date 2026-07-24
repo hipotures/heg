@@ -111,7 +111,33 @@ def _common_action_properties() -> dict[str, Any]:
     }
 
 
-def director_decision_schema() -> dict[str, Any]:
+def director_decision_schema(
+    allowed_action_space: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return the structured schema for the submitted applicable actions."""
+
+    applicable_actions = set(
+        (
+            allowed_action_space.get("actions", ACTION_TYPES)
+            if isinstance(allowed_action_space, dict)
+            else ACTION_TYPES
+        )
+    )
+    active_lane_ids = (
+        list(allowed_action_space.get("active_executable_lane_ids", []))
+        if isinstance(allowed_action_space, dict)
+        else []
+    )
+    candidate_target_ids = (
+        list(allowed_action_space.get("candidate_target_ids", []))
+        if isinstance(allowed_action_space, dict)
+        else []
+    )
+    checkpoint_target_ids = (
+        list(allowed_action_space.get("checkpoint_target_ids", []))
+        if isinstance(allowed_action_space, dict)
+        else []
+    )
     common = _common_action_properties()
     common_required = [
         "action_id",
@@ -167,8 +193,15 @@ def director_decision_schema() -> dict[str, Any]:
             },
         }
 
+    lane_id_schema: dict[str, Any] = {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+    }
+    if allowed_action_space is not None:
+        lane_id_schema["enum"] = active_lane_ids
     lane_target = {
-        "lane_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "lane_id": lane_id_schema,
         "expected_lane_version": {"type": "integer", "minimum": 0},
     }
     patch_parameter_schema = {
@@ -239,7 +272,14 @@ def director_decision_schema() -> dict[str, Any]:
             ["lane_id", "expected_lane_version", "checkpoint_id", "variants"],
             {
                 **lane_target,
-                "checkpoint_id": {"type": "string"},
+                "checkpoint_id": {
+                    "type": "string",
+                    **(
+                        {"enum": checkpoint_target_ids}
+                        if allowed_action_space is not None
+                        else {}
+                    ),
+                },
                 "variants": {
                     "type": "array",
                     "minItems": 1,
@@ -327,7 +367,16 @@ def director_decision_schema() -> dict[str, Any]:
         variant(
             "promote_candidate",
             ["candidate_id"],
-            {"candidate_id": {"type": "string"}},
+            {
+                "candidate_id": {
+                    "type": "string",
+                    **(
+                        {"enum": candidate_target_ids}
+                        if allowed_action_space is not None
+                        else {}
+                    ),
+                }
+            },
         ),
         variant(
             "request_diagnostic",
@@ -341,7 +390,14 @@ def director_decision_schema() -> dict[str, Any]:
                     "type": "array",
                     "minItems": 1,
                     "maxItems": 32,
-                    "items": {"type": "string"},
+                    "items": {
+                        "type": "string",
+                        **(
+                            {"enum": candidate_target_ids}
+                            if allowed_action_space is not None
+                            else {}
+                        ),
+                    },
                 },
             },
         ),
@@ -367,6 +423,11 @@ def director_decision_schema() -> dict[str, Any]:
             ["review_trigger"],
             {"review_trigger": _review_schema()},
         ),
+    ]
+    action_variants = [
+        value
+        for value in action_variants
+        if value["properties"]["type"]["const"] in applicable_actions
     ]
     return {
         "$schema": "https://json-schema.org/draft/2020-12/schema",

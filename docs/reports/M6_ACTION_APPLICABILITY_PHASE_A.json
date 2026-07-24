@@ -1,0 +1,135 @@
+{
+  "schema_version": "1.0",
+  "date": "2026-07-24",
+  "initial_commit": "bd85c18023eab9ae305628c19dc3e55c3c54cc5d",
+  "objective": "deterministic_action_applicability_contract_repair",
+  "contract": {
+    "reference_roles": [
+      "evidence_ids",
+      "advisory_target_ids",
+      "executable_target_ids"
+    ],
+    "registries_built_from_final_submitted_state": true,
+    "per_identifier_lifecycle_and_paths_persisted": true,
+    "dynamic_action_schema": true,
+    "dynamic_prompt_action_description": true,
+    "measurement_only_uses_production_applicability": true,
+    "historical_lane_visibility_implies_executability": false
+  },
+  "preserved_S2_reclassification": {
+    "S2_schema_valid": true,
+    "S2_original_semantic_validation": "indeterminate_due_to_action_applicability_contract_mismatch",
+    "S2_selected_action": "stop_lane",
+    "S2_target_lane_visible_as_evidence": true,
+    "S2_target_lane_executable": false,
+    "S2_action_was_exposed_by_submitted_schema": true,
+    "corrected_action_space_revalidation": "invalid_action_should_not_have_been_offered",
+    "independent_model_quality_failure": false
+  },
+  "fresh_preparation": {
+    "ok": true,
+    "slots": [
+      "S2",
+      "P1",
+      "P2"
+    ],
+    "slot_count": 3,
+    "fourth_slot_exists": false,
+    "search_batches": 0,
+    "compaction_operations": 0,
+    "tools": 0,
+    "turn_timeout_seconds": 300,
+    "A1_actions": {
+      "start_lane": "capacity exists for one reviewed new search lane",
+      "request_diagnostic": "at least one submitted evidence subject is available",
+      "set_review_trigger": "review scheduling is lane-independent"
+    },
+    "A4_actions": {
+      "start_lane": "capacity exists for one reviewed new search lane",
+      "promote_candidate": "at least one retained candidate is available",
+      "request_diagnostic": "at least one submitted evidence subject is available",
+      "schedule_verification": "at least one retained candidate is available for M4 verification",
+      "set_review_trigger": "review scheduling is lane-independent"
+    },
+    "A4_historical_lane_ids": [
+      "lane-36ef6c44aded9d38cfc4dd72",
+      "lane-b6a9e52b62176089963c03df",
+      "lane-fc3311f3e8cd88ddb8b31293"
+    ],
+    "A4_active_executable_lane_ids": [],
+    "stop_lane_exposed_for_A4": false,
+    "all_available_actions_have_a_valid_local_output": true
+  },
+  "S2_P2_equivalence": {
+    "all_equal": true,
+    "director_state_sha256": "94347f651d821bcbf502a517f9913f3924d89afee308f667d9adff39ee8db4bd",
+    "prompt_sha256": "d9ae1fd0e157825b97e4ad8d7b657f744a37c118c0a66bcbd7064f373358139c",
+    "output_schema_sha256": "6f7293c8241d316c4c185b172828ef23c84f3369939f7d89d3a8de79bfde04e2",
+    "evidence_registry_sha256": "48571c03d8b8da9e922fbd0710bf1f98a9a3f51826ea5656333ff0f165cb5428",
+    "advisory_target_registry_sha256": "2f2c50f29a48c15157abc726997d8bfc1d37fb977873fd7a7d1d3d5e588ac49d",
+    "executable_target_registry_sha256": "07b0af203732db6b02671870fefc1bd8a54826c78f8b38f5d861f199fbc85b30",
+    "applicable_action_space_sha256": "d0709fbf795ba05ae73cbfab19f2cc23ddb0f491b8c4fc542fb6eca842874461",
+    "complete_request_sha256": "0a8f4052017b59576bcdb4a717e2bf8d841b8d7abe32f291de22b15ac5c6c18f"
+  },
+  "context_budgets": {
+    "S2": {
+      "director_state_bytes": 18111,
+      "ancestry_bytes": 5611,
+      "historical_outcomes_bytes": 3593,
+      "prompt_bytes": 19656,
+      "output_schema_bytes": 10967,
+      "complete_client_request_bytes": 33374,
+      "estimated_client_owned_tokens": 7827
+    },
+    "P1": {
+      "director_state_bytes": 3246,
+      "ancestry_bytes": 65,
+      "historical_outcomes_bytes": 2,
+      "prompt_bytes": 4494,
+      "output_schema_bytes": 8114,
+      "complete_client_request_bytes": 13947,
+      "estimated_client_owned_tokens": 3323
+    },
+    "P2": {
+      "director_state_bytes": 18111,
+      "ancestry_bytes": 5611,
+      "historical_outcomes_bytes": 3593,
+      "prompt_bytes": 19656,
+      "output_schema_bytes": 10967,
+      "complete_client_request_bytes": 33374,
+      "estimated_client_owned_tokens": 7827
+    },
+    "all_limits_pass": true
+  },
+  "dry_run_artifacts": {
+    "phase_a_report_sha256": "f3de4e02ed3a6a9dcfc0dd8db3461f4dbe70e1433df8d63cf60997d5a5d58c48",
+    "equivalence_report_sha256": "191dd17a6683c73f35507c96c64fa479b895f300062c9a0f31d7ae211062edcb",
+    "S2_request_template_sha256": "fa5de5b34ead7215656a3036c48ed7a536267d350f55d867d8a7af296b9c2e4c",
+    "P1_request_template_sha256": "15d4ceec8cc7381d6707f4df078bd8f2957c70d414b2162ee27a488fec5f7fa9",
+    "P2_request_template_sha256": "fa5de5b34ead7215656a3036c48ed7a536267d350f55d867d8a7af296b9c2e4c"
+  },
+  "verification": {
+    "targeted_action_registry_prompt_timeout_tests": "22_passed",
+    "action_applicability_tests": "7_passed",
+    "sqlite_v9_migration_and_registry_tests": "8_passed",
+    "safe_non_network_suite_pass_1": "128_passed",
+    "safe_non_network_suite_pass_2": "128_passed",
+    "full_safe_suite": "blocked_by_loopback_socket_sandbox_after_128_passed_and_5_permission_errors",
+    "make_doctor": "passed",
+    "make_check": "passed",
+    "make_benchmark_smoke": "passed",
+    "make_dashboard_smoke": "blocked_by_loopback_socket_sandbox",
+    "sqlite_user_version": 9,
+    "sqlite_integrity_check": "ok"
+  },
+  "boundaries": {
+    "model_inferences": 0,
+    "auth_json_accesses": 0,
+    "authenticated_app_server_turns": 0,
+    "graph_search_batches": 0,
+    "preserved_S2_artifacts_modified": false,
+    "planning_modified": false
+  },
+  "ready_for_fresh_authenticated_authorization": false,
+  "remaining_gate": "loopback HTTP tests and dashboard smoke require an environment that permits local sockets"
+}

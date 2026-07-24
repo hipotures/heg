@@ -20,6 +20,10 @@ MAX_OUTCOMES = 3
 MAX_GLOBAL_RECORD_SUMMARIES = 8
 MAX_FINAL_BEST_ANCESTORS = 8
 EVIDENCE_REGISTRY_VERSION = "1.0"
+REFERENCE_REGISTRY_VERSION = "2.0"
+ACTIVE_LANE_STATES = frozenset(
+    {"starting", "running", "paused", "stopping"}
+)
 
 
 class DirectorContextMode(StrEnum):
@@ -43,6 +47,11 @@ class PreparedDirectorState:
     size_report: dict[str, Any]
     evidence_registry: dict[str, Any]
     evidence_registry_sha256: str
+    advisory_target_registry: dict[str, Any]
+    advisory_target_registry_sha256: str
+    executable_target_registry: dict[str, Any]
+    executable_target_registry_sha256: str
+    applicable_action_space_sha256: str
 
 
 def director_state_v2_schema() -> dict[str, Any]:
@@ -189,6 +198,9 @@ def prepare_director_state_v2(
             state["previous_outcomes"].pop()
         else:
             break
+    state["allowed_action_space"] = _applicable_action_space(
+        snapshot, state, action_catalog()
+    )
     while _json_size(state) > DIRECTOR_STATE_MAX_BYTES:
         if ancestry["final_best_accepted_ancestors"]:
             ancestry["final_best_accepted_ancestors"].pop(0)
@@ -241,21 +253,53 @@ def prepare_director_state_v2(
         != payload,
         "within_state_limits": within_state_limits,
     }
-    registry = build_evidence_registry(state)
-    registry_bytes = canonical_json(registry, max_bytes=128 * 1024)
+    registries = build_reference_registries(state)
+    evidence_registry = registries["evidence_ids"]
+    advisory_registry = registries["advisory_target_ids"]
+    executable_registry = registries["executable_target_ids"]
+    evidence_bytes = canonical_json(
+        evidence_registry, max_bytes=128 * 1024
+    )
+    advisory_bytes = canonical_json(
+        advisory_registry, max_bytes=128 * 1024
+    )
+    executable_bytes = canonical_json(
+        executable_registry, max_bytes=128 * 1024
+    )
     return PreparedDirectorState(
         state=state,
         pre_compaction=pre,
         size_report=report,
-        evidence_registry=registry,
-        evidence_registry_sha256=hashlib.sha256(registry_bytes).hexdigest(),
+        evidence_registry=evidence_registry,
+        evidence_registry_sha256=hashlib.sha256(evidence_bytes).hexdigest(),
+        advisory_target_registry=advisory_registry,
+        advisory_target_registry_sha256=hashlib.sha256(
+            advisory_bytes
+        ).hexdigest(),
+        executable_target_registry=executable_registry,
+        executable_target_registry_sha256=hashlib.sha256(
+            executable_bytes
+        ).hexdigest(),
+        applicable_action_space_sha256=hashlib.sha256(
+            canonical_json(
+                state["allowed_action_space"], max_bytes=128 * 1024
+            )
+        ).hexdigest(),
     )
 
 
 def build_evidence_registry(
     director_state_v2: dict[str, Any],
 ) -> dict[str, Any]:
-    """Build the sole evidence allowlist from the exact model-facing state."""
+    """Build the evidence role from the exact model-facing state."""
+
+    return build_reference_registries(director_state_v2)["evidence_ids"]
+
+
+def build_reference_registries(
+    director_state_v2: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Build separate evidence, advisory and executable reference roles."""
 
     state = json.loads(
         canonical_json(
@@ -265,16 +309,44 @@ def build_evidence_registry(
     state_sha256 = hashlib.sha256(
         canonical_json(state, max_bytes=DIRECTOR_STATE_MAX_BYTES)
     ).hexdigest()
-    references: dict[str, dict[str, set[str]]] = {}
+    references: dict[str, dict[str, Any]] = {}
 
-    def add(value: Any, kind: str, path: str) -> None:
+    def add(
+        value: Any,
+        kind: str,
+        path: str,
+        *,
+        status: str | None = None,
+        evidence_allowed: bool = True,
+        advisory_allowed: bool = False,
+        executable_allowed: bool = False,
+    ) -> None:
         if not isinstance(value, str) or not value:
             return
         entry = references.setdefault(
-            value, {"kinds": set(), "json_paths": set()}
+            value,
+            {
+                "kinds": set(),
+                "statuses": set(),
+                "json_paths": set(),
+                "evidence_allowed": False,
+                "advisory_allowed": False,
+                "executable_allowed": False,
+            },
         )
         entry["kinds"].add(kind)
         entry["json_paths"].add(path)
+        if status:
+            entry["statuses"].add(status)
+        entry["evidence_allowed"] = bool(
+            entry["evidence_allowed"] or evidence_allowed
+        )
+        entry["advisory_allowed"] = bool(
+            entry["advisory_allowed"] or advisory_allowed
+        )
+        entry["executable_allowed"] = bool(
+            entry["executable_allowed"] or executable_allowed
+        )
 
     add(
         state.get("source_snapshot_id"),
@@ -309,6 +381,7 @@ def build_evidence_registry(
         "metric_window_id": "outcome",
         "outcome_id": "outcome",
         "outcome_artifact_sha256": "artifact_hash",
+        "lane_id": "lane",
     }
 
     def visit(value: Any, path: str) -> None:
@@ -331,17 +404,61 @@ def build_evidence_registry(
                 visit(child, f"{path}[{index}]")
 
     visit(state, "$")
+    action_space = state.get("allowed_action_space")
+    reference_objects = (
+        action_space.get("reference_objects", [])
+        if isinstance(action_space, dict)
+        else []
+    )
+    for index, value in enumerate(reference_objects):
+        if not isinstance(value, dict):
+            continue
+        add(
+            value.get("id"),
+            str(value.get("object_kind") or "reference"),
+            f"$.allowed_action_space.reference_objects[{index}].id",
+            status=str(value.get("status") or "unknown"),
+            evidence_allowed=bool(value.get("evidence_allowed")),
+            advisory_allowed=bool(value.get("advisory_allowed")),
+            executable_allowed=bool(value.get("executable_allowed")),
+        )
+
+    entries = [
+        {
+            "id": identifier,
+            "object_kind": sorted(entry["kinds"])[0],
+            "object_kinds": sorted(entry["kinds"]),
+            "current_lifecycle_status": (
+                sorted(entry["statuses"])[0]
+                if entry["statuses"]
+                else "visible_evidence"
+            ),
+            "director_state_json_paths": sorted(entry["json_paths"]),
+            "evidence_allowed": bool(entry["evidence_allowed"]),
+            "advisory_allowed": bool(entry["advisory_allowed"]),
+            "executable_allowed": bool(entry["executable_allowed"]),
+        }
+        for identifier, entry in sorted(references.items())
+    ]
+
+    def registry(role: str, flag: str) -> dict[str, Any]:
+        return {
+            "schema_version": REFERENCE_REGISTRY_VERSION,
+            "role": role,
+            "director_state_sha256": state_sha256,
+            "references": [
+                entry for entry in entries if bool(entry[flag])
+            ],
+        }
+
     return {
-        "schema_version": EVIDENCE_REGISTRY_VERSION,
-        "director_state_sha256": state_sha256,
-        "references": [
-            {
-                "id": identifier,
-                "kinds": sorted(entry["kinds"]),
-                "json_paths": sorted(entry["json_paths"]),
-            }
-            for identifier, entry in sorted(references.items())
-        ],
+        "evidence_ids": registry("evidence_ids", "evidence_allowed"),
+        "advisory_target_ids": registry(
+            "advisory_target_ids", "advisory_allowed"
+        ),
+        "executable_target_ids": registry(
+            "executable_target_ids", "executable_allowed"
+        ),
     }
 
 
@@ -357,7 +474,9 @@ def evidence_registry_ids(
         if not isinstance(reference, dict):
             continue
         identifier = reference.get("id")
-        reference_kinds = reference.get("kinds")
+        reference_kinds = reference.get(
+            "object_kinds", reference.get("kinds")
+        )
         if not isinstance(identifier, str) or not isinstance(
             reference_kinds, list
         ):
@@ -480,22 +599,6 @@ def _unbounded_state(snapshot: dict[str, Any]) -> dict[str, Any]:
                 "remaining": remaining_evaluations,
             },
         },
-        "allowed_action_space": {
-            "catalog_version": catalog["catalog_version"],
-            "actions": catalog["actions"],
-            "algorithms": catalog["algorithms"],
-            "graph_families": [
-                value["id"] for value in catalog["graph_families"]
-            ],
-            "diagnostics": catalog["diagnostics"],
-            "review_events": catalog["review_events"],
-            "parameter_domains": catalog["parameter_domains"],
-            "algorithm_parameters": catalog["algorithm_parameters"],
-            "mutation_operators": catalog["mutation_operators"],
-            "mutation_weights_contract": catalog[
-                "mutation_weights_contract"
-            ],
-        },
         "best_ever_result": _best_result(snapshot, outcomes),
         "_all_outcomes": outcomes,
         "plateau": latest_effect.get("plateau_signal"),
@@ -536,7 +639,234 @@ def _unbounded_state(snapshot: dict[str, Any]) -> dict[str, Any]:
             snapshot, batch_actions[:MAX_OUTCOMES]
         ),
     }
+    state["allowed_action_space"] = _applicable_action_space(
+        snapshot, state, catalog
+    )
     return state
+
+
+def _applicable_action_space(
+    snapshot: dict[str, Any],
+    state: dict[str, Any],
+    catalog: dict[str, Any],
+) -> dict[str, Any]:
+    """Return only actions with at least one legal target or construction."""
+
+    lanes = [
+        value
+        for value in snapshot.get("lanes", [])
+        if isinstance(value, dict) and isinstance(value.get("lane_id"), str)
+    ]
+    active_lanes = [
+        value for value in lanes if value.get("state") in ACTIVE_LANE_STATES
+    ]
+    active_lane_ids = sorted(str(value["lane_id"]) for value in active_lanes)
+    maximum_lanes = int(
+        (snapshot.get("resources") or {}).get("max_active_lanes", 1)
+    )
+    best_result = state.get("best_ever_result")
+    retained_candidate = (
+        best_result.get("candidate_id")
+        if isinstance(best_result, dict)
+        else None
+    )
+    candidate_ids = (
+        [str(retained_candidate)]
+        if isinstance(retained_candidate, str) and retained_candidate
+        else []
+    )
+    checkpoint_ids = sorted(
+        {
+            str(value)
+            for value in _values_for_keys(state, {"checkpoint_id"})
+            if isinstance(value, str) and value
+        }
+    )
+    visible_ids = sorted(
+        {
+            str(value)
+            for value in _values_for_keys(
+                state,
+                {
+                    "action_id",
+                    "candidate_id",
+                    "best_candidate_identifier",
+                    "checkpoint_id",
+                    "decision_batch_id",
+                    "evidence_id",
+                    "hypothesis_id",
+                    "lane_id",
+                    "metric_window_id",
+                    "outcome_id",
+                },
+            )
+            if isinstance(value, str) and value
+        }
+        | {str(state.get("source_snapshot_id", ""))}
+    )
+
+    actions: list[str] = []
+    explanations: dict[str, str] = {}
+
+    def expose(action: str, reason: str) -> None:
+        actions.append(action)
+        explanations[action] = reason
+
+    if len(active_lanes) < maximum_lanes:
+        expose(
+            "start_lane",
+            "capacity exists for one reviewed new search lane",
+        )
+    if active_lane_ids:
+        expose(
+            "patch_lane",
+            "at least one active lane has implemented patchable controls",
+        )
+        if checkpoint_ids:
+            expose(
+                "fork_lane",
+                "an active lane and a retained checkpoint are available",
+            )
+        expose(
+            "restart_lane",
+            "at least one active lane can be restarted from a reviewed source",
+        )
+        expose(
+            "stop_lane",
+            "at least one active lane is an executable stop target",
+        )
+        expose(
+            "reallocate_resources",
+            "at least one active lane can receive a resource allocation",
+        )
+    if candidate_ids:
+        expose(
+            "promote_candidate",
+            "at least one retained candidate is available",
+        )
+    if visible_ids:
+        expose(
+            "request_diagnostic",
+            "at least one submitted evidence subject is available",
+        )
+    if candidate_ids:
+        expose(
+            "schedule_verification",
+            "at least one retained candidate is available for M4 verification",
+        )
+    expose(
+        "set_review_trigger",
+        "review scheduling is lane-independent",
+    )
+
+    active_by_id = {str(value["lane_id"]): value for value in active_lanes}
+    reference_objects: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def add_reference(
+        identifier: str,
+        kind: str,
+        status: str,
+        *,
+        advisory: bool,
+        executable: bool,
+    ) -> None:
+        key = (identifier, kind)
+        if not identifier or key in seen:
+            return
+        seen.add(key)
+        reference_objects.append(
+            {
+                "id": identifier,
+                "object_kind": kind,
+                "status": status,
+                "evidence_allowed": True,
+                "advisory_allowed": advisory,
+                "executable_allowed": executable,
+            }
+        )
+
+    for lane in lanes:
+        lane_id = str(lane["lane_id"])
+        status = str(lane.get("state") or "unknown")
+        add_reference(
+            lane_id,
+            "lane",
+            status,
+            advisory=True,
+            executable=lane_id in active_by_id,
+        )
+    for lane_id in sorted(
+        {
+            str(value)
+            for value in _values_for_keys(state, {"lane_id"})
+            if isinstance(value, str) and value
+        }
+    ):
+        if lane_id not in {str(value["lane_id"]) for value in lanes}:
+            add_reference(
+                lane_id,
+                "lane",
+                "historical",
+                advisory=True,
+                executable=False,
+            )
+    for candidate_id in candidate_ids:
+        add_reference(
+            candidate_id,
+            "candidate",
+            "retained",
+            advisory=True,
+            executable=True,
+        )
+    for checkpoint_id in checkpoint_ids:
+        add_reference(
+            checkpoint_id,
+            "checkpoint",
+            "retained",
+            advisory=True,
+            executable=bool(active_lane_ids),
+        )
+
+    result = {
+        "catalog_version": catalog["catalog_version"],
+        "actions": actions,
+        "action_applicability": explanations,
+        "active_executable_lane_ids": active_lane_ids,
+        "historical_lane_ids": sorted(
+            str(value["lane_id"])
+            for value in lanes
+            if str(value["lane_id"]) not in active_by_id
+        ),
+        "candidate_target_ids": candidate_ids,
+        "reference_objects": reference_objects,
+        "algorithms": catalog["algorithms"],
+        "graph_families": [
+            value["id"] for value in catalog["graph_families"]
+        ],
+        "diagnostics": catalog["diagnostics"],
+        "review_events": catalog["review_events"],
+        "parameter_domains": catalog["parameter_domains"],
+        "algorithm_parameters": catalog["algorithm_parameters"],
+        "mutation_operators": catalog["mutation_operators"],
+        "mutation_weights_contract": catalog["mutation_weights_contract"],
+    }
+    if checkpoint_ids:
+        result["checkpoint_target_ids"] = checkpoint_ids
+    return result
+
+
+def _values_for_keys(value: Any, keys: set[str]) -> list[Any]:
+    values: list[Any] = []
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if key in keys:
+                values.append(child)
+            values.extend(_values_for_keys(child, keys))
+    elif isinstance(value, list):
+        for child in value:
+            values.extend(_values_for_keys(child, keys))
+    return values
 
 
 def _outcome_summary(

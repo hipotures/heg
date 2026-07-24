@@ -556,6 +556,15 @@ class ActiveDirectorTests(unittest.IsolatedAsyncioTestCase):
                 "snapshot_id": "snapshot-1",
                 "campaign": {"stop_mode": "time_limit"},
                 "target": {"target_id": "erdos_gyarfas"},
+                "resources": {"max_active_lanes": 2},
+                "lanes": [
+                    {
+                        "lane_id": "lane-1",
+                        "lane_version": 3,
+                        "state": "running",
+                        "algorithm": "simulated_annealing",
+                    }
+                ],
                 "available_evidence_ids": ["evidence-1"],
             }
             store.record_snapshot(
@@ -601,7 +610,8 @@ class ActiveDirectorTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(evidence.turn_record_ids), 2)
             rows = store.connection.execute(
                 """
-                SELECT status, evidence_registry_artifact_ref,
+                SELECT status, request_artifact_ref,
+                       evidence_registry_artifact_ref,
                        evidence_registry_sha256
                 FROM app_server_turns ORDER BY started_at, rowid
                 """
@@ -620,6 +630,35 @@ class ActiveDirectorTests(unittest.IsolatedAsyncioTestCase):
                         registry_path.read_bytes().rstrip(b"\n")
                     ).hexdigest(),
                     row["evidence_registry_sha256"],
+                )
+                request = json.loads(
+                    (root / row["request_artifact_ref"]).read_text(
+                        encoding="utf-8"
+                    )
+                )
+                for role in (
+                    "advisory_target_registry",
+                    "executable_target_registry",
+                ):
+                    role_path = root / request[
+                        f"{role}_artifact_ref"
+                    ]
+                    self.assertTrue(role_path.is_file())
+                    self.assertEqual(
+                        hashlib.sha256(
+                            role_path.read_bytes().rstrip(b"\n")
+                        ).hexdigest(),
+                        request[f"{role}_sha256"],
+                    )
+                action_space_path = root / request[
+                    "applicable_action_space_artifact_ref"
+                ]
+                self.assertTrue(action_space_path.is_file())
+                self.assertEqual(
+                    hashlib.sha256(
+                        action_space_path.read_bytes().rstrip(b"\n")
+                    ).hexdigest(),
+                    request["applicable_action_space_sha256"],
                 )
             statuses = store.commit_decision_batch(
                 decision_batch_id="batch-1",

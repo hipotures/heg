@@ -730,6 +730,7 @@ def build_experiment_prompt(
                 "another search batch",
             ],
         }
+    director_state = prepare_director_state_v2(snapshot).state
     payload = {
         "objective": (
             "Make one evidence-based structured research decision from the "
@@ -737,7 +738,16 @@ def build_experiment_prompt(
         ),
         "experiment_contract": contract,
         "phase_a_static_benchmark_evidence": PHASE_A_BENCHMARK_EVIDENCE,
-        "director_state_v2": prepare_director_state_v2(snapshot).state,
+        "applicable_action_description": {
+            "actions": director_state["allowed_action_space"]["actions"],
+            "why_applicable": director_state["allowed_action_space"][
+                "action_applicability"
+            ],
+            "active_executable_lane_ids": director_state[
+                "allowed_action_space"
+            ]["active_executable_lane_ids"],
+        },
+        "director_state_v2": director_state,
         "required_response": "Return only the existing Director decision schema.",
     }
     return canonical_json(payload, max_bytes=MAX_SNAPSHOT_BYTES).decode("ascii")

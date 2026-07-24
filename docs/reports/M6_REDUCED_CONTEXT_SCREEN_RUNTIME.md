@@ -27,7 +27,10 @@ model_contract_matched: true
 ```
 
 S2 returned a final structured decision and complete token usage. Its schema
-was valid, but semantic validation failed at:
+was valid. The original semantic result is now classified as
+`indeterminate_due_to_action_applicability_contract_mismatch`, because the
+submitted schema exposed an action that the submitted runtime state could
+never execute:
 
 ```text
 $.actions[0].lane_id: does not reference an active lane
@@ -36,8 +39,21 @@ $.actions[0].lane_id: does not reference an active lane
 The model recommended `stop_lane` for the historical lane
 `lane-36ef6c44aded9d38cfc4dd72`. That lane identifier was visible in the A4
 scientific state, but the measurement database intentionally contained no
-active lane and `DecisionContext` did not admit it as executable. The raw
-response was preserved unchanged; the decision remained
+active lane and `DecisionContext` did not admit it as executable. Therefore:
+
+```text
+S2_schema_valid: true
+S2_original_semantic_validation: indeterminate_due_to_action_applicability_contract_mismatch
+S2_selected_action: stop_lane
+S2_target_lane_visible_as_evidence: true
+S2_target_lane_executable: false
+S2_action_was_exposed_by_submitted_schema: true
+```
+
+Under the corrected action space this response is not valid: `stop_lane`
+should not have been offered. This is a deterministic client-contract defect,
+not an independent model-quality failure. The raw response was preserved
+unchanged; the decision remained
 `measurement_only: true` and `executed: false`.
 
 P1 and P2 were not started. No retry or replacement slot was created.
@@ -52,7 +68,7 @@ P1 and P2 were not started. No retry or replacement slot was created.
 | final item ID | `msg_0f54820d364b5a12016a63c3590f588191b924f837de864be2` |
 | lifecycle | `completed` |
 | schema valid | `true` |
-| semantic valid | `false` |
+| original semantic validation | `indeterminate_due_to_action_applicability_contract_mismatch` |
 | input tokens | 10,180 |
 | cached input tokens | 0 |
 | cache-write input tokens | 0 |
@@ -135,7 +151,7 @@ zero_candidate_evaluations: true
 zero_compaction_operations: true
 zero_tool_calls: true
 usage_accounting_complete: false
-semantic_validity_stateless_A4: false
+semantic_validity_stateless_A4: indeterminate_due_to_action_applicability_contract_mismatch
 semantic_validity_persistent_A4: unavailable
 stateless_token_reduction_percent: null
 completion_reliability_comparison: inconclusive

@@ -85,6 +85,20 @@ def build_director_prompt(snapshot: dict[str, Any]) -> str:
         ),
         "immutable_target": target,
         "acceptance_control": acceptance_control,
+        "applicable_action_description": {
+            "actions": director_state["allowed_action_space"]["actions"],
+            "why_applicable": director_state["allowed_action_space"][
+                "action_applicability"
+            ],
+            "active_executable_lane_ids": director_state[
+                "allowed_action_space"
+            ]["active_executable_lane_ids"],
+            "historical_lane_ids_are_evidence_not_execution_targets": (
+                director_state["allowed_action_space"][
+                    "historical_lane_ids"
+                ]
+            ),
+        },
         "director_state_v2": director_state,
         "required_response": (
             "Assess, update evidence-backed hypotheses, issue concrete typed "
@@ -293,6 +307,21 @@ class ActiveDirector:
             / "evidence-registries"
             / f"{turn_record_id}.json"
         )
+        advisory_registry_relative = (
+            Path("director")
+            / "advisory-target-registries"
+            / f"{turn_record_id}.json"
+        )
+        executable_registry_relative = (
+            Path("director")
+            / "executable-target-registries"
+            / f"{turn_record_id}.json"
+        )
+        action_space_relative = (
+            Path("director")
+            / "applicable-action-spaces"
+            / f"{turn_record_id}.json"
+        )
         context_relative = (
             Path("director")
             / "context-budgets"
@@ -323,6 +352,30 @@ class ActiveDirector:
             self.campaign_dir / registry_relative,
             registry_bytes + b"\n",
         )
+        advisory_registry_bytes = canonical_json(
+            prepared_state.advisory_target_registry,
+            max_bytes=128 * 1024,
+        )
+        executable_registry_bytes = canonical_json(
+            prepared_state.executable_target_registry,
+            max_bytes=128 * 1024,
+        )
+        action_space_bytes = canonical_json(
+            prepared_state.state["allowed_action_space"],
+            max_bytes=128 * 1024,
+        )
+        _write_private(
+            self.campaign_dir / advisory_registry_relative,
+            advisory_registry_bytes + b"\n",
+        )
+        _write_private(
+            self.campaign_dir / executable_registry_relative,
+            executable_registry_bytes + b"\n",
+        )
+        _write_private(
+            self.campaign_dir / action_space_relative,
+            action_space_bytes + b"\n",
+        )
         validation_context = replace(
             context,
             snapshot_id=str(prepared_state.state["source_snapshot_id"]),
@@ -341,12 +394,24 @@ class ActiveDirector:
                 prepared_state.evidence_registry,
                 kinds=frozenset({"hypothesis"}),
             ),
+            advisory_target_ids=evidence_registry_ids(
+                prepared_state.advisory_target_registry
+            ),
+            executable_target_ids=evidence_registry_ids(
+                prepared_state.executable_target_registry
+            ),
+            applicable_action_types=frozenset(
+                prepared_state.state["allowed_action_space"]["actions"]
+            ),
+        )
+        output_schema = director_decision_schema(
+            prepared_state.state["allowed_action_space"]
         )
         context_report = complete_context_size_report(
             prepared_state,
             prompt=prompt,
             base_instructions=base_instructions(),
-            output_schema=director_decision_schema(),
+            output_schema=output_schema,
             mode=self.context_mode,
         )
         context_bytes = canonical_json(
@@ -363,17 +428,45 @@ class ActiveDirector:
             )
         if not prior_turns:
             await self._prepare_context_boundary()
+        measurement_only = (
+            parsed_prompt.get("measurement_contract", {}).get(
+                "measurement_only"
+            )
+            is True
+        )
         request_payload = {
             "thread_id": self.session.thread_id,
             "snapshot_id": snapshot_id,
             "trigger_id": trigger_id,
             "prompt": prompt,
-            "output_schema": director_decision_schema(),
+            "output_schema": output_schema,
             "evidence_registry_artifact_ref": str(registry_relative),
             "evidence_registry_sha256": (
                 prepared_state.evidence_registry_sha256
             ),
+            "advisory_target_registry_artifact_ref": str(
+                advisory_registry_relative
+            ),
+            "advisory_target_registry_sha256": (
+                prepared_state.advisory_target_registry_sha256
+            ),
+            "executable_target_registry_artifact_ref": str(
+                executable_registry_relative
+            ),
+            "executable_target_registry_sha256": (
+                prepared_state.executable_target_registry_sha256
+            ),
+            "applicable_action_space_artifact_ref": str(
+                action_space_relative
+            ),
+            "applicable_action_space_sha256": (
+                prepared_state.applicable_action_space_sha256
+            ),
         }
+        if measurement_only:
+            request_payload.update(
+                {"measurement_only": True, "executed": False}
+            )
         request_bytes = canonical_json(request_payload, max_bytes=1024 * 1024)
         _write_private(self.campaign_dir / request_relative, request_bytes + b"\n")
         self.store.begin_turn(
@@ -413,7 +506,7 @@ class ActiveDirector:
             result = await self.client.turn(
                 self.session,
                 prompt,
-                output_schema=director_decision_schema(),
+                output_schema=output_schema,
                 on_event=persist_event,
             )
             if not isinstance(result.parsed, dict):

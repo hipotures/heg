@@ -69,6 +69,26 @@ class DecisionContext:
     candidate_ids: frozenset[str]
     hypothesis_ids: frozenset[str] = frozenset()
     max_active_lanes: int = 8
+    advisory_target_ids: frozenset[str] | None = None
+    executable_target_ids: frozenset[str] | None = None
+    applicable_action_types: frozenset[str] = frozenset(ACTION_TYPES)
+
+    def __post_init__(self) -> None:
+        # Backward-compatible construction for callers predating explicit
+        # target-role registries. Production snapshot builders pass the exact
+        # role sets derived from the submitted DirectorStateV2.
+        if self.advisory_target_ids is None:
+            object.__setattr__(
+                self, "advisory_target_ids", self.evidence_ids
+            )
+        if self.executable_target_ids is None:
+            object.__setattr__(
+                self,
+                "executable_target_ids",
+                frozenset(self.lane_versions)
+                | self.checkpoint_ids
+                | self.candidate_ids,
+            )
 
 
 class _Issues:
@@ -146,6 +166,12 @@ def validate_decision(
         action_type = action.get("type") if isinstance(action, dict) else None
         if action_type not in ACTION_TYPES:
             issues.add(f"{path}.type", "is not in the reviewed action catalog")
+            continue
+        if action_type not in context.applicable_action_types:
+            issues.add(
+                f"{path}.type",
+                "is not applicable in the submitted action space",
+            )
             continue
         required = COMMON_ACTION_FIELDS | ACTION_FIELDS[action_type]
         if not issues.exact_keys(action, path, required):
@@ -249,8 +275,8 @@ def validate_decision(
                 maximum=32,
                 allowlist=(
                     context.evidence_ids
-                    | context.candidate_ids
-                    | frozenset(context.lane_versions)
+                    | context.advisory_target_ids
+                    | context.executable_target_ids
                 ),
             )
         elif action_type == "schedule_verification":
@@ -416,6 +442,12 @@ def _lane_target(
     if lane_id not in context.lane_versions:
         issues.add(f"{path}.lane_id", "does not reference an active lane")
         return None
+    if lane_id not in context.executable_target_ids:
+        issues.add(
+            f"{path}.lane_id",
+            "is not in executable_target_ids for this turn",
+        )
+        return None
     if version != context.lane_versions[lane_id]:
         issues.add(
             f"{path}.expected_lane_version",
@@ -436,6 +468,11 @@ def _fork(
     )
     if checkpoint not in context.checkpoint_ids:
         issues.add(f"{path}.checkpoint_id", "is not an admissible checkpoint")
+    elif checkpoint not in context.executable_target_ids:
+        issues.add(
+            f"{path}.checkpoint_id",
+            "is not in executable_target_ids for this turn",
+        )
     variants = action["variants"]
     if not isinstance(variants, list) or not 1 <= len(variants) <= 4:
         issues.add(f"{path}.variants", "must contain between 1 and 4 variants")
@@ -481,10 +518,20 @@ def _restart(
         checkpoint = spec.get("checkpoint_id")
         if checkpoint not in context.checkpoint_ids:
             issues.add(f"{path}.checkpoint_id", "is not admissible")
+        elif checkpoint not in context.executable_target_ids:
+            issues.add(
+                f"{path}.checkpoint_id",
+                "is not in executable_target_ids for this turn",
+            )
     if source == "archive_elite":
         candidate = spec.get("candidate_id")
         if candidate not in context.candidate_ids:
             issues.add(f"{path}.candidate_id", "is not admissible")
+        elif candidate not in context.executable_target_ids:
+            issues.add(
+                f"{path}.candidate_id",
+                "is not in executable_target_ids for this turn",
+            )
 
 
 def _allocations(
@@ -678,6 +725,8 @@ def _candidate(
     identifier = _identifier(issues, value, path)
     if identifier not in context.candidate_ids:
         issues.add(path, "is not an admissible retained candidate")
+    elif identifier not in context.executable_target_ids:
+        issues.add(path, "is not in executable_target_ids for this turn")
 
 
 def _candidate_list(

@@ -301,6 +301,15 @@ def _replay_decisions_validate(
                 registry, kinds=frozenset({"hypothesis"})
             ),
             max_active_lanes=1,
+            advisory_target_ids=evidence_registry_ids(
+                prepared.advisory_target_registry
+            ),
+            executable_target_ids=evidence_registry_ids(
+                prepared.executable_target_registry
+            ),
+            applicable_action_types=frozenset(
+                prepared.state["allowed_action_space"]["actions"]
+            ),
         )
         candidate = copy.deepcopy(decision)
         if not validate_decision(candidate, context).accepted:

@@ -2,6 +2,35 @@
 
 Last implementation audit: **2026-07-24**.
 
+## Action-applicability contract repaired deterministically
+
+DirectorStateV2 now separates visible evidence, advisory targets, and
+executable targets into independently hashed registries derived from the final
+submitted state. The same dynamic applicable-action space drives the prompt,
+structured output schema, and semantic validator. Lane-bound actions and lane
+ID enums appear only when an active executable lane exists; historical lanes
+remain explicitly visible as non-executable evidence.
+
+The fresh offline reduced-screen plan retains exactly S2 → P1 → P2. A1 offers
+`start_lane`, `request_diagnostic`, and `set_review_trigger`; A4 additionally
+offers candidate promotion and M4 verification, but no lane-bound action.
+S2/P2 remain byte-identical across state, prompt, schema, all three registries,
+and applicable action space. Context limits pass, and no inference, auth
+access, authenticated App Server turn, or graph-search batch occurred.
+
+The preserved S2 result is now correctly classified as
+`indeterminate_due_to_action_applicability_contract_mismatch`. Its raw
+`stop_lane` output is not valid under the corrected space because that action
+should not have been offered; it is not classified as an independent
+model-quality failure.
+
+Focused tests, SQLite v9 migration/integrity tests, and two 128-test
+non-network safe-suite runs pass. Doctor, compile checks, and benchmark smoke
+pass. Five HTTP/dashboard tests and `make dashboard-smoke` remain blocked
+because this execution sandbox forbids loopback sockets and rejected
+escalation. Fresh authenticated authorization is therefore not requested yet.
+See `docs/reports/M6_ACTION_APPLICABILITY_PHASE_A.md`.
+
 ## Reduced context-mode screen — deterministic Phase A complete
 
 The replacement measurement screen now has exactly three fail-closed slots in
@@ -40,9 +69,13 @@ occurred. See `docs/reports/M6_REDUCED_CONTEXT_SCREEN_PHASE_A.md`.
 With explicit authorization, the runtime imported only `auth.json` into two
 separate private homes and started the strict stateless arm first. The
 server-reported model contract matched `gpt-5.6-luna:xhigh` before inference.
-S2 completed with a final structured response and authoritative usage, but the
-local semantic validator correctly rejected its `stop_lane` action because the
-referenced historical lane was not active in the measurement context.
+S2 completed with a final structured response and authoritative usage. Its
+original semantic result is classified as
+`indeterminate_due_to_action_applicability_contract_mismatch`: the submitted
+schema exposed `stop_lane` even though its only referenced lane was historical
+and non-executable. The preserved output is not valid under the corrected
+action space, but this is a client-contract defect rather than an independent
+model-quality failure.
 
 Fail-closed sequencing then stopped before P1 and P2. The run therefore used
 exactly one inference start, no retries, and zero search batches, lanes,
