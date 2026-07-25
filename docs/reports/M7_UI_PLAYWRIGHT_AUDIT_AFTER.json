@@ -1,0 +1,139 @@
+{
+  "report": "M7_UI_PLAYWRIGHT_AUDIT_AFTER",
+  "date": "2026-07-25",
+  "workspace": "workspace/ui-review-demo",
+  "safety": {
+    "model_inferences": 0,
+    "auth_accesses": 0,
+    "authenticated_app_server_turns": 0,
+    "paid_comparisons": 0,
+    "production_graph_search_batches": 0
+  },
+  "inventory": {
+    "document_route_shapes": [
+      "/",
+      "/comparisons",
+      "/comparisons/new",
+      "/comparisons/<suite-id>",
+      "/comparisons/<suite-id>/blind",
+      "/model-cost-profiles"
+    ],
+    "dashboard_domains": [
+      "campaign",
+      "hypotheses",
+      "director_decisions",
+      "measured_effects",
+      "lanes",
+      "parameter_revisions",
+      "app_server_turns",
+      "events",
+      "legacy_telemetry",
+      "candidates",
+      "experiments"
+    ],
+    "states": [
+      "empty",
+      "draft",
+      "prepared",
+      "authorized",
+      "running",
+      "completed",
+      "failed",
+      "timed_out",
+      "stopped",
+      "historical_read_only",
+      "not_found"
+    ]
+  },
+  "viewports": [
+    {"width": 1920, "height": 1080},
+    {"width": 1440, "height": 900},
+    {"width": 1280, "height": 720},
+    {"width": 1024, "height": 768},
+    {"width": 390, "height": 844}
+  ],
+  "measurements": {
+    "dashboard_1024": {
+      "client_width": 1009,
+      "scroll_width": 1009,
+      "page_overflow": false
+    },
+    "dashboard_390": {
+      "client_width": 375,
+      "scroll_width": 375,
+      "page_overflow": false,
+      "primary_targets_below_44px": 0
+    },
+    "normal_console_errors": 0,
+    "normal_network_errors": 0,
+    "expected_not_found_responses": 1
+  },
+  "themes": {
+    "light": true,
+    "dark": true,
+    "toggle_accessible": true,
+    "local_storage_key": "sglab-theme",
+    "persisted_across_navigation": true
+  },
+  "screenshots": {
+    "dashboard": [
+      "docs/reports/ui-playwright/after/dashboard-desktop-1920-final.png",
+      "docs/reports/ui-playwright/after/dashboard-desktop-1440-final.png",
+      "docs/reports/ui-playwright/after/dashboard-desktop-1280-final.png",
+      "docs/reports/ui-playwright/after/dashboard-tablet-1024-final.png",
+      "docs/reports/ui-playwright/after/dashboard-mobile-touch-final.png"
+    ],
+    "comparisons": "docs/reports/ui-playwright/after/comparisons-mobile-final.png",
+    "comparisons_empty": "docs/reports/ui-playwright/after/comparisons-empty-mobile-390.png",
+    "new_suite": "docs/reports/ui-playwright/after/new-suite-mobile-final.png",
+    "comparison_detail": "docs/reports/ui-playwright/after/comparison-detail-mobile-final.png",
+    "comparison_running": "docs/reports/ui-playwright/after/comparison-running-final.png",
+    "comparison_timeout": "docs/reports/ui-playwright/after/comparison-timeout-mobile-final.png",
+    "comparison_historical": "docs/reports/ui-playwright/after/comparison-historical-final.png",
+    "blind": "docs/reports/ui-playwright/after/comparison-blind-mobile-final.png",
+    "blind_empty": "docs/reports/ui-playwright/after/comparison-blind-empty-mobile-final.png",
+    "cost_profiles": "docs/reports/ui-playwright/after/model-cost-profiles-mobile-final.png",
+    "not_found": "docs/reports/ui-playwright/after/error-404-mobile-390.png"
+  },
+  "verification": {
+    "focused_tests": {"passed": 45, "failed": 0},
+    "full_safe_suite_runs": [
+      {"passed": 175, "failed": 0},
+      {"passed": 175, "failed": 0}
+    ],
+    "make_test": "pass",
+    "make_doctor": "pass",
+    "make_check": "pass",
+    "make_benchmark_smoke": "pass",
+    "make_dashboard_smoke": "pass",
+    "loopback_http": "pass",
+    "sqlite_schema": 10,
+    "sqlite_integrity_check": "ok"
+  },
+  "remaining_issues": [
+    "The research dashboard remains a deliberately long operational document.",
+    "The phone layout prioritizes readable cards over simultaneous cross-column comparison.",
+    "The comparison execution worker is outside this UI-review milestone.",
+    "The stateless recommendation remains based on one controlled pair."
+  ],
+  "status": {
+    "ui_demo_workspace_created": true,
+    "all_pages_inventoried": true,
+    "before_playwright_audit_completed": true,
+    "raw_json_removed_from_primary_views": true,
+    "semantic_action_renderers_created": true,
+    "decision_effect_view_created": true,
+    "table_overflow_fixed": true,
+    "excessive_row_height_fixed": true,
+    "responsive_audit_completed": true,
+    "accessibility_baseline_completed": true,
+    "comparison_pages_audited": true,
+    "console_errors_remaining": 0,
+    "network_errors_remaining": 0,
+    "after_playwright_audit_completed": true,
+    "http_tests_passed": true,
+    "sqlite_integrity_check": "ok",
+    "remaining_ui_blockers": [],
+    "ready_for_real_user_ui_testing": true
+  }
+}

@@ -2,7 +2,7 @@
 
 Last implementation audit: **2026-07-25**.
 
-## M7 browser UI redesign in verification
+## M7 browser UI redesign complete
 
 The research dashboard and controlled-comparison pages now use semantic
 decision, effect, lane, candidate, plan, usage, and cost views. Raw protocol
@@ -17,9 +17,18 @@ to the operating-system color-scheme preference when unset. Typography,
 focus visibility, field grouping, empty/error states, and status labelling
 were normalized without adding a frontend framework or build step.
 
-The baseline Playwright-CDP inventory and before screenshots are preserved in
-`docs/reports/M7_UI_PLAYWRIGHT_AUDIT_BEFORE.md`. Final status remains pending
-the required after-audit against a user-restarted port-8787 server.
+The user-started port-8787 demo server was inspected through Playwright-CDP at
+1920×1080, 1440×900, 1280×720, 1024×768, and 390×844. All route shapes,
+comparison lifecycle states, empty/error states, both themes, technical
+disclosures, and deterministic forms were exercised. The phone layout has no
+page-wide overflow and its primary controls provide 44-pixel touch targets.
+Normal routes produced no console or network failures; the intentional unknown
+route produced the expected styled 404.
+
+The complete 175-test safe suite passes twice, as do focused HTTP/UI tests,
+doctor, compile checks, benchmark/dashboard smoke, and SQLite v10 integrity.
+See `docs/reports/M7_UI_PLAYWRIGHT_AUDIT_BEFORE.md` and
+`docs/reports/M7_UI_PLAYWRIGHT_AUDIT_AFTER.md`.
 
 ## M7 deterministic UI-review fixture complete
 

@@ -107,6 +107,11 @@ class SemanticUiRenderingTests(unittest.TestCase):
         html = self.decode(blind_page("suite-demo"))
         self.assertIn("decisionCard(pair[0].normalized_decision_json", html)
         self.assertIn("remain hidden until submission", html)
+        self.assertIn('id="blind-empty" class="empty-state" hidden', html)
+        self.assertIn(
+            "Failed or invalid turns remain available in the suite reliability view",
+            html,
+        )
         self.assertNotIn('<pre id="a"', html)
 
     def test_cost_profiles_have_semantic_history_cards(self) -> None:
@@ -128,11 +133,34 @@ class SemanticUiRenderingTests(unittest.TestCase):
         self.assertIn("Candidate metadata", dashboard)
         self.assertIn("Math.min(limit,3)", dashboard)
         self.assertIn("function eventLine(line)", dashboard)
+        self.assertIn("boundedList('logs',logs.lines||[],eventLine)", dashboard)
         self.assertNotIn("['Parameters', r => esc(JSON.stringify", dashboard)
         self.assertNotIn(
             "typeof v==='object'?esc(JSON.stringify(v))",
             dashboard,
         )
+
+    def test_mobile_controls_use_touch_sized_targets(self) -> None:
+        comparison = self.decode(comparisons_page())
+        dashboard = (Path(__file__).parents[1] / "web" / "index.html").read_text(
+            encoding="utf-8"
+        )
+        for html in (comparison, dashboard):
+            self.assertIn(
+                "input,select,button,.copy-id,.section-heading>a,.form-actions>a"
+                "{min-height:2.75rem}",
+                html,
+            )
+            self.assertIn(
+                ".section-heading>a,.form-actions>a"
+                "{display:inline-flex;align-items:center}",
+                html,
+            )
+            self.assertIn(
+                ".brand strong a{display:inline-flex;align-items:center;"
+                "min-height:2.75rem}",
+                html,
+            )
 
     def test_global_navigation_is_consistent_and_theme_label_does_not_wrap(self) -> None:
         comparison = self.decode(comparisons_page())
@@ -179,7 +207,17 @@ class SemanticUiRenderingTests(unittest.TestCase):
     def test_terminal_suite_controls_use_explicit_element_lookup(self) -> None:
         html = self.decode(comparison_detail_page("suite-demo"))
         self.assertIn("document.getElementById('stop').onclick", html)
+        self.assertIn("stop=document.getElementById('stop')", html)
         self.assertNotIn("stop.onclick=", html)
+
+    def test_missing_effect_values_do_not_render_null(self) -> None:
+        html = self.decode(comparison_detail_page("suite-demo"))
+        self.assertIn("v==='null'", html)
+        self.assertIn("scoreMissing?'Unavailable'", html)
+
+    def test_hidden_attribute_wins_over_layout_display(self) -> None:
+        html = self.decode(comparison_detail_page("suite-demo"))
+        self.assertIn("[hidden]{display:none!important}", html)
 
 
 if __name__ == "__main__":

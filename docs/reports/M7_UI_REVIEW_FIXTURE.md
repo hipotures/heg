@@ -9,9 +9,11 @@ A rich deterministic UI-review workspace is available at
 uses seed `20260725`, and can be safely regenerated only when the target
 already carries the exact demo marker.
 
-Phase A stops here. No browser inspection, screenshot capture, page inventory,
-UI redesign, or Playwright-CDP action has started. The HTTP server on port
-8787 was not started by the agent.
+Phase A originally stopped at this boundary. The user subsequently started
+the server manually and the complete before/after Playwright-CDP audit was
+performed without model, auth, paid-comparison, or production-search access.
+See `M7_UI_PLAYWRIGHT_AUDIT_BEFORE.md` and
+`M7_UI_PLAYWRIGHT_AUDIT_AFTER.md`.
 
 ## Baseline and preservation
 
@@ -157,9 +159,9 @@ that confirmation may Phase B begin with Playwright-CDP.
 
 ```text
 ui_demo_workspace_created: true
-all_pages_inventoried: false
-before_playwright_audit_completed: false
-after_playwright_audit_completed: false
-ready_for_phase_b_browser_audit: true
-ready_for_real_user_ui_testing: false
+all_pages_inventoried: true
+before_playwright_audit_completed: true
+after_playwright_audit_completed: true
+ready_for_phase_b_browser_audit: false
+ready_for_real_user_ui_testing: true
 ```

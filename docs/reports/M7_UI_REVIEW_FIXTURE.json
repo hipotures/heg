@@ -125,7 +125,7 @@
       "failed": 0
     },
     "full_safe_suite": {
-      "passed": 158,
+      "passed": 175,
       "failed": 0
     },
     "make_doctor": "pass",
@@ -144,25 +144,26 @@
     "authenticated_app_server_turns": 0,
     "paid_comparisons": 0,
     "production_search_campaigns": 0,
-    "playwright_audit_started": false,
+    "playwright_audit_started": true,
     "server_8787_started_by_agent": false,
     "production_research_records_modified": false,
     "preserved_m6_runtime_artifacts_modified": false
   },
   "next_step": {
     "user_command": "PYTHONPATH=src python3 -m sglab serve --workspace workspace/ui-review-demo --host 127.0.0.1 --port 8787",
-    "requires_user_confirmation": "http://127.0.0.1:8787 is running",
-    "phase_b_started": false
+    "requires_user_confirmation": null,
+    "phase_b_started": true,
+    "phase_b_completed": true
   },
   "status": {
     "ui_demo_workspace_created": true,
     "fixture_generator_deterministic": true,
     "fixture_safety_gates_passed": true,
     "historical_m6_preserved": true,
-    "all_pages_inventoried": false,
-    "before_playwright_audit_completed": false,
-    "after_playwright_audit_completed": false,
-    "ready_for_phase_b_browser_audit": true,
-    "ready_for_real_user_ui_testing": false
+    "all_pages_inventoried": true,
+    "before_playwright_audit_completed": true,
+    "after_playwright_audit_completed": true,
+    "ready_for_phase_b_browser_audit": false,
+    "ready_for_real_user_ui_testing": true
   }
 }

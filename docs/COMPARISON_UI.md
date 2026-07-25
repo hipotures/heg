@@ -191,6 +191,14 @@ Long identifiers are abbreviated visually while preserving their full value
 for inspection. Both light and dark themes are available from the persistent
 header toggle; the preference is saved in browser local storage.
 
+The comparison UI is phone-first at its narrow breakpoint. The global
+navigation remains identical on every page, arranged as a two-by-two grid;
+forms and primary actions use 44-pixel touch targets; suites and turns render
+as readable cards without page-wide horizontal overflow. Desktop and tablet
+layouts use the same information hierarchy with more simultaneous columns.
+Failed or schema-invalid turns are excluded from ordinary blind comparison
+and produce a reliability-focused empty state instead of blank answer cards.
+
 ## Quality layers
 
 Automatic hard validity, human judgment, and downstream scientific outcome
