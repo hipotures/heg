@@ -63,6 +63,14 @@ class SemanticUiRenderingTests(unittest.TestCase):
             self.assertIn(action, html)
         self.assertIn("Technical decision JSON", html)
         self.assertIn("Raw server decision", html)
+        self.assertIn(
+            "Array.isArray(parsed)?parsed:parsed?.actions",
+            html,
+        )
+        self.assertIn(
+            "actionSpaceLabels(t.applicable_action_space_json)",
+            html,
+        )
 
     def test_semantic_renderer_omits_null_values(self) -> None:
         html = self.decode(comparison_detail_page("suite-demo"))
