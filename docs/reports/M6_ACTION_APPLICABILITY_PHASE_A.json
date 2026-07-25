@@ -1,6 +1,7 @@
 {
   "schema_version": "1.0",
   "date": "2026-07-24",
+  "loopback_verification_date": "2026-07-25",
   "initial_commit": "bd85c18023eab9ae305628c19dc3e55c3c54cc5d",
   "objective": "deterministic_action_applicability_contract_repair",
   "contract": {
@@ -114,11 +115,32 @@
     "sqlite_v9_migration_and_registry_tests": "8_passed",
     "safe_non_network_suite_pass_1": "128_passed",
     "safe_non_network_suite_pass_2": "128_passed",
-    "full_safe_suite": "blocked_by_loopback_socket_sandbox_after_128_passed_and_5_permission_errors",
+    "previously_blocked_loopback_tests": {
+      "result": "5_passed",
+      "elapsed_seconds": 6.525,
+      "tests": [
+        "tests.test_web.WebAssetsTests.test_bearer_token_protects_changes",
+        "tests.test_web.WebAssetsTests.test_campaign_api_has_only_stop_contract_inputs",
+        "tests.test_web.WebAssetsTests.test_http_api_smoke_and_control_validation",
+        "tests.test_benchmark.BenchmarkTests.test_short_soak_exercises_controls_and_dashboard",
+        "tests.test_ai_experiment.OneBatchExperimentTests.test_replay_decision_batch_outcome_feedback_and_dashboard"
+      ]
+    },
+    "full_safe_suite": "133_passed_excluding_installed_app_server_compliance_test",
+    "full_safe_suite_elapsed_seconds": 31.992,
     "make_doctor": "passed",
     "make_check": "passed",
     "make_benchmark_smoke": "passed",
-    "make_dashboard_smoke": "blocked_by_loopback_socket_sandbox",
+    "make_dashboard_smoke": "passed",
+    "dashboard_smoke_output": "dashboard smoke: ok",
+    "http_bind_host": "127.0.0.1",
+    "http_ports": "ephemeral",
+    "http_shutdown_contract": [
+      "shutdown",
+      "server_close",
+      "thread_join"
+    ],
+    "test_owned_http_servers_remaining": 0,
     "sqlite_user_version": 9,
     "sqlite_integrity_check": "ok"
   },
@@ -130,6 +152,6 @@
     "preserved_S2_artifacts_modified": false,
     "planning_modified": false
   },
-  "ready_for_fresh_authenticated_authorization": false,
-  "remaining_gate": "loopback HTTP tests and dashboard smoke require an environment that permits local sockets"
+  "ready_for_fresh_authenticated_authorization": true,
+  "remaining_gate": null
 }

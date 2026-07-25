@@ -2,6 +2,8 @@
 
 Date: **2026-07-24**
 
+Loopback verification completed: **2026-07-25**
+
 The deterministic repair started from
 `bd85c18023eab9ae305628c19dc3e55c3c54cc5d`. No model inference, auth access,
 authenticated App Server turn, graph-search batch, compaction operation, or
@@ -103,14 +105,30 @@ tokens. Every context budget passes.
 - focused action-applicability suite: 7 passed;
 - SQLite v9 migration, integrity, and registry reconstruction: 8 passed;
 - non-network safe suite: 128 passed twice;
+- the five previously socket-blocked HTTP/dashboard tests: 5 passed in
+  6.525 seconds;
+- complete Phase-A-safe suite, excluding only the installed App Server
+  compliance test: 133 passed in 31.992 seconds;
+- `make dashboard-smoke`: passed (`dashboard smoke: ok`);
 - `make doctor`, `make check`, and `make benchmark-smoke`: passed;
 - SQLite `user_version=9`, `integrity_check=ok`.
 
-The full suite reached 128 passing tests, then five HTTP/dashboard tests
-failed because this execution sandbox forbids opening a loopback socket.
-`make dashboard-smoke` failed for the same environmental reason. Escalated
-execution was requested and rejected by the environment's approval layer.
-These are verification-environment blockers, not observed assertion failures.
+The five tests completed in a host environment that permits loopback sockets:
 
-Fresh authenticated authorization is not requested yet because the loopback
-HTTP and dashboard gates are not complete.
+- `tests.test_web.WebAssetsTests.test_bearer_token_protects_changes`;
+- `tests.test_web.WebAssetsTests.test_campaign_api_has_only_stop_contract_inputs`;
+- `tests.test_web.WebAssetsTests.test_http_api_smoke_and_control_validation`;
+- `tests.test_benchmark.BenchmarkTests.test_short_soak_exercises_controls_and_dashboard`;
+- `tests.test_ai_experiment.OneBatchExperimentTests.test_replay_decision_batch_outcome_feedback_and_dashboard`.
+
+Every dashboard server used by these tests and `make dashboard-smoke` was
+constructed with host `127.0.0.1` and an ephemeral port. Each path calls
+`shutdown()`, `server_close()`, and joins its serving thread; the successful
+process exits confirm that no test-owned dashboard server remained running.
+
+This completion run performed no model inference, auth access, authenticated
+App Server turn, graph-search batch, compaction operation, or model tool call.
+`planning/` and the preserved S2 runtime artifacts remained untouched.
+
+All deterministic gates are now complete. The preparation is ready for a
+fresh, separately granted authenticated authorization.
