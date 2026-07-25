@@ -1,0 +1,194 @@
+{
+  "schema_version": "1.0",
+  "report_kind": "m7_first_real_comparison_preparation",
+  "phase": "A",
+  "generated_at": "2026-07-25T15:40:00Z",
+  "deterministic_gates_passed": true,
+  "runtime_authorized": false,
+  "repository": {
+    "branch": "m7-ui-review-phase-a",
+    "tested_commit": "3979af3b9675feefcedb34dda930bdcd136dba2a",
+    "worker_baseline_commit": "04aec06fa5847dd79d0efac55f991e10f375e30d",
+    "worker_baseline_integrated": true,
+    "ui_final_commit": "25920da",
+    "ui_final_integrated": true,
+    "integration_merge_commit": "825ddc7"
+  },
+  "workspace": {
+    "source": "workspace/first-ai-search-auth-20260724-01",
+    "destination": "workspace/model-comparisons-live",
+    "workspace_kind": "model_comparison_live",
+    "synthetic_data": false,
+    "source_workspace": "first-ai-search-auth-20260724-01",
+    "schema_version": 11,
+    "integrity_check": "ok",
+    "foreign_key_check_rows": 0,
+    "source_campaign_id": "ai-experiment-f428e11c80514d23ac06085f7f0b8380",
+    "source_snapshot_id": "snapshot-f05c68797620478d87764fd4e0717b1f",
+    "source_report_sha256": "97d6fdeabedc159725730bc06ffa3025fd75e0ac3e1b1649bd2ed8ce393faa1d",
+    "source_snapshot_artifact_sha256": "db1bf0e0049cbae497e975e932a12e7493d5c9b4ba654cc0267b3ee97746476a",
+    "source_snapshot_hash_preserved": true
+  },
+  "fixture": {
+    "fixture_id": "m6-executable-preserved-a4",
+    "display_name": "M6 executable preserved A4",
+    "fixture_type": "campaign_snapshot",
+    "fixture_sha256": "2abb54b631942cd721dfd4bbaa6481135c73d818d35b9046c8f2f15d2c03af77",
+    "fixture_bundle_file_sha256": "637a767672cb6e569814554283711ab7c614830a63d8c31158467ef6f2a0f86d",
+    "executable": true,
+    "read_only": false,
+    "measurement_only_safe": true,
+    "complete_contract_verify_only": true,
+    "director_state_schema_version": "2.0",
+    "estimated_client_owned_tokens": 6516,
+    "hashes": {
+      "director_state": "2abb54b631942cd721dfd4bbaa6481135c73d818d35b9046c8f2f15d2c03af77",
+      "prompt": "12bada6af03626bf10a3b5313a8e058e39555bf0083529ff72fd0fff91d004f7",
+      "base_instructions": "bb79f9078bf017c9079d10fc1619dfe52072d58172977a7868b5201c2c37f151",
+      "developer_instructions": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "output_schema": "9147d4fcc81bcfbdfc986b71fa1f194cf4986b0d0ac4f5602228a4a9a966a400",
+      "evidence_registry": "2b15586edf1e512f9285af13f51d6b2897e154bba9c995404c9b92eaec88048c",
+      "advisory_registry": "2c4d430e52710fa3345b6c27ce58573d6885455e4d869463e0a3025279f2d463",
+      "executable_registry": "b594c18a0112206f01258ade6daa18b3e11935d20749b769c03736ac301f83f7",
+      "applicable_action_space": "437647c85fc5a970a0d49c381967ea7eb5b541c3ba2310a4fbd2c94abd43de8e",
+      "campaign_budget": "4766fb7b07941614d2b09868b95b853c36c363265624bc508cb8c706cf08398d"
+    }
+  },
+  "suite": {
+    "suite_id": "comparison-4407a28f8e7c47b89a7226045b61b1b4",
+    "name": "Luna high vs xhigh — A4 worker smoke",
+    "description": "Compare reasoning effort on an identical bounded A4 Director decision using the authenticated M7 comparison worker. Measurement only; no returned action is executed.",
+    "status": "prepared",
+    "authorization_status": "unauthorized",
+    "plan_fingerprint": "89e09e8f82428e86f2a75ae24ff51f7187536c22c2ad023152dcb80b60512886",
+    "canonical_fingerprint_recomputed": true,
+    "created_by": "web",
+    "created_at": "2026-07-25T15:26:22Z"
+  },
+  "safe_api_plan": {
+    "captured_via": "playwright-cdp rendered-page session",
+    "schema_version": "2.0",
+    "suite_id": "comparison-4407a28f8e7c47b89a7226045b61b1b4",
+    "fixture_reference": "m6-executable-preserved-a4",
+    "fixture_sha256": "2abb54b631942cd721dfd4bbaa6481135c73d818d35b9046c8f2f15d2c03af77",
+    "plan_fingerprint": "89e09e8f82428e86f2a75ae24ff51f7187536c22c2ad023152dcb80b60512886",
+    "measurement_only": true,
+    "execute_decisions": false,
+    "fail_closed": true,
+    "randomized_arm_order": true,
+    "ordering_seed": 20260725,
+    "planned_inference_count": 2,
+    "maximum_inference_starts": 2,
+    "timeout_seconds": 300,
+    "maximum_total_server_tokens": 40000,
+    "maximum_client_owned_tokens_per_turn": 12000,
+    "expected_search_batches": 0,
+    "expected_action_dispatches": 0,
+    "expected_model_tool_calls": 0,
+    "expected_compactions": 0,
+    "maximum_retries_reaching_inference": 0,
+    "fixture_equality": {
+      "all_equal": true,
+      "director_state_sha256": true,
+      "prompt_sha256": true,
+      "base_instructions_sha256": true,
+      "output_schema_sha256": true,
+      "evidence_registry_sha256": true,
+      "advisory_registry_sha256": true,
+      "executable_registry_sha256": true,
+      "applicable_action_space_sha256": true,
+      "campaign_budget_sha256": true
+    },
+    "scientific_runtime_contract_difference": [
+      "reasoning_effort"
+    ],
+    "arms": [
+      {
+        "arm_id": "arm-9a0c4225502c4959973bffe2101201a5",
+        "display_name": "Luna high",
+        "effective_order": 0,
+        "model": "gpt-5.6-luna",
+        "reasoning_effort": "high",
+        "context_mode": "stateless_turns",
+        "repetitions": 1,
+        "fresh_thread": true
+      },
+      {
+        "arm_id": "arm-f95c90d663ff45b9b0b6e846c609df9c",
+        "display_name": "Luna xhigh",
+        "effective_order": 1,
+        "model": "gpt-5.6-luna",
+        "reasoning_effort": "xhigh",
+        "context_mode": "stateless_turns",
+        "repetitions": 1,
+        "fresh_thread": true
+      }
+    ]
+  },
+  "phase_a_state": {
+    "consumed_inference_starts": 0,
+    "authorizations": 0,
+    "inference_reservations": 0,
+    "comparison_turns": 0,
+    "worker_leases": 0,
+    "execution_attempts": 0,
+    "runtime_campaigns": 0,
+    "research_lanes": 0,
+    "director_action_batches": 0,
+    "director_actions": 0,
+    "director_action_outcomes": 0,
+    "auth_source_configured": true,
+    "auth_source_content_accessed": false,
+    "auth_copied": false,
+    "model_inference_performed": false,
+    "authorize_clicked": false,
+    "start_clicked": false
+  },
+  "control_plane": {
+    "host": "127.0.0.1",
+    "port": 8788,
+    "loopback_only": true,
+    "bearer_protected": true,
+    "current_bearer_excluded": true,
+    "initial_diagnostic_bearer_rotated_before_prepare": true,
+    "workspace_visible_in_rendered_ui": "workspace/model-comparisons-live",
+    "worker_active": false
+  },
+  "verification": {
+    "focused_fixture_and_worker_tests": "passed",
+    "make_doctor": "passed",
+    "make_test": {
+      "passed": true,
+      "tests": 194
+    },
+    "make_check": "passed",
+    "make_benchmark_smoke": "passed",
+    "make_dashboard_smoke": "passed",
+    "playwright_rendered_ui": "passed",
+    "safe_api_response": "passed",
+    "sqlite_integrity_check": "ok",
+    "sqlite_foreign_key_check_rows": 0
+  },
+  "screenshots": [
+    {
+      "path": "docs/reports/m7-first-real-comparison-prep/workspace-confirmation.png",
+      "sha256": "28ef78f0f613b0c3604d8f4439bf5e77100c83214a25c0167965af60c8e59c30"
+    },
+    {
+      "path": "docs/reports/m7-first-real-comparison-prep/suite-form.png",
+      "sha256": "05e7e99139d5eedc05950bf323d1b4bfce840636cd3820c7c2289bc80c2e566f"
+    },
+    {
+      "path": "docs/reports/m7-first-real-comparison-prep/prepared-plan.png",
+      "sha256": "c29bd0b8f4f14d04449c67fa5b3d05ba0a27ed3da523db283d7728da9defd712"
+    },
+    {
+      "path": "docs/reports/m7-first-real-comparison-prep/inference-limit-summary.png",
+      "sha256": "23bf358b2eb88c24e932a00b281f22c98419a5394486c0fb69531220315c5031"
+    }
+  ],
+  "authorization_boundary": {
+    "phase_b_not_started": true,
+    "fresh_explicit_user_authorization_required": true
+  }
+}

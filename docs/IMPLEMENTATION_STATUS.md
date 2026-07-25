@@ -2,6 +2,30 @@
 
 Last implementation audit: **2026-07-25**.
 
+## M7 first real comparison deterministic preparation complete
+
+The dedicated non-synthetic `model_comparison_live` workspace now contains a
+complete executable preserved-A4 fixture and one immutable prepared suite for
+`gpt-5.6-luna` high versus xhigh in fresh `stateless_turns`. The schema-v11
+workspace was built with SQLite Online Backup and a safe scientific-artifact
+import; it contains no auth, sessions, Codex homes, rollouts, or wire logs.
+All arm-input hashes match and the fixture's conservative client-owned input
+estimate is 6,516 tokens under the 12,000-token limit.
+
+The exact plan permits at most two 300-second inference starts and 40,000
+authoritative server tokens, with measurement-only, no decision execution,
+fail-closed sequencing, seed 20260725, zero search batches, zero action
+dispatches, zero model tools, zero compactions, and zero retries reaching
+inference. Playwright CDP created and prepared the suite through the rendered
+UI and verified the safe API response. The plan remains unauthorized with zero
+turns, reservations, attempts, leases, lanes, batches, and actions.
+
+The complete 194-test suite, doctor, compile checks, benchmark/dashboard smoke,
+schema-v11 integrity, and foreign-key checks pass. No auth content was read or
+copied and no model inference occurred. Phase B remains stopped at the fresh
+explicit authorization boundary. See
+`docs/reports/M7_FIRST_REAL_COMPARISON_PREP.md`.
+
 ## M7 preserved A4 comparison import complete
 
 The `sglab comparisons import-campaign-snapshot` administrative command now
