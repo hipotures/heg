@@ -1,0 +1,139 @@
+{
+  "report": "M7_THIRD_REAL_COMPARISON_PREP",
+  "date": "2026-07-25",
+  "tested_commit": "76b6b33c15c8584003f780220b7080b320163de5",
+  "workspace": "workspace/model-comparisons-live",
+  "suite": {
+    "name": "Luna high vs xhigh — A4 installed-wrapper rerun",
+    "suite_id": "comparison-24c99e0539684b9ca488cdaba4f2486b",
+    "status": "prepared",
+    "authorization_status": "unauthorized",
+    "plan_schema_version": "2.1",
+    "plan_fingerprint": "062bc657ccd45f56808b741c042a9685f0f8b7e7135b5cc5f7af2ce4edef1790",
+    "recomputed_fingerprint_matches": true,
+    "resource_accounting_version": 2
+  },
+  "fixture": {
+    "fixture_id": "m6-executable-preserved-a4",
+    "display_name": "M6 executable preserved A4",
+    "fixture_sha256": "2abb54b631942cd721dfd4bbaa6481135c73d818d35b9046c8f2f15d2c03af77",
+    "estimated_client_owned_tokens": 6516
+  },
+  "effective_arm_order": [
+    {
+      "order": 1,
+      "arm_id": "arm-72342014dab94046869814ff2a48ffc0",
+      "display_name": "Luna high",
+      "model": "gpt-5.6-luna",
+      "reasoning_effort": "high",
+      "context_mode": "stateless_turns",
+      "repetition_index": 0,
+      "fresh_thread": true,
+      "resume_prior_thread": false
+    },
+    {
+      "order": 2,
+      "arm_id": "arm-a3d5c064486e458a808a10a259dc4441",
+      "display_name": "Luna xhigh",
+      "model": "gpt-5.6-luna",
+      "reasoning_effort": "xhigh",
+      "context_mode": "stateless_turns",
+      "repetition_index": 0,
+      "fresh_thread": true,
+      "resume_prior_thread": false
+    }
+  ],
+  "scientific_input_equality": {
+    "all_equal": true,
+    "only_intended_difference": "reasoning_effort",
+    "hashes": {
+      "director_state_v2": "2abb54b631942cd721dfd4bbaa6481135c73d818d35b9046c8f2f15d2c03af77",
+      "prompt": "12bada6af03626bf10a3b5313a8e058e39555bf0083529ff72fd0fff91d004f7",
+      "output_schema": "9147d4fcc81bcfbdfc986b71fa1f194cf4986b0d0ac4f5602228a4a9a966a400",
+      "base_instructions": "bb79f9078bf017c9079d10fc1619dfe52072d58172977a7868b5201c2c37f151",
+      "developer_instructions": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "campaign_budget": "4766fb7b07941614d2b09868b95b853c36c363265624bc508cb8c706cf08398d",
+      "evidence_registry": "2b15586edf1e512f9285af13f51d6b2897e154bba9c995404c9b92eaec88048c",
+      "advisory_registry": "2c4d430e52710fa3345b6c27ce58573d6885455e4d869463e0a3025279f2d463",
+      "executable_registry": "b594c18a0112206f01258ade6daa18b3e11935d20749b769c03736ac301f83f7",
+      "applicable_action_space": "437647c85fc5a970a0d49c381967ea7eb5b541c3ba2310a4fbd2c94abd43de8e"
+    },
+    "single_fixture_target_metadata": true
+  },
+  "limits": {
+    "planned_turns": 2,
+    "maximum_inference_starts": 2,
+    "timeout_seconds_per_turn": 300,
+    "maximum_total_authoritative_server_tokens": 40000,
+    "maximum_client_owned_estimated_tokens_per_turn": 12000,
+    "maximum_worker_wall_seconds": 7200,
+    "maximum_concurrent_suites": 1,
+    "randomized_order": true,
+    "random_seed": 20260725,
+    "max_preserved_artifact_bytes": 67108864,
+    "max_runtime_scratch_bytes": 536870912,
+    "max_single_preserved_artifact_bytes": 33554432,
+    "max_single_runtime_file_bytes": 268435456,
+    "max_wire_log_bytes": 8388608,
+    "max_stderr_bytes": 262144,
+    "max_stdout_bytes": 1048576
+  },
+  "execution_contract": {
+    "measurement_only": true,
+    "execute_decisions": false,
+    "fail_closed": true,
+    "compaction_permitted": false,
+    "inference_reaching_retries": 0,
+    "graph_search_batches": 0,
+    "returned_action_dispatches": 0,
+    "model_tool_calls": 0
+  },
+  "filesystem_policy": {
+    "database_schema_version": 13,
+    "contract_binding": "tested_commit",
+    "expected_wrapper_names": [
+      "apply_patch",
+      "applypatch",
+      "codex-execve-wrapper",
+      "codex-linux-sandbox"
+    ],
+    "safe_expected_location": "app-server-tmp/arg0/<wrapper-name>",
+    "symlink_targets_followed": false,
+    "expected_trusted_wrappers_fail_accounting": false,
+    "unexpected_external_failure_domain": "filesystem_policy",
+    "byte_quota_requires_true_numeric_inequality": true
+  },
+  "process_reaping": {
+    "owned_popen_registry": true,
+    "nonblocking_poll": true,
+    "global_waitpid": false,
+    "reap_result_persisted": true,
+    "dashboard_shutdown_required": false
+  },
+  "verification": {
+    "rendered_ui_verified_with_playwright_cdp": true,
+    "protected_safe_api_verified": true,
+    "protected_safe_api_sha256": "d1e76bccc24893fbb574c2cf2b8873e50d18135d1ee12e996f19fbffe1f6f206",
+    "sqlite_schema_version": 13,
+    "sqlite_integrity_check": "ok",
+    "sqlite_foreign_key_check_rows": 0,
+    "active_worker_leases": 0,
+    "authorizations": 0,
+    "execution_attempts": 0,
+    "inference_reservations": 0,
+    "comparison_turns": 0,
+    "resource_samples": 0,
+    "private_runtime_roots": 0,
+    "consumed_inference_starts": 0,
+    "historical_suites_unchanged": true
+  },
+  "authorization_boundary": {
+    "authorize_clicked": false,
+    "start_clicked": false,
+    "worker_started": false,
+    "model_inference_starts": 0,
+    "credential_access": false,
+    "credential_copies": 0,
+    "ready_for_explicit_authorization": true
+  }
+}
