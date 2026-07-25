@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from hashlib import sha256
 from http.client import HTTPConnection
 from pathlib import Path
 from threading import Thread
@@ -20,6 +21,7 @@ from sglab.comparison_worker import (
 from sglab.comparisons import (
     ComparisonStore,
     canonical_sha256,
+    import_campaign_snapshot_fixture,
     import_comparison_fixture_bundle,
 )
 from sglab.db import (
@@ -631,6 +633,146 @@ class ComparisonWorkerTests(unittest.TestCase):
 
 
 class ComparisonWorkerMigrationTests(unittest.TestCase):
+    def test_campaign_snapshot_import_is_isolated_and_executable(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "preserved-source"
+            campaign = source / "research-campaigns" / "source-campaign"
+            snapshots = campaign / "snapshots"
+            snapshots.mkdir(parents=True)
+            snapshot = {
+                "schema_version": "3.0",
+                "snapshot_id": "snapshot-a4",
+                "created_at": "2026-07-24T00:00:00Z",
+                "campaign": {
+                    "campaign_id": "source-campaign",
+                    "state": "running",
+                    "state_version": 4,
+                    "stop_mode": "time_limit",
+                    "elapsed_seconds": 30,
+                    "remaining_seconds": 570,
+                },
+                "target": {
+                    "target_id": "erdos_gyarfas",
+                    "immutable_definition_hash": "a" * 64,
+                    "success_authority": "M4_independent_verifier",
+                },
+                "lanes": [],
+                "hypotheses": [],
+                "global_best": None,
+                "recent_actions": [],
+                "available_evidence_ids": [],
+            }
+            snapshot_bytes = json.dumps(
+                snapshot, sort_keys=True, separators=(",", ":")
+            ).encode("utf-8")
+            snapshot_path = snapshots / "snapshot-a4.json"
+            snapshot_path.write_bytes(snapshot_bytes)
+            connection = connect(source / "results.sqlite3")
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO research_campaigns
+                    (campaign_id, created_at, updated_at, target,
+                     target_definition_sha256, state, state_version, stop_mode)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "source-campaign",
+                        "2026-07-24T00:00:00Z",
+                        "2026-07-24T00:00:00Z",
+                        "erdos_gyarfas",
+                        "a" * 64,
+                        "running",
+                        4,
+                        "time_limit",
+                    ),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO director_snapshots
+                    (snapshot_id, campaign_id, campaign_state_version,
+                     high_water_json, artifact_ref, artifact_sha256,
+                     payload_bytes, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "snapshot-a4",
+                        "source-campaign",
+                        4,
+                        "{}",
+                        "snapshots/snapshot-a4.json",
+                        sha256(snapshot_bytes).hexdigest(),
+                        len(snapshot_bytes),
+                        "2026-07-24T00:00:00Z",
+                    ),
+                )
+                connection.commit()
+            finally:
+                connection.close()
+            (source / "active-research-campaign.json").write_text(
+                json.dumps({"campaign_dir": str(campaign)}),
+                encoding="utf-8",
+            )
+            (source / "ai-experiment-report.json").write_text(
+                json.dumps(
+                    {
+                        "campaign_id": "source-campaign",
+                        "second_snapshot_id": "snapshot-a4",
+                        "model_inferences": 2,
+                        "search_batches": 1,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            source_hash = sha256(snapshot_path.read_bytes()).hexdigest()
+            destination = root / "model-comparisons-live"
+            result = import_campaign_snapshot_fixture(
+                source_workspace=source,
+                destination_workspace=destination,
+                snapshot_reference="A4",
+                display_name="M6 executable preserved A4",
+            )
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["schema_version"], SCHEMA_VERSION)
+            self.assertFalse(result["synthetic_data"])
+            self.assertEqual(
+                sha256(snapshot_path.read_bytes()).hexdigest(), source_hash
+            )
+            self.assertFalse(
+                any(
+                    path.name.startswith("source-online-backup")
+                    for path in destination.iterdir()
+                )
+            )
+            self.assertFalse(
+                any(
+                    "auth.json" in path.name
+                    for path in destination.rglob("*")
+                )
+            )
+            with ComparisonStore(destination / "results.sqlite3") as store:
+                fixture = store.connection.execute(
+                    """
+                    SELECT * FROM comparison_fixtures
+                    WHERE fixture_id='m6-executable-preserved-a4'
+                    """
+                ).fetchone()
+                self.assertIsNotNone(fixture)
+                self.assertEqual(fixture["fixture_type"], "campaign_snapshot")
+                self.assertIsNotNone(fixture["prompt_text"])
+                self.assertIsNotNone(fixture["base_instructions_text"])
+                self.assertEqual(
+                    store.connection.execute(
+                        "PRAGMA integrity_check"
+                    ).fetchone()[0],
+                    "ok",
+                )
+                self.assertEqual(
+                    list(store.connection.execute("PRAGMA foreign_key_check")),
+                    [],
+                )
+
     def test_admin_fixture_bundle_install_is_hash_complete(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

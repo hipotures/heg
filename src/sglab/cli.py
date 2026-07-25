@@ -17,6 +17,7 @@ from .model import BitGraph
 from .certification import certify, verify_cpp
 from .config import load_config
 from .comparisons import (
+    import_campaign_snapshot_fixture,
     import_comparison_fixture_bundle,
     import_m6_context_report,
     run_replay_dry_run,
@@ -570,6 +571,15 @@ def cmd_research_campaign(args: Namespace) -> int:
 
 def cmd_comparisons(args: Namespace) -> int:
     workspace = _workspace(args.workspace)
+    if args.comparisons_command == "import-campaign-snapshot":
+        report = import_campaign_snapshot_fixture(
+            source_workspace=_workspace(args.source_workspace),
+            destination_workspace=workspace,
+            snapshot_reference=args.snapshot,
+            display_name=args.display_name,
+        )
+        print(json.dumps(report, indent=2, sort_keys=True))
+        return 0
     workspace.mkdir(parents=True, exist_ok=True)
     database = workspace / "results.sqlite3"
     if args.comparisons_command == "worker":
@@ -864,6 +874,22 @@ def build_parser() -> ArgumentParser:
     comparison_fixture.add_argument("--workspace", required=True)
     comparison_fixture.add_argument("--fixture", required=True)
     comparison_fixture.set_defaults(func=cmd_comparisons)
+    comparison_snapshot = comparison_commands.add_parser(
+        "import-campaign-snapshot"
+    )
+    comparison_snapshot.add_argument(
+        "--source-workspace",
+        required=True,
+    )
+    comparison_snapshot.add_argument(
+        "--workspace",
+        dest="workspace",
+        required=True,
+        help="dedicated destination comparison workspace",
+    )
+    comparison_snapshot.add_argument("--snapshot", required=True)
+    comparison_snapshot.add_argument("--display-name", required=True)
+    comparison_snapshot.set_defaults(func=cmd_comparisons)
     comparison_worker = comparison_commands.add_parser("worker")
     comparison_worker.add_argument("--workspace", required=True)
     comparison_worker.add_argument("--suite-id", required=True)

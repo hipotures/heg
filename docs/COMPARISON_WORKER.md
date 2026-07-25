@@ -15,6 +15,24 @@ sglab comparisons install-fixture \
   --fixture ./director-fixture.json
 ```
 
+For a preserved scientific campaign, create an isolated live-comparison
+workspace and executable A4 fixture without copying the source database or
+private runtime homes:
+
+```bash
+sglab comparisons import-campaign-snapshot \
+  --source-workspace ./workspace/preserved-campaign \
+  --workspace ./workspace/model-comparisons-live \
+  --snapshot A4 \
+  --display-name "M6 executable preserved A4"
+```
+
+The importer takes an SQLite Online Backup for consistent read-only
+validation, copies only the hash-verified snapshot artifact, creates a fresh
+schema-v11 database, and derives the prompt, schema, registries, action space,
+base instructions, and campaign budget deterministically. It rejects
+synthetic/demo sources and private or absolute runtime references.
+
 The bundle contains DirectorStateV2, prompt, output schema, applicable action
 space, evidence/advisory/executable registries, custom base instructions,
 empty developer instructions, and campaign budget. Import calculates and

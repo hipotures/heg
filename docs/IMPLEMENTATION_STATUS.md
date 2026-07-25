@@ -2,6 +2,23 @@
 
 Last implementation audit: **2026-07-25**.
 
+## M7 preserved A4 comparison import complete
+
+The `sglab comparisons import-campaign-snapshot` administrative command now
+creates a dedicated `model_comparison_live` workspace from one hash-verified
+preserved campaign snapshot. It validates a read-only SQLite Online Backup,
+copies only the scientific snapshot artifact, derives the complete executable
+Director fixture, creates a fresh schema-v11 database, and records a
+non-synthetic marker without credential hashes or private runtime paths.
+Synthetic/demo sources, absolute paths, auth references, Codex homes,
+sessions, rollouts, and wire references are rejected.
+
+The redesigned comparison form and detail view retain every bounded-worker
+resource limit, persistent-thread dependency field, fixed Start/Stop controls,
+and bounded live progress polling while keeping semantic cards and responsive
+layouts. Focused importer, worker, persistence, and UI tests cover the merged
+behavior.
+
 ## M7 browser UI redesign complete
 
 The research dashboard and controlled-comparison pages now use semantic

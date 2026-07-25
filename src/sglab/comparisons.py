@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import closing
 from dataclasses import dataclass
 from hashlib import sha256
 from importlib.resources import files
@@ -9,7 +10,9 @@ from typing import Any, Iterable
 import json
 import math
 import re
+import shutil
 import sqlite3
+import tempfile
 import uuid
 
 from .db import connect
@@ -1807,6 +1810,232 @@ def import_comparison_fixture_bundle(
             },
         )
     return fixture_id
+
+
+def import_campaign_snapshot_fixture(
+    *,
+    source_workspace: Path,
+    destination_workspace: Path,
+    snapshot_reference: str,
+    display_name: str,
+) -> dict[str, Any]:
+    """Create an isolated live-comparison workspace from one scientific snapshot."""
+
+    from .research.context import prepare_director_state_v2
+    from .research.context_screen import build_context_screen_prompt
+    from .research.director import base_instructions
+    from .research.protocol import director_decision_schema
+    from .state import atomic_write_json
+
+    source = source_workspace.resolve()
+    destination = destination_workspace.resolve()
+    if source == destination:
+        raise ValueError("source and destination workspaces must differ")
+    if not source.is_dir():
+        raise ValueError("source workspace does not exist")
+    if destination.exists():
+        raise ValueError("destination workspace already exists")
+    _reject_synthetic_source_workspace(source)
+
+    source_database = source / "results.sqlite3"
+    report_path = source / "ai-experiment-report.json"
+    pointer_path = source / "active-research-campaign.json"
+    if not source_database.is_file() or not report_path.is_file() or not pointer_path.is_file():
+        raise ValueError("source workspace lacks preserved campaign evidence")
+
+    report_bytes = report_path.read_bytes()
+    report = json.loads(report_bytes)
+    pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
+    if not isinstance(report, dict) or not isinstance(pointer, dict):
+        raise ValueError("source campaign metadata is malformed")
+    campaign_dir = Path(str(pointer.get("campaign_dir", ""))).resolve()
+    campaign_dir.relative_to(source)
+
+    snapshot_id = str(snapshot_reference)
+    if snapshot_id == "A4":
+        snapshot_id = str(report.get("second_snapshot_id", ""))
+    if re.fullmatch(r"snapshot-[A-Za-z0-9]+", snapshot_id) is None:
+        raise ValueError("snapshot reference does not identify preserved A4")
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary_root = Path(
+        tempfile.mkdtemp(
+            prefix=".model-comparison-import-",
+            dir=destination.parent,
+        )
+    )
+    try:
+        backup_database = temporary_root / "source-online-backup.sqlite3"
+        source_uri = f"file:{source_database.as_posix()}?mode=ro"
+        with (
+            closing(sqlite3.connect(source_uri, uri=True)) as source_connection,
+            closing(sqlite3.connect(backup_database)) as backup_connection,
+        ):
+            source_connection.backup(backup_connection)
+        with closing(sqlite3.connect(backup_database)) as backup_connection:
+            backup_connection.row_factory = sqlite3.Row
+            source_schema = int(
+                backup_connection.execute("PRAGMA user_version").fetchone()[0]
+            )
+            source_integrity = str(
+                backup_connection.execute("PRAGMA integrity_check").fetchone()[0]
+            )
+            source_foreign_keys = list(
+                backup_connection.execute("PRAGMA foreign_key_check")
+            )
+            snapshot_row = backup_connection.execute(
+                """
+                SELECT snapshot_id, campaign_id, artifact_ref, artifact_sha256,
+                       payload_bytes, created_at
+                FROM director_snapshots WHERE snapshot_id=?
+                """,
+                (snapshot_id,),
+            ).fetchone()
+            backup_connection.execute("PRAGMA journal_mode=DELETE")
+        if source_integrity != "ok" or source_foreign_keys:
+            raise RuntimeError("source Online Backup failed SQLite validation")
+        if snapshot_row is None:
+            raise ValueError("preserved snapshot is absent from source database")
+        if str(snapshot_row["campaign_id"]) != str(report.get("campaign_id")):
+            raise ValueError("snapshot campaign does not match source report")
+        backup_database.unlink()
+
+        source_artifact = (campaign_dir / str(snapshot_row["artifact_ref"])).resolve()
+        source_artifact.relative_to(campaign_dir)
+        raw_snapshot = source_artifact.read_bytes()
+        source_artifact_sha256 = sha256(raw_snapshot).hexdigest()
+        if source_artifact_sha256 != str(snapshot_row["artifact_sha256"]):
+            raise ValueError("source snapshot artifact hash mismatch")
+        if len(raw_snapshot) != int(snapshot_row["payload_bytes"]):
+            raise ValueError("source snapshot artifact size mismatch")
+        snapshot = json.loads(raw_snapshot)
+        if not isinstance(snapshot, dict) or snapshot.get("snapshot_id") != snapshot_id:
+            raise ValueError("source snapshot artifact has an unexpected shape")
+
+        prepared = prepare_director_state_v2(snapshot)
+        state = prepared.state
+        materials = {
+            "prompt": build_context_screen_prompt(snapshot),
+            "output_schema": director_decision_schema(
+                state["allowed_action_space"]
+            ),
+            "applicable_action_space": state["allowed_action_space"],
+            "evidence_registry": prepared.evidence_registry,
+            "advisory_registry": prepared.advisory_target_registry,
+            "executable_registry": prepared.executable_target_registry,
+            "base_instructions": base_instructions(),
+            "developer_instructions": "",
+            "campaign_budget": state["campaign_budget"],
+        }
+        _reject_private_fixture_material({"director_state": state, "materials": materials})
+
+        fixture_id = "m6-executable-preserved-a4"
+        target = state["target"]
+        bundle = {
+            "schema_version": "1.0",
+            "fixture_id": fixture_id,
+            "display_name": _safe_text(display_name, "display_name", 120),
+            "fixture_type": "campaign_snapshot",
+            "director_state": state,
+            "status_timestamp": str(target["status_timestamp"]),
+            "target_statement_id": str(target["statement_id"]),
+            "materials": materials,
+        }
+        artifact_directory = temporary_root / "scientific-artifacts"
+        artifact_directory.mkdir(parents=True)
+        preserved_snapshot = artifact_directory / f"{snapshot_id}.json"
+        shutil.copyfile(source_artifact, preserved_snapshot)
+        bundle_path = artifact_directory / "m6-executable-preserved-a4.json"
+        atomic_write_json(bundle_path, bundle)
+
+        destination_database = temporary_root / "results.sqlite3"
+        imported_fixture_id = import_comparison_fixture_bundle(
+            destination_database, bundle_path
+        )
+        with ComparisonStore(destination_database) as store:
+            destination_schema = int(
+                store.connection.execute("PRAGMA user_version").fetchone()[0]
+            )
+            destination_integrity = str(
+                store.connection.execute("PRAGMA integrity_check").fetchone()[0]
+            )
+            destination_foreign_keys = list(
+                store.connection.execute("PRAGMA foreign_key_check")
+            )
+            fixture = store.connection.execute(
+                "SELECT fixture_sha256 FROM comparison_fixtures WHERE fixture_id=?",
+                (imported_fixture_id,),
+            ).fetchone()
+        if destination_integrity != "ok" or destination_foreign_keys:
+            raise RuntimeError("destination workspace failed SQLite validation")
+        assert fixture is not None
+
+        marker = {
+            "workspace_kind": "model_comparison_live",
+            "synthetic_data": False,
+            "source_workspace": source.name,
+            "source_campaign_id": str(report["campaign_id"]),
+            "source_snapshot_id": snapshot_id,
+            "source_snapshot_artifact_sha256": source_artifact_sha256,
+            "source_report_sha256": sha256(report_bytes).hexdigest(),
+            "fixture_id": fixture_id,
+            "fixture_sha256": str(fixture["fixture_sha256"]),
+            "schema_version": destination_schema,
+        }
+        atomic_write_json(temporary_root / "workspace.json", marker)
+        temporary_root.replace(destination)
+        return {
+            "ok": True,
+            **marker,
+            "source_schema_version": source_schema,
+            "source_integrity_check": source_integrity,
+            "source_foreign_key_check_rows": len(source_foreign_keys),
+            "destination_integrity_check": destination_integrity,
+            "destination_foreign_key_check_rows": len(destination_foreign_keys),
+            "auth_access": False,
+            "model_inferences": 0,
+            "search_batches": 0,
+            "action_dispatches": 0,
+        }
+    except BaseException:
+        shutil.rmtree(temporary_root, ignore_errors=True)
+        raise
+
+
+def _reject_synthetic_source_workspace(source: Path) -> None:
+    for name in ("workspace.json", "fixture-summary.json"):
+        marker_path = source / name
+        if not marker_path.is_file():
+            continue
+        marker = json.loads(marker_path.read_text(encoding="utf-8"))
+        if not isinstance(marker, dict):
+            raise ValueError("source workspace marker is malformed")
+        if marker.get("synthetic_data") is True or marker.get("workspace_kind") == "ui_demo":
+            raise ValueError("synthetic or demo workspaces cannot seed live comparisons")
+
+
+def _reject_private_fixture_material(value: Any) -> None:
+    prohibited = (
+        "auth.json",
+        "codex-home",
+        "codex-sqlite-home",
+        "/wire/",
+        "/sessions/",
+        "rollout-",
+    )
+    if isinstance(value, dict):
+        for child in value.values():
+            _reject_private_fixture_material(child)
+        return
+    if isinstance(value, list):
+        for child in value:
+            _reject_private_fixture_material(child)
+        return
+    if not isinstance(value, str):
+        return
+    lowered = value.lower()
+    if value.startswith("/") or any(token in lowered for token in prohibited):
+        raise ValueError("fixture material contains a private runtime reference")
 
 
 def run_replay_dry_run(database: Path) -> dict[str, Any]:
