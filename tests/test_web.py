@@ -6,6 +6,7 @@ from pathlib import Path
 from threading import Thread
 from unittest.mock import patch
 
+from sglab.research.store import ResearchStore
 from sglab.state import atomic_write_json
 from sglab.web import create_server
 
@@ -173,6 +174,112 @@ class WebAssetsTests(unittest.TestCase):
             response = connection.getresponse()
             self.assertEqual(response.status, 400)
             self.assertIn(b"does not accept a duration", response.read())
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_campaign_turn_communication_is_lazy_and_complete(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            campaign_dir = workspace / "research-campaigns" / "campaign-1"
+            request_ref = "director/requests/turn-record-1.json"
+            response_ref = "director/responses/turn-record-1.json"
+            atomic_write_json(
+                campaign_dir / request_ref,
+                {"prompt": "full scientific request", "output_schema": {"type": "object"}},
+            )
+            atomic_write_json(
+                campaign_dir / response_ref,
+                {"campaign_assessment": "full Director response", "actions": []},
+            )
+            with ResearchStore(workspace / "results.sqlite3") as store:
+                store.create_campaign(
+                    campaign_id="campaign-1",
+                    target="erdos_gyarfas",
+                    target_definition_sha256="a" * 64,
+                    stop_mode="until_success",
+                    deadline_at=None,
+                )
+                store.record_session(
+                    record_id="session-record-1",
+                    campaign_id="campaign-1",
+                    thread_id="thread-1",
+                    session_id="session-1",
+                    thread_path=None,
+                    parent_thread_id=None,
+                    model="gpt-5.6-luna",
+                    effort="high",
+                    codex_version="test",
+                    executable_sha256="b" * 64,
+                    protocol_schema_sha256="c" * 64,
+                    context_mode="stateless_turns",
+                )
+                store.record_snapshot(
+                    snapshot_id="snapshot-1",
+                    campaign_id="campaign-1",
+                    campaign_state_version=0,
+                    high_water={},
+                    artifact_ref="snapshots/snapshot-1.json",
+                    artifact_sha256="f" * 64,
+                    payload_bytes=2,
+                )
+                store.record_trigger(
+                    trigger_id="trigger-1",
+                    campaign_id="campaign-1",
+                    campaign_state_version=0,
+                    reasons=["test"],
+                    first_event_at="2026-07-25T00:00:00Z",
+                    snapshot_id="snapshot-1",
+                )
+                store.begin_turn(
+                    turn_record_id="turn-record-1",
+                    session_record_id="session-record-1",
+                    campaign_id="campaign-1",
+                    thread_id="thread-1",
+                    snapshot_id="snapshot-1",
+                    trigger_id="trigger-1",
+                    request_artifact_ref=request_ref,
+                    request_sha256="d" * 64,
+                    wire_artifact_ref="director/wire/turn-record-1.jsonl",
+                )
+                store.complete_turn(
+                    "turn-record-1",
+                    turn_id="turn-1",
+                    status="completed_valid",
+                    response_artifact_ref=response_ref,
+                    response_sha256="e" * 64,
+                    wire_sha256="f" * 64,
+                    usage={
+                        "input_tokens": 10,
+                        "cached_input_tokens": 0,
+                        "cache_write_input_tokens": 0,
+                        "output_tokens": 5,
+                        "reasoning_output_tokens": 2,
+                        "total_tokens": 15,
+                        "raw": {"totalTokens": 15},
+                    },
+                    wall_seconds=1.0,
+                )
+            server = create_server(workspace, "127.0.0.1", 0)
+            thread = Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            connection = HTTPConnection(*server.server_address, timeout=2)
+            connection.request(
+                "GET",
+                "/api/research-campaign/turn/turn-record-1/communication",
+            )
+            response = connection.getresponse()
+            self.assertEqual(response.status, 200)
+            payload = json.loads(response.read())
+            self.assertEqual(
+                payload["request"]["prompt"],
+                "full scientific request",
+            )
+            self.assertEqual(
+                payload["response"]["campaign_assessment"],
+                "full Director response",
+            )
+            self.assertNotIn("artifact_ref", payload)
             server.shutdown()
             server.server_close()
             thread.join(timeout=2)

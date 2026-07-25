@@ -12,6 +12,7 @@ import json
 import mimetypes
 import os
 import re
+import sqlite3
 import sys
 import time
 
@@ -50,6 +51,32 @@ MAX_JSON_RESPONSE = 2 * 1024 * 1024
 COMPARISON_PATH = re.compile(
     r"^/comparisons/([A-Za-z0-9][A-Za-z0-9._:-]{0,127})(/blind)?$"
 )
+CAMPAIGN_TURN_COMMUNICATION_PATH = re.compile(
+    r"^/api/research-campaign/turn/"
+    r"([A-Za-z0-9][A-Za-z0-9._:-]{0,127})/communication$"
+)
+
+
+def _read_campaign_turn_artifact(
+    campaign_dir: Path,
+    artifact_ref: str | None,
+) -> Any:
+    if not artifact_ref:
+        return None
+    relative = Path(artifact_ref)
+    if relative.is_absolute() or ".." in relative.parts:
+        raise ValueError("invalid campaign turn artifact reference")
+    root = campaign_dir.resolve()
+    candidate = root / relative
+    if candidate.is_symlink():
+        raise ValueError("campaign turn artifact is unavailable")
+    path = candidate.resolve()
+    if root not in path.parents or not path.is_file():
+        raise ValueError("campaign turn artifact is unavailable")
+    body = path.read_bytes()
+    if len(body) > MAX_JSON_RESPONSE:
+        raise ValueError("campaign turn artifact exceeds configured limit")
+    return json.loads(body)
 
 
 class DashboardServer(ThreadingHTTPServer):
@@ -649,6 +676,59 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     self.server.workspace / "state.json",
                     default={"status": "IDLE", "updated_at": utc_now()},
                 ),
+            )
+            return
+        communication_match = CAMPAIGN_TURN_COMMUNICATION_PATH.fullmatch(
+            parsed.path
+        )
+        if communication_match:
+            database = self.server.workspace / "results.sqlite3"
+            connection = sqlite3.connect(
+                f"{database.resolve().as_uri()}?mode=ro",
+                uri=True,
+                timeout=2,
+            )
+            connection.row_factory = sqlite3.Row
+            try:
+                row = connection.execute(
+                    """
+                    SELECT campaign_id, request_artifact_ref, request_sha256,
+                           response_artifact_ref, response_sha256
+                    FROM app_server_turns WHERE turn_record_id=?
+                    """,
+                    (communication_match.group(1),),
+                ).fetchone()
+            finally:
+                connection.close()
+            if row is None:
+                self._json(404, {"error": "campaign turn not found"})
+                return
+            campaign_dir = (
+                self.server.workspace
+                / "research-campaigns"
+                / str(row["campaign_id"])
+            )
+            try:
+                request = _read_campaign_turn_artifact(
+                    campaign_dir,
+                    row["request_artifact_ref"],
+                )
+                response = _read_campaign_turn_artifact(
+                    campaign_dir,
+                    row["response_artifact_ref"],
+                )
+            except (OSError, ValueError, json.JSONDecodeError) as error:
+                self._json(409, {"error": str(error)})
+                return
+            self._json(
+                200,
+                {
+                    "turn_record_id": communication_match.group(1),
+                    "request": request,
+                    "request_sha256": row["request_sha256"],
+                    "response": response,
+                    "response_sha256": row["response_sha256"],
+                },
             )
             return
         if parsed.path == "/api/research-campaign":
