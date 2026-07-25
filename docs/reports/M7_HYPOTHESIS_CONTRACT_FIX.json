@@ -1,0 +1,106 @@
+{
+  "report": "M7_HYPOTHESIS_CONTRACT_FIX",
+  "date": "2026-07-25",
+  "baseline_commit": "6f7a04c8fc65576cee3483a5e7ea1c7e93948bba",
+  "workspace": "workspace/model-comparisons-live",
+  "preserved_response": {
+    "suite_id": "comparison-24c99e0539684b9ca488cdaba4f2486b",
+    "arm": "Luna high",
+    "path": "$.hypothesis_updates[1].hypothesis_id",
+    "operation": "revise",
+    "hypothesis_id": "H0",
+    "submitted_existing_hypothesis_ids": [],
+    "offline_semantic_valid": false,
+    "offline_structural_valid_under_new_schema": false,
+    "validation_issue": "$.hypothesis_updates[1].hypothesis_id: must reference an existing hypothesis",
+    "classification": "model response remains invalid; not a valid create/client-contract mismatch",
+    "sha256": "743f8ecdb463e6221bd135e1a54b9a11a148e06d9c1c4958281d5e97e8c455b2",
+    "historical_record_modified": false
+  },
+  "hypothesis_contract": {
+    "create": "new submitted-registry ID and unique within the response",
+    "existing_operations": [
+      "confirm",
+      "weaken",
+      "reject",
+      "retain",
+      "revise"
+    ],
+    "existing_operation_rule": "ID must occur in the submitted hypothesis registry",
+    "schema_branch_keyword": "anyOf",
+    "duplicate_create_enforcement": "semantic"
+  },
+  "comparison_policy": {
+    "plan_schema_version": "2.2",
+    "policy": "independent_invalid_continue_v1",
+    "independent_schema_or_semantic_invalid": "persist and continue",
+    "infrastructure_security_protocol_resource_model_contract": "stop later arms",
+    "dependent_requires_prior_success": "block unless predecessor completed",
+    "returned_actions": "never execute",
+    "fingerprinted": true
+  },
+  "persistence": {
+    "sqlite_schema_version": 14,
+    "migration_source_version": 13,
+    "migration_method": "SQLite Online Backup",
+    "integrity_check": "ok",
+    "foreign_key_check_rows": 0,
+    "active_worker_leases": 0,
+    "historical_record_canonical_sha256_before": "851b087f56e993acdac7337210383a76c2b961486c5a439569d3ce1be7318b8b",
+    "historical_record_canonical_sha256_after": "851b087f56e993acdac7337210383a76c2b961486c5a439569d3ce1be7318b8b"
+  },
+  "historical_suites": [
+    {
+      "suite_id": "comparison-4407a28f8e7c47b89a7226045b61b1b4",
+      "status": "failed",
+      "consumed_inference_starts": 1,
+      "arm_failure_policy": null,
+      "stored_fingerprint": "89e09e8f82428e86f2a75ae24ff51f7187536c22c2ad023152dcb80b60512886",
+      "recomputed_fingerprint": "89e09e8f82428e86f2a75ae24ff51f7187536c22c2ad023152dcb80b60512886"
+    },
+    {
+      "suite_id": "comparison-aaabfae5a010445e9d966ea50a0958a8",
+      "status": "failed",
+      "consumed_inference_starts": 0,
+      "arm_failure_policy": null,
+      "stored_fingerprint": "a44e96f67628cb9afcacbc6c76b8f0e6e65696ba075a62c587d5f02b9b41c6d7",
+      "recomputed_fingerprint": "a44e96f67628cb9afcacbc6c76b8f0e6e65696ba075a62c587d5f02b9b41c6d7"
+    },
+    {
+      "suite_id": "comparison-24c99e0539684b9ca488cdaba4f2486b",
+      "status": "failed",
+      "consumed_inference_starts": 1,
+      "arm_failure_policy": null,
+      "stored_fingerprint": "062bc657ccd45f56808b741c042a9685f0f8b7e7135b5cc5f7af2ce4edef1790",
+      "recomputed_fingerprint": "062bc657ccd45f56808b741c042a9685f0f8b7e7135b5cc5f7af2ce4edef1790"
+    }
+  ],
+  "historical_evidence_hashes": {
+    "worker_log": "8165e111d28b08821c2446a6c91fc1f9e95467e6e6284e27e200f79093eb2ced",
+    "runtime_report_markdown": "c89da80568a6d679147c84dbdedaf010013f246f4d4b766d0f7c8dd79d4bdb3d",
+    "runtime_report_json": "ab88b3de23025d34b4e82f617d5da88749eb930438c23fcb54a30676d34a3b10"
+  },
+  "verification": {
+    "focused_tests_passed": 84,
+    "full_safe_tests_passed": 236,
+    "make_doctor": "passed",
+    "make_test": "passed",
+    "make_check": "passed",
+    "make_benchmark_smoke": "passed",
+    "make_dashboard_smoke": "passed",
+    "strict_installed_protocol_audit": "passed without turn/start or inference",
+    "model_inference_starts": 0,
+    "real_auth_accesses": 0,
+    "graph_search_batches": 0,
+    "action_dispatches": 0
+  },
+  "preserved_response_operation": "revise",
+  "preserved_response_offline_revalidation": "invalid; unknown existing-hypothesis ID H0; rejected structurally by the new empty-registry schema",
+  "hypothesis_create_contract_fixed": true,
+  "existing_hypothesis_operations_enforced": true,
+  "independent_invalid_arm_continues": true,
+  "infrastructure_fail_closed_preserved": true,
+  "historical_suites_unchanged": true,
+  "zero_model_inferences": true,
+  "ready_for_first_real_graph_campaign": true
+}

@@ -20,7 +20,11 @@ from .context import (
     prepare_director_state_v2,
 )
 from .director import ActiveDirector, base_instructions
-from .protocol import canonical_json, director_decision_schema
+from .protocol import (
+    canonical_json,
+    director_decision_schema,
+    hypothesis_update_contract,
+)
 from .store import ResearchStore
 from .validation import DecisionContext, validate_decision
 
@@ -37,8 +41,13 @@ SAFE_ITEM_TYPES = {"userMessage", "reasoning", "agentMessage"}
 
 
 def build_context_screen_prompt(snapshot: dict[str, Any]) -> str:
-    state = prepare_director_state_v2(snapshot).state
+    prepared = prepare_director_state_v2(snapshot)
+    state = prepared.state
     applicable = state["allowed_action_space"]
+    hypothesis_ids = evidence_registry_ids(
+        prepared.evidence_registry,
+        kinds=frozenset({"hypothesis"}),
+    )
     payload = {
         "objective": (
             "Return one structured scientific recommendation grounded only in "
@@ -75,6 +84,9 @@ def build_context_screen_prompt(snapshot: dict[str, Any]) -> str:
                 applicable["historical_lane_ids"]
             ),
         },
+        "hypothesis_update_contract": hypothesis_update_contract(
+            hypothesis_ids
+        ),
         "director_state_v2": state,
         "required_response": (
             "Return only the existing Director decision schema. The action is "
@@ -101,7 +113,11 @@ def prepare_context_screen_phase_a(
         snapshot = states[state_label]
         prepared = prepare_director_state_v2(snapshot)
         schema = director_decision_schema(
-            prepared.state["allowed_action_space"]
+            prepared.state["allowed_action_space"],
+            existing_hypothesis_ids=evidence_registry_ids(
+                prepared.evidence_registry,
+                kinds=frozenset({"hypothesis"}),
+            ),
         )
         schema_bytes = canonical_json(schema, max_bytes=1024 * 1024)
         prompt = build_context_screen_prompt(snapshot)
@@ -998,7 +1014,11 @@ def _measurement_turn(
     prompt = build_context_screen_prompt(snapshot)
     prompt_bytes = prompt.encode("ascii")
     output_schema = director_decision_schema(
-        prepared.state["allowed_action_space"]
+        prepared.state["allowed_action_space"],
+        existing_hypothesis_ids=evidence_registry_ids(
+            prepared.evidence_registry,
+            kinds=frozenset({"hypothesis"}),
+        ),
     )
     schema_bytes = canonical_json(output_schema, max_bytes=1024 * 1024)
     action = (
@@ -1169,7 +1189,11 @@ def _incomplete_measurement_turn(
         prepared.state, max_bytes=DIRECTOR_STATE_MAX_BYTES
     )
     output_schema = director_decision_schema(
-        prepared.state["allowed_action_space"]
+        prepared.state["allowed_action_space"],
+        existing_hypothesis_ids=evidence_registry_ids(
+            prepared.evidence_registry,
+            kinds=frozenset({"hypothesis"}),
+        ),
     )
     schema_bytes = canonical_json(output_schema, max_bytes=1024 * 1024)
     request_path = campaign_dir / str(row["request_artifact_ref"])

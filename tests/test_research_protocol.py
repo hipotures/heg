@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import copy
 import hashlib
 import json
@@ -14,7 +15,10 @@ from sglab.research.app_server_client import (
     AppServerUsage,
 )
 from sglab.research.director import ActiveDirector
-from sglab.research.protocol import director_decision_schema
+from sglab.research.protocol import (
+    director_decision_schema,
+    hypothesis_updates_match_schema_contract,
+)
 from sglab.research.providers import ReplayDecisionProvider
 from sglab.research.store import ResearchStore
 from sglab.research.validation import DecisionContext, validate_decision
@@ -106,6 +110,86 @@ def context() -> DecisionContext:
 
 
 class ResearchProtocolTests(unittest.TestCase):
+    def test_create_with_new_hypothesis_id(self) -> None:
+        decision = valid_decision()
+        result = validate_decision(decision, context())
+        self.assertTrue(result.accepted, result.issues)
+        self.assertTrue(
+            hypothesis_updates_match_schema_contract(
+                decision["hypothesis_updates"],
+                frozenset(),
+            )
+        )
+
+    def test_revise_with_existing_hypothesis_id(self) -> None:
+        decision = valid_decision()
+        update = decision["hypothesis_updates"][0]
+        update["hypothesis_id"] = "hyp-existing"
+        update["operation"] = "revise"
+        for action in decision["actions"]:
+            action["hypothesis_ids"] = ["hyp-existing"]
+        existing = frozenset({"hyp-existing"})
+        result = validate_decision(
+            decision,
+            replace(context(), hypothesis_ids=existing),
+        )
+        self.assertTrue(result.accepted, result.issues)
+        self.assertTrue(
+            hypothesis_updates_match_schema_contract(
+                decision["hypothesis_updates"],
+                existing,
+            )
+        )
+
+    def test_revise_with_unknown_hypothesis_id(self) -> None:
+        decision = valid_decision()
+        update = decision["hypothesis_updates"][0]
+        update["hypothesis_id"] = "H0"
+        update["operation"] = "revise"
+        result = validate_decision(decision, context())
+        self.assertFalse(result.accepted)
+        self.assertTrue(
+            any(
+                issue.path == "$.hypothesis_updates[0].hypothesis_id"
+                and "existing hypothesis" in issue.message
+                for issue in result.issues
+            )
+        )
+        self.assertFalse(
+            hypothesis_updates_match_schema_contract(
+                decision["hypothesis_updates"],
+                frozenset(),
+            )
+        )
+        schema = director_decision_schema(
+            existing_hypothesis_ids=frozenset()
+        )
+        branches = schema["properties"]["hypothesis_updates"]["items"][
+            "anyOf"
+        ]
+        self.assertEqual(
+            [
+                branch["properties"]["operation"]["const"]
+                for branch in branches
+            ],
+            ["create"],
+        )
+
+    def test_duplicate_create_is_invalid(self) -> None:
+        decision = valid_decision()
+        decision["hypothesis_updates"].append(
+            copy.deepcopy(decision["hypothesis_updates"][0])
+        )
+        result = validate_decision(decision, context())
+        self.assertFalse(result.accepted)
+        self.assertTrue(
+            any(
+                issue.path == "$.hypothesis_updates[1].hypothesis_id"
+                and issue.message == "already exists"
+                for issue in result.issues
+            )
+        )
+
     def test_valid_batch_and_schema_are_bounded_json(self) -> None:
         result = validate_decision(valid_decision(), context())
         self.assertTrue(result.accepted, result.issues)

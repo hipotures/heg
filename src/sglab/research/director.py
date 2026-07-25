@@ -30,6 +30,7 @@ from .protocol import (
     MAX_SNAPSHOT_BYTES,
     canonical_json,
     director_decision_schema,
+    hypothesis_update_contract,
 )
 from .store import ResearchStore, new_id
 from .validation import DecisionContext, validate_decision
@@ -77,7 +78,12 @@ def build_director_prompt(snapshot: dict[str, Any]) -> str:
         and target.get("target_id") == "m6_hidden_witness_control_v1"
         else None
     )
-    director_state = prepare_director_state_v2(snapshot).state
+    prepared = prepare_director_state_v2(snapshot)
+    director_state = prepared.state
+    hypothesis_ids = evidence_registry_ids(
+        prepared.evidence_registry,
+        kinds=frozenset({"hypothesis"}),
+    )
     payload = {
         "objective": (
             "Actively manage the running concurrent search portfolio. "
@@ -100,6 +106,9 @@ def build_director_prompt(snapshot: dict[str, Any]) -> str:
                 ]
             ),
         },
+        "hypothesis_update_contract": hypothesis_update_contract(
+            hypothesis_ids
+        ),
         "director_state_v2": director_state,
         "required_response": (
             "Assess, update evidence-backed hypotheses, issue concrete typed "
@@ -406,7 +415,8 @@ class ActiveDirector:
             ),
         )
         output_schema = director_decision_schema(
-            prepared_state.state["allowed_action_space"]
+            prepared_state.state["allowed_action_space"],
+            existing_hypothesis_ids=validation_context.hypothesis_ids,
         )
         context_report = complete_context_size_report(
             prepared_state,

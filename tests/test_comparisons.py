@@ -7,6 +7,7 @@ from pathlib import Path
 from threading import Thread
 
 from sglab.comparisons import (
+    INDEPENDENT_INVALID_CONTINUE_POLICY,
     ComparisonStore,
     ModelCatalog,
     calculate_cost,
@@ -87,12 +88,12 @@ def suite_payload(**changes):
 
 
 class ComparisonDatabaseTests(unittest.TestCase):
-    def test_schema_v13_tables_foreign_keys_and_integrity(self) -> None:
+    def test_schema_v14_tables_foreign_keys_and_integrity(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             database = Path(directory) / "results.sqlite3"
             connection = connect(database)
-            self.assertEqual(SCHEMA_VERSION, 13)
-            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 13)
+            self.assertEqual(SCHEMA_VERSION, 14)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 14)
             tables = {
                 row[0]
                 for row in connection.execute(
@@ -324,6 +325,39 @@ class ComparisonPlanningTests(unittest.TestCase):
             self.store._suite_row(suite_id)["authorization_status"],
             "invalidated",
         )
+
+    def test_independent_invalid_arm_policy_is_persisted_and_fingerprinted(
+        self,
+    ) -> None:
+        suite_id = self.store.create_suite(suite_payload())
+        plan = self.store.prepare(suite_id)
+        self.assertEqual(plan["schema_version"], "2.2")
+        self.assertEqual(
+            plan["arm_failure_policy"],
+            INDEPENDENT_INVALID_CONTINUE_POLICY,
+        )
+        self.assertEqual(
+            plan["arm_failure_contract"][
+                "schema_or_semantic_invalid_independent"
+            ],
+            "continue",
+        )
+        self.assertEqual(
+            self.store._suite_row(suite_id)["arm_failure_policy"],
+            INDEPENDENT_INVALID_CONTINUE_POLICY,
+        )
+        self.store.authorize(suite_id, plan["plan_fingerprint"])
+        with self.store.connection:
+            self.store.connection.execute(
+                """
+                UPDATE comparison_suites
+                SET arm_failure_policy=NULL
+                WHERE suite_id=?
+                """,
+                (suite_id,),
+            )
+        with self.assertRaisesRegex(ValueError, "changed"):
+            self.store.start(suite_id, auth_available=True)
 
     def test_effective_model_effort_contract_aborts_on_mismatch(self) -> None:
         suite_id = self.store.create_suite(

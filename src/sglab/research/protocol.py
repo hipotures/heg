@@ -18,6 +18,26 @@ from .catalog import (
 
 MAX_SNAPSHOT_BYTES = 256 * 1024
 MAX_DECISION_BYTES = 128 * 1024
+HYPOTHESIS_CREATE_OPERATION = "create"
+HYPOTHESIS_EXISTING_OPERATIONS = (
+    "confirm",
+    "weaken",
+    "reject",
+    "retain",
+    "revise",
+)
+HYPOTHESIS_OPERATIONS = (
+    HYPOTHESIS_CREATE_OPERATION,
+    *HYPOTHESIS_EXISTING_OPERATIONS,
+)
+HYPOTHESIS_UPDATE_FIELDS = (
+    "hypothesis_id",
+    "operation",
+    "statement",
+    "confidence",
+    "evidence_for",
+    "evidence_against",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +67,140 @@ def canonical_json(value: Any, *, max_bytes: int) -> bytes:
 
 def payload_sha256(value: Any, *, max_bytes: int) -> str:
     return hashlib.sha256(canonical_json(value, max_bytes=max_bytes)).hexdigest()
+
+
+def hypothesis_update_contract(
+    existing_hypothesis_ids: Any,
+) -> dict[str, Any]:
+    existing = sorted(
+        {
+            value
+            for value in existing_hypothesis_ids
+            if isinstance(value, str) and value
+        }
+    )
+    return {
+        "existing_submitted_hypothesis_ids": existing,
+        "create": {
+            "operation": HYPOTHESIS_CREATE_OPERATION,
+            "hypothesis_id_rule": (
+                "must be new and unique within this response"
+            ),
+        },
+        "existing_operations": list(HYPOTHESIS_EXISTING_OPERATIONS),
+        "existing_hypothesis_id_rule": (
+            "must reference an existing submitted hypothesis ID"
+        ),
+        "existing_operations_available": bool(existing),
+    }
+
+
+def hypothesis_updates_match_schema_contract(
+    value: Any,
+    existing_hypothesis_ids: Any,
+) -> bool:
+    if not isinstance(value, list) or len(value) > 32:
+        return False
+    existing = {
+        item
+        for item in existing_hypothesis_ids
+        if isinstance(item, str) and item
+    }
+    for item in value:
+        if not isinstance(item, dict):
+            return False
+        operation = item.get("operation")
+        identifier = item.get("hypothesis_id")
+        if operation == HYPOTHESIS_CREATE_OPERATION:
+            if not isinstance(identifier, str):
+                return False
+            continue
+        if (
+            operation not in HYPOTHESIS_EXISTING_OPERATIONS
+            or identifier not in existing
+        ):
+            return False
+    return True
+
+
+def _hypothesis_update_schema(
+    existing_hypothesis_ids: Any,
+) -> dict[str, Any]:
+    existing = sorted(
+        {
+            value
+            for value in existing_hypothesis_ids
+            if isinstance(value, str) and value
+        }
+    )
+    common_properties = {
+        "statement": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+        },
+        "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+        },
+        "evidence_for": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {"type": "string"},
+        },
+        "evidence_against": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {"type": "string"},
+        },
+    }
+
+    def branch(
+        operation: dict[str, Any],
+        hypothesis_id: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "additionalProperties": False,
+            "required": list(HYPOTHESIS_UPDATE_FIELDS),
+            "properties": {
+                "hypothesis_id": hypothesis_id,
+                "operation": operation,
+                **common_properties,
+            },
+        }
+
+    branches = [
+        branch(
+            {
+                "type": "string",
+                "const": HYPOTHESIS_CREATE_OPERATION,
+            },
+            {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "description": (
+                    "A new hypothesis ID, unique within this response."
+                ),
+            },
+        )
+    ]
+    if existing:
+        branches.append(
+            branch(
+                {
+                    "type": "string",
+                    "enum": list(HYPOTHESIS_EXISTING_OPERATIONS),
+                },
+                {
+                    "type": "string",
+                    "enum": existing,
+                },
+            )
+        )
+    return {"anyOf": branches}
 
 
 def _common_action_properties() -> dict[str, Any]:
@@ -113,6 +267,8 @@ def _common_action_properties() -> dict[str, Any]:
 
 def director_decision_schema(
     allowed_action_space: dict[str, Any] | None = None,
+    *,
+    existing_hypothesis_ids: Any = (),
 ) -> dict[str, Any]:
     """Return the structured schema for the submitted applicable actions."""
 
@@ -453,51 +609,9 @@ def director_decision_schema(
             "hypothesis_updates": {
                 "type": "array",
                 "maxItems": 32,
-                "items": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": [
-                        "hypothesis_id",
-                        "operation",
-                        "statement",
-                        "confidence",
-                        "evidence_for",
-                        "evidence_against",
-                    ],
-                    "properties": {
-                        "hypothesis_id": {"type": "string"},
-                        "operation": {
-                            "type": "string",
-                            "enum": [
-                                "create",
-                                "confirm",
-                                "weaken",
-                                "reject",
-                                "revise",
-                            ]
-                        },
-                        "statement": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 4000,
-                        },
-                        "confidence": {
-                            "type": "number",
-                            "minimum": 0,
-                            "maximum": 1,
-                        },
-                        "evidence_for": {
-                            "type": "array",
-                            "maxItems": 32,
-                            "items": {"type": "string"},
-                        },
-                        "evidence_against": {
-                            "type": "array",
-                            "maxItems": 32,
-                            "items": {"type": "string"},
-                        },
-                    },
-                },
+                "items": _hypothesis_update_schema(
+                    existing_hypothesis_ids
+                ),
             },
             "actions": {
                 "type": "array",

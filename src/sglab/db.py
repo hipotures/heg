@@ -5,7 +5,7 @@ from typing import Any, Iterable
 import json
 import sqlite3
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 MAX_METRIC_ROWS = 100_000
 
 BASE_SCHEMA_SQL = """
@@ -922,6 +922,7 @@ def migrate(connection: sqlite3.Connection) -> None:
     _ensure_comparison_schema(connection)
     _ensure_comparison_worker_schema(connection)
     _ensure_comparison_resource_schema(connection)
+    _ensure_comparison_arm_policy_schema(connection)
 
 
 def _ensure_m6_lane_columns(connection: sqlite3.Connection) -> None:
@@ -1269,6 +1270,29 @@ def _ensure_comparison_resource_schema(connection: sqlite3.Connection) -> None:
                 f"ADD COLUMN {name} {definition}"
             )
     connection.execute("PRAGMA user_version=13")
+    connection.commit()
+
+
+def _ensure_comparison_arm_policy_schema(
+    connection: sqlite3.Connection,
+) -> None:
+    exists = connection.execute(
+        """
+        SELECT 1 FROM sqlite_master
+        WHERE type='table' AND name='comparison_suites'
+        """
+    ).fetchone()
+    if exists is None:
+        return
+    present = {
+        str(row[1])
+        for row in connection.execute("PRAGMA table_info(comparison_suites)")
+    }
+    if "arm_failure_policy" not in present:
+        connection.execute(
+            "ALTER TABLE comparison_suites ADD COLUMN arm_failure_policy TEXT"
+        )
+    connection.execute("PRAGMA user_version=14")
     connection.commit()
 
 

@@ -21,6 +21,9 @@ from .catalog import (
 )
 from .protocol import (
     DecisionValidation,
+    HYPOTHESIS_CREATE_OPERATION,
+    HYPOTHESIS_EXISTING_OPERATIONS,
+    HYPOTHESIS_OPERATIONS,
     MAX_DECISION_BYTES,
     ValidationIssue,
     canonical_json,
@@ -379,13 +382,16 @@ def _validate_hypotheses(
             issues, item["hypothesis_id"], f"{path}.hypothesis_id"
         )
         operation = item["operation"]
-        if operation not in {"create", "confirm", "weaken", "reject", "revise"}:
+        if operation not in HYPOTHESIS_OPERATIONS:
             issues.add(f"{path}.operation", "is not supported")
-        if operation == "create":
+        if operation == HYPOTHESIS_CREATE_OPERATION:
             if identifier in context.hypothesis_ids or identifier in created:
                 issues.add(f"{path}.hypothesis_id", "already exists")
             created.add(identifier)
-        elif identifier not in context.hypothesis_ids:
+        elif (
+            operation in HYPOTHESIS_EXISTING_OPERATIONS
+            and identifier not in context.hypothesis_ids
+        ):
             issues.add(
                 f"{path}.hypothesis_id",
                 "must reference an existing hypothesis",

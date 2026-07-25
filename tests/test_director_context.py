@@ -18,7 +18,11 @@ from sglab.research.context import (
     director_state_v2_schema,
     prepare_director_state_v2,
 )
-from sglab.research.director import ActiveDirector, base_instructions
+from sglab.research.director import (
+    ActiveDirector,
+    base_instructions,
+    build_director_prompt,
+)
 from sglab.research.protocol import canonical_json, director_decision_schema
 from sglab.research.store import ResearchStore
 from sglab.research.validation import DecisionContext
@@ -152,6 +156,22 @@ def snapshot(actions: list[dict] | None = None) -> dict:
 
 
 class DirectorStateV2Tests(unittest.TestCase):
+    def test_prompt_names_operation_specific_hypothesis_contract(self) -> None:
+        payload = json.loads(build_director_prompt(snapshot([batch_action(1)])))
+        contract = payload["hypothesis_update_contract"]
+        self.assertEqual(
+            contract["existing_submitted_hypothesis_ids"],
+            ["H1"],
+        )
+        self.assertEqual(contract["create"]["operation"], "create")
+        self.assertIn("unique", contract["create"]["hypothesis_id_rule"])
+        self.assertIn("revise", contract["existing_operations"])
+        self.assertIn("retain", contract["existing_operations"])
+        self.assertIn(
+            "existing submitted",
+            contract["existing_hypothesis_id_rule"],
+        )
+
     def test_schema_and_bounded_sections(self) -> None:
         prepared = prepare_director_state_v2(
             snapshot([batch_action(index) for index in range(10, 0, -1)])

@@ -2,6 +2,32 @@
 
 Last implementation audit: **2026-07-25**.
 
+## M7 hypothesis and independent-arm contracts
+
+SQLite schema v14 adds a nullable, fingerprinted arm-failure policy. Historical
+suite rows remain null, retain plan schema 2.1, and recompute to their original
+fingerprints. New measurement-only comparison plans use schema 2.2 and
+`independent_invalid_continue_v1`: a schema-invalid or semantic-invalid
+independent result is retained and the next independent arm runs, while
+infrastructure, security, protocol, resource, and model-contract failures
+still stop later arms. A persistent dependent arm still requires a completed
+predecessor. All returned actions remain unexecuted.
+
+The Director prompt, generated schema, and semantic validator now share an
+operation-specific hypothesis-update contract. `create` requires a new,
+response-unique ID. `confirm`, `weaken`, `reject`, `retain`, and `revise`
+require an ID from the submitted hypothesis registry. The preserved Luna-high
+response used `revise` for unknown `H0`; it therefore remains semantically
+invalid and the new generated schema rejects that shape structurally.
+
+Focused production-worker tests cover both invalid-result classes continuing
+to a second independent arm, infrastructure fail-closed behavior, dependent
+persistent blocking, and zero action execution. The complete 236-test safe
+suite, doctor, compile checks, benchmark/dashboard smoke, schema-v14 Online
+Backup migration, SQLite integrity, and foreign-key checks pass. No model,
+auth, graph-search, or action-dispatch path was used. See
+`docs/reports/M7_HYPOTHESIS_CONTRACT_FIX.md`.
+
 ## M7 comparison symlink policy and worker reaping
 
 Schema v13 separates byte inequalities, single-file and log caps, filesystem

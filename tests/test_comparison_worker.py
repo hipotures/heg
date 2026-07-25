@@ -815,37 +815,88 @@ class ComparisonWorkerTests(unittest.TestCase):
                 len(arm_ids),
             )
 
-    def test_schema_and_semantic_failures_are_fail_closed(self) -> None:
+    def test_independent_invalid_arm_continues_to_second(self) -> None:
         for mode, expected in (
-            ("director-screen-schema-invalid", "schema_invalid"),
-            ("director-screen-semantic-invalid", "semantic_invalid"),
+            ("director-screen-schema-invalid-first", "schema_invalid"),
+            ("director-screen-semantic-invalid-first", "semantic_invalid"),
         ):
             with self.subTest(mode=mode):
                 suite_id, arm_ids = self._authorize()
                 result = self._run(suite_id, mode)
                 self.assertFalse(result.ok)
+                self.assertEqual(result.inference_starts, 2)
                 with ComparisonStore(self.database) as store:
-                    self.assertEqual(
+                    latest = [
                         store.connection.execute(
                             """
                             SELECT lifecycle_state FROM comparison_arm_transitions
                             WHERE arm_id=? ORDER BY sequence_number DESC LIMIT 1
                             """,
-                            (arm_ids[0],),
+                            (arm_id,),
+                        ).fetchone()[0]
+                        for arm_id in arm_ids
+                    ]
+                    self.assertEqual(latest, [expected, "completed"])
+                    self.assertEqual(
+                        store.connection.execute(
+                            "SELECT count(*) FROM director_action_batches"
                         ).fetchone()[0],
-                        expected,
+                        0,
                     )
                     self.assertEqual(
                         store.connection.execute(
-                            """
-                            SELECT lifecycle_state FROM comparison_arm_transitions
-                            WHERE arm_id=? ORDER BY sequence_number DESC LIMIT 1
-                            """,
-                            (arm_ids[1],),
+                            "SELECT count(*) FROM director_actions"
                         ).fetchone()[0],
-                        "blocked",
+                        0,
                     )
-                    self.assertEqual(result.inference_starts, 1)
+
+    def test_infrastructure_failure_still_blocks_second(self) -> None:
+        suite_id, arm_ids = self._authorize()
+        result = self._run(suite_id, "director-screen-process-crash")
+        self.assertFalse(result.ok)
+        self.assertEqual(result.inference_starts, 1)
+        with ComparisonStore(self.database) as store:
+            latest = [
+                store.connection.execute(
+                    """
+                    SELECT lifecycle_state FROM comparison_arm_transitions
+                    WHERE arm_id=? ORDER BY sequence_number DESC LIMIT 1
+                    """,
+                    (arm_id,),
+                ).fetchone()[0]
+                for arm_id in arm_ids
+            ]
+            self.assertEqual(latest, ["failed", "blocked"])
+
+    def test_invalid_persistent_predecessor_blocks_dependent_arm(self) -> None:
+        suite_id, arm_ids = self._authorize(three_arms=True)
+        result = self._run(
+            suite_id,
+            "director-screen-semantic-invalid-second",
+        )
+        self.assertFalse(result.ok)
+        self.assertEqual(result.inference_starts, 2)
+        with ComparisonStore(self.database) as store:
+            latest = [
+                store.connection.execute(
+                    """
+                    SELECT lifecycle_state FROM comparison_arm_transitions
+                    WHERE arm_id=? ORDER BY sequence_number DESC LIMIT 1
+                    """,
+                    (arm_id,),
+                ).fetchone()[0]
+                for arm_id in arm_ids
+            ]
+            self.assertEqual(
+                latest,
+                ["completed", "semantic_invalid", "blocked"],
+            )
+            self.assertEqual(
+                store.connection.execute(
+                    "SELECT count(*) FROM director_action_batches"
+                ).fetchone()[0],
+                0,
+            )
 
     def test_plan_change_and_revocation_fail_before_auth_copy(self) -> None:
         suite_id, _ = self._authorize()
@@ -1276,7 +1327,7 @@ class ComparisonWorkerMigrationTests(unittest.TestCase):
                     canonical_sha256(metadata["materials"]["output_schema"]),
                 )
 
-    def test_v11_online_backup_migrates_to_v13_and_preserves_rows(self) -> None:
+    def test_v11_online_backup_migrates_to_v14_and_preserves_rows(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = root / "source.sqlite3"
@@ -1318,8 +1369,8 @@ class ComparisonWorkerMigrationTests(unittest.TestCase):
             backup.close()
             connection.close()
             migrated = connect(backup_path)
-            self.assertEqual(SCHEMA_VERSION, 13)
-            self.assertEqual(migrated.execute("PRAGMA user_version").fetchone()[0], 13)
+            self.assertEqual(SCHEMA_VERSION, 14)
+            self.assertEqual(migrated.execute("PRAGMA user_version").fetchone()[0], 14)
             self.assertEqual(
                 migrated.execute("PRAGMA integrity_check").fetchone()[0],
                 "ok",
@@ -1330,14 +1381,14 @@ class ComparisonWorkerMigrationTests(unittest.TestCase):
             preserved = migrated.execute(
                 """
                 SELECT read_only, runtime_executed_elsewhere,
-                       resource_accounting_version
+                       resource_accounting_version, arm_failure_policy
                 FROM comparison_suites WHERE suite_id='old-suite'
                 """
             ).fetchone()
-            self.assertEqual(tuple(preserved), (1, 1, 1))
+            self.assertEqual(tuple(preserved), (1, 1, 1, None))
             migrated.close()
 
-    def test_v12_online_backup_migrates_to_v13_without_rewriting_suite(
+    def test_v12_online_backup_migrates_to_v14_without_rewriting_suite(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -1401,7 +1452,7 @@ class ComparisonWorkerMigrationTests(unittest.TestCase):
             migrated = connect(backup_path)
             self.assertEqual(
                 migrated.execute("PRAGMA user_version").fetchone()[0],
-                13,
+                14,
             )
             suite = migrated.execute(
                 """
@@ -1414,6 +1465,73 @@ class ComparisonWorkerMigrationTests(unittest.TestCase):
             self.assertEqual(
                 tuple(suite),
                 ("prepared", plan["plan_fingerprint"], 0, None, None),
+            )
+            self.assertEqual(
+                migrated.execute("PRAGMA integrity_check").fetchone()[0],
+                "ok",
+            )
+            self.assertEqual(
+                migrated.execute("PRAGMA foreign_key_check").fetchall(),
+                [],
+            )
+            migrated.close()
+
+    def test_v13_online_backup_migrates_to_v14_without_rewriting_plan(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source.sqlite3"
+            with ComparisonStore(source) as store:
+                seed_worker_fixture(store)
+                suite_id = store.create_suite(
+                    worker_suite_payload(),
+                    created_by="migration-test",
+                )
+                with store.connection:
+                    store.connection.execute(
+                        """
+                        UPDATE comparison_suites
+                        SET arm_failure_policy=NULL
+                        WHERE suite_id=?
+                        """,
+                        (suite_id,),
+                    )
+                plan = store.prepare(suite_id)
+                self.assertEqual(plan["schema_version"], "2.1")
+            raw = sqlite3.connect(source)
+            raw.execute(
+                "ALTER TABLE comparison_suites DROP COLUMN arm_failure_policy"
+            )
+            raw.execute("PRAGMA user_version=13")
+            raw.commit()
+            backup_path = root / "snapshot.sqlite3"
+            backup = sqlite3.connect(backup_path)
+            raw.backup(backup)
+            backup.close()
+            raw.close()
+            migrated = connect(backup_path)
+            self.assertEqual(
+                migrated.execute("PRAGMA user_version").fetchone()[0],
+                14,
+            )
+            suite = migrated.execute(
+                """
+                SELECT status, plan_fingerprint, consumed_inference_starts,
+                       arm_failure_policy
+                FROM comparison_suites WHERE suite_id=?
+                """,
+                (suite_id,),
+            ).fetchone()
+            self.assertEqual(
+                tuple(suite),
+                ("prepared", plan["plan_fingerprint"], 0, None),
+            )
+            with ComparisonStore(backup_path) as store:
+                recomputed = store.plan_payload(suite_id)
+            self.assertEqual(
+                canonical_sha256(recomputed),
+                plan["plan_fingerprint"],
             )
             self.assertEqual(
                 migrated.execute("PRAGMA integrity_check").fetchone()[0],

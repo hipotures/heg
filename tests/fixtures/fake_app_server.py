@@ -22,6 +22,36 @@ def send(value: dict) -> None:
 
 P2_SHAPE = MODE in {"p2-timeout", "p2-late-abort"}
 DIRECTOR_SCREEN = MODE.startswith("director-screen")
+
+
+def claim_screen_process_index() -> int:
+    if not DIRECTOR_SCREEN or MODE not in {
+        "director-screen-schema-invalid-first",
+        "director-screen-semantic-invalid-first",
+        "director-screen-semantic-invalid-second",
+    }:
+        return 0
+    marker = os.path.abspath(
+        os.path.join(
+            os.environ["CODEX_HOME"],
+            "..",
+            "..",
+            "..",
+            "..",
+            ".fake-screen-process-count",
+        )
+    )
+    try:
+        with open(marker, encoding="ascii") as reader:
+            current = int(reader.read())
+    except FileNotFoundError:
+        current = 0
+    with open(marker, "w", encoding="ascii") as writer:
+        writer.write(str(current + 1))
+    return current + 1
+
+
+screen_process_index = claim_screen_process_index()
 thread_id = (
     "019f953e-5817-7c21-ae03-79c0ad6942eb"
     if P2_SHAPE
@@ -143,9 +173,18 @@ def screen_decision(snapshot_id: str) -> dict:
         ],
         "next_review": review,
     }
-    if MODE == "director-screen-schema-invalid":
+    if MODE == "director-screen-schema-invalid" or (
+        MODE == "director-screen-schema-invalid-first"
+        and screen_process_index == 1
+    ):
         decision.pop("next_review")
-    if MODE == "director-screen-semantic-invalid":
+    if MODE == "director-screen-semantic-invalid" or (
+        MODE == "director-screen-semantic-invalid-first"
+        and screen_process_index == 1
+    ) or (
+        MODE == "director-screen-semantic-invalid-second"
+        and screen_process_index == 2
+    ):
         decision["actions"][0]["evidence_ids"] = ["unknown-evidence"]
     if MODE == "director-screen-large-response":
         decision["campaign_assessment"] = "x" * (2 * 1024 * 1024)

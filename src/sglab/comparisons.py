@@ -20,6 +20,7 @@ from .research.context import (
     CONTEXT_RECOMMENDATION_BASIS,
     DEFAULT_DIRECTOR_CONTEXT_MODE,
     DirectorContextMode,
+    evidence_registry_ids,
 )
 from .state import utc_now
 
@@ -30,6 +31,12 @@ MAX_TIMEOUT_SECONDS = 900
 MAX_CLIENT_TOKENS = 12000
 DEFAULT_WORKER_WALL_SECONDS = 7200
 MAX_WORKER_WALL_SECONDS = 86400
+INDEPENDENT_INVALID_CONTINUE_POLICY = (
+    "independent_invalid_continue_v1"
+)
+MODEL_INVALID_ARM_STATES = frozenset(
+    {"schema_invalid", "semantic_invalid"}
+)
 VALID_SUITE_STATES = {
     "draft",
     "prepared",
@@ -536,9 +543,9 @@ class ComparisonStore:
                  maximum_worker_wall_seconds, resource_accounting_version,
                  max_preserved_artifact_bytes, max_runtime_scratch_bytes,
                  max_single_preserved_artifact_bytes,
-                 max_single_runtime_file_bytes)
+                 max_single_runtime_file_bytes, arm_failure_policy)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', 1, 0, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, 2, ?, ?, ?, ?)
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, 2, ?, ?, ?, ?, ?)
                 """,
                 (
                     suite_id,
@@ -567,6 +574,7 @@ class ComparisonStore:
                     resource_limits["max_runtime_scratch_bytes"],
                     resource_limits["max_single_preserved_artifact_bytes"],
                     resource_limits["max_single_runtime_file_bytes"],
+                    INDEPENDENT_INVALID_CONTINUE_POLICY,
                 ),
             )
             for planned_order, arm in enumerate(arms):
@@ -828,6 +836,19 @@ class ComparisonStore:
                     "max_preserved_artifact_bytes"
                 )
             }
+        if suite["arm_failure_policy"] is not None:
+            plan["schema_version"] = "2.2"
+            plan["arm_failure_policy"] = str(
+                suite["arm_failure_policy"]
+            )
+            plan["arm_failure_contract"] = {
+                "infrastructure_security_protocol_resource_model_contract": (
+                    "stop_later_arms"
+                ),
+                "schema_or_semantic_invalid_independent": "continue",
+                "dependent_requires_prior_success": "block",
+                "returned_actions": "never_execute",
+            }
         return plan
 
     def plan_payload(self, suite_id: str) -> dict[str, Any]:
@@ -1032,10 +1053,42 @@ class ComparisonStore:
         )
         if any(row["lifecycle_status"] is None for row in earlier):
             raise ValueError("comparison turns must follow the authorized arm order")
-        if suite["fail_closed"] and any(
-            row["lifecycle_status"] != "completed" for row in earlier
-        ):
-            raise ValueError("fail-closed suite cannot continue after an arm failure")
+        if suite["fail_closed"]:
+            policy = suite["arm_failure_policy"]
+            if policy == INDEPENDENT_INVALID_CONTINUE_POLICY:
+                dependency_status = None
+                if arm["requires_prior_success"]:
+                    dependency_status = self.connection.execute(
+                        """
+                        SELECT t.lifecycle_status
+                        FROM comparison_arms a
+                        LEFT JOIN comparison_turns t ON t.arm_id=a.arm_id
+                        WHERE a.arm_id=?
+                        """,
+                        (arm["depends_on_arm_id"],),
+                    ).fetchone()
+                if (
+                    dependency_status is not None
+                    and dependency_status["lifecycle_status"] != "completed"
+                ):
+                    raise ValueError(
+                        "dependent arm requires a completed predecessor"
+                    )
+                if any(
+                    row["lifecycle_status"]
+                    not in {"completed", *MODEL_INVALID_ARM_STATES}
+                    for row in earlier
+                ):
+                    raise ValueError(
+                        "fail-closed suite cannot continue after an "
+                        "infrastructure or incomplete arm failure"
+                    )
+            elif any(
+                row["lifecycle_status"] != "completed" for row in earlier
+            ):
+                raise ValueError(
+                    "fail-closed suite cannot continue after an arm failure"
+                )
         existing = self.connection.execute(
             "SELECT comparison_turn_id FROM comparison_turns WHERE arm_id=?",
             (arm_id,),
@@ -2018,7 +2071,11 @@ def import_campaign_snapshot_fixture(
         materials = {
             "prompt": build_context_screen_prompt(snapshot),
             "output_schema": director_decision_schema(
-                state["allowed_action_space"]
+                state["allowed_action_space"],
+                existing_hypothesis_ids=evidence_registry_ids(
+                    prepared.evidence_registry,
+                    kinds=frozenset({"hypothesis"}),
+                ),
             ),
             "applicable_action_space": state["allowed_action_space"],
             "evidence_registry": prepared.evidence_registry,

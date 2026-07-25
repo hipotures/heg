@@ -15,7 +15,13 @@ import socket
 import stat
 import uuid
 
-from .comparisons import ComparisonStore, canonical_bytes, canonical_sha256
+from .comparisons import (
+    INDEPENDENT_INVALID_CONTINUE_POLICY,
+    MODEL_INVALID_ARM_STATES,
+    ComparisonStore,
+    canonical_bytes,
+    canonical_sha256,
+)
 from .research.app_server_client import (
     AppServerClient,
     AppServerConfig,
@@ -26,6 +32,7 @@ from .research.app_server_client import (
     AppServerTurnTimeout,
 )
 from .research.context import DirectorContextMode, evidence_registry_ids
+from .research.protocol import hypothesis_updates_match_schema_contract
 from .research.store import ResearchStore, new_id
 from .research.validation import DecisionContext, validate_decision
 from .resource_accounting import (
@@ -286,15 +293,23 @@ def _decision_context(contract: FixtureContract) -> DecisionContext:
     )
 
 
-def _schema_shape_valid(value: Any) -> bool:
-    return isinstance(value, dict) and set(value) == {
-        "schema_version",
-        "snapshot_id",
-        "campaign_assessment",
-        "hypothesis_updates",
-        "actions",
-        "next_review",
-    }
+def _schema_shape_valid(value: Any, context: DecisionContext) -> bool:
+    return (
+        isinstance(value, dict)
+        and set(value)
+        == {
+            "schema_version",
+            "snapshot_id",
+            "campaign_assessment",
+            "hypothesis_updates",
+            "actions",
+            "next_review",
+        }
+        and hypothesis_updates_match_schema_contract(
+            value["hypothesis_updates"],
+            context.hypothesis_ids,
+        )
+    )
 
 
 def _decision_text(value: Any) -> str:
@@ -473,6 +488,10 @@ class ComparisonWorker:
         self._mark_suite_running()
         self._ensure_runtime_campaign()
         arms = list(plan["arms"])
+        independent_invalid_continues = (
+            plan.get("arm_failure_policy")
+            == INDEPENDENT_INVALID_CONTINUE_POLICY
+        )
         nonfatal_failures: list[str] = []
         current_arm_id: str | None = None
         try:
@@ -506,7 +525,7 @@ class ComparisonWorker:
                             "blocked",
                             "required prior arm did not complete",
                         )
-                        if plan["fail_closed"]:
+                        if plan["fail_closed"] and not independent_invalid_continues:
                             self._block_remaining(
                                 arms,
                                 str(arm["arm_id"]),
@@ -530,6 +549,14 @@ class ComparisonWorker:
                             include_current=False,
                         )
                         raise WorkerStopped("operator stop requested")
+                    if (
+                        independent_invalid_continues
+                        and outcome in MODEL_INVALID_ARM_STATES
+                    ):
+                        nonfatal_failures.append(
+                            f"{arm['arm_id']}: {outcome}"
+                        )
+                        continue
                     if plan["fail_closed"]:
                         self._block_remaining(
                             arms,
@@ -1274,7 +1301,8 @@ class ComparisonWorker:
             self._transition(arm_id, "failed", "tool-call attempt")
             return "failed"
         decision = result.parsed
-        schema_valid = _schema_shape_valid(decision)
+        decision_context = _decision_context(contract)
+        schema_valid = _schema_shape_valid(decision, decision_context)
         if not schema_valid:
             status = "schema_invalid"
             semantic = False
@@ -1284,7 +1312,7 @@ class ComparisonWorker:
         else:
             assert isinstance(decision, dict)
             semantic, checks, issues, normalized = _automatic_validity(
-                decision, _decision_context(contract)
+                decision, decision_context
             )
             status = "completed" if semantic else "semantic_invalid"
         self._finish_result(

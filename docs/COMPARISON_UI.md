@@ -82,6 +82,15 @@ measurement policy into a canonical plan fingerprint. Authorization binds to
 that fingerprint. Any changed plan is rejected and the authorization is
 invalidated before a start.
 
+New plan cards show the fingerprinted arm-result policy. Under
+`independent_invalid_continue_v1`, schema-invalid and semantic-invalid
+measurement results remain visible and do not suppress a later independent
+arm. Infrastructure, security, protocol, resource, and model-contract
+failures still stop later arms. A persistent arm that requires prior success
+remains blocked when its predecessor is failed or invalid. Historical plans
+continue to display their legacy fail-closed policy without changing stored
+records or fingerprints.
+
 The auth source is server configuration only:
 
 ```text

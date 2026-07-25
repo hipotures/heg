@@ -130,9 +130,30 @@ their internal sequence.
   is rejected before auth access because this milestone authorizes no
   compaction.
 
-A failed required predecessor blocks its dependent arm. With the default
-`fail_closed=true`, any invalid or failed arm blocks every later arm and no
-replacement or retry is created.
+A failed or invalid required predecessor blocks its dependent arm. New
+measurement-only plans persist and fingerprint
+`arm_failure_policy=independent_invalid_continue_v1`: a schema-invalid or
+semantic-invalid response is retained as that independent arm's result, then
+the next independent arm runs. Infrastructure, security, protocol, resource,
+and model-contract failures still block every later arm fail-closed. No
+replacement or inference-reaching retry is created, and returned actions are
+never executed. Historical plans have a null policy, retain schema version
+2.1 and their original fail-closed behavior and fingerprint; new plans use
+schema version 2.2.
+
+## Hypothesis-update contract
+
+The Director prompt, generated structured-output schema, and semantic
+validator share one operation-specific contract:
+
+- `create` requires a new ID that is unique within the response;
+- `confirm`, `weaken`, `reject`, `retain`, and `revise` require an ID from the
+  submitted hypothesis registry.
+
+The schema emits a create branch and, only when submitted hypothesis IDs
+exist, an existing-hypothesis branch whose ID is restricted to that exact
+set. Duplicate creation remains a semantic error because uniqueness across
+array items is outside the reviewed strict structured-output subset.
 
 ## Private runtime
 
