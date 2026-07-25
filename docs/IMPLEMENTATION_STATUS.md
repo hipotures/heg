@@ -2,6 +2,25 @@
 
 Last implementation audit: **2026-07-25**.
 
+## M7 browser UI redesign in verification
+
+The research dashboard and controlled-comparison pages now use semantic
+decision, effect, lane, candidate, plan, usage, and cost views. Raw protocol
+JSON remains available as secondary technical evidence. Primary lists are
+bounded, long identifiers are abbreviated without losing the complete value,
+tables are locally contained, and narrow viewports use responsive card
+layouts.
+
+All pages now provide light and dark themes through shared design tokens. The
+header toggle persists the browser preference in `localStorage` and falls back
+to the operating-system color-scheme preference when unset. Typography,
+focus visibility, field grouping, empty/error states, and status labelling
+were normalized without adding a frontend framework or build step.
+
+The baseline Playwright-CDP inventory and before screenshots are preserved in
+`docs/reports/M7_UI_PLAYWRIGHT_AUDIT_BEFORE.md`. Final status remains pending
+the required after-audit against a user-restarted port-8787 server.
+
 ## M7 deterministic UI-review fixture complete
 
 The `sglab ui-fixture create` command now creates a rich, isolated and

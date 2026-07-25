@@ -1,0 +1,130 @@
+from __future__ import annotations
+
+from pathlib import Path
+import unittest
+
+from sglab.comparison_web import (
+    blind_page,
+    comparison_detail_page,
+    comparisons_page,
+    cost_profiles_page,
+    error_page,
+    new_comparison_page,
+)
+
+
+class SemanticUiRenderingTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.catalog = {
+            "gpt-5.6-luna": ["medium", "high", "xhigh"],
+            "gpt-5.6-sol": ["medium", "high", "xhigh"],
+        }
+        self.fixtures = [
+            {"fixture_id": "fixture-a4", "display_name": "Preserved A4"}
+        ]
+
+    def decode(self, value: bytes) -> str:
+        return value.decode("utf-8")
+
+    def test_theme_is_switchable_and_persisted_on_every_page(self) -> None:
+        pages = [
+            comparisons_page(),
+            new_comparison_page(self.catalog, self.fixtures),
+            comparison_detail_page("suite-demo"),
+            blind_page("suite-demo"),
+            cost_profiles_page(self.catalog),
+            error_page(404, "Not found", "Missing page"),
+        ]
+        for body in pages:
+            html = self.decode(body)
+            self.assertIn("id=\"theme-toggle\"", html)
+            self.assertIn("localStorage.getItem('sglab-theme')", html)
+            self.assertIn("localStorage.setItem('sglab-theme'", html)
+            self.assertIn(':root[data-theme="dark"]', html)
+
+        dashboard = (Path(__file__).parents[1] / "web" / "index.html").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("id=\"theme-toggle\"", dashboard)
+        self.assertIn("localStorage.getItem('sglab-theme')", dashboard)
+        self.assertIn("localStorage.setItem('sglab-theme'", dashboard)
+        self.assertIn(':root[data-theme="dark"]', dashboard)
+
+    def test_action_renderers_cover_reviewed_action_types(self) -> None:
+        html = self.decode(comparison_detail_page("suite-demo"))
+        for action in (
+            "start_lane",
+            "request_diagnostic",
+            "set_review_trigger",
+            "promote_candidate",
+            "schedule_verification",
+            "stop_lane",
+        ):
+            self.assertIn(action, html)
+        self.assertIn("Technical decision JSON", html)
+        self.assertIn("Raw server decision", html)
+
+    def test_semantic_renderer_omits_null_values(self) -> None:
+        html = self.decode(comparison_detail_page("suite-demo"))
+        self.assertIn(
+            "v!==null&&v!==undefined&&v!==''",
+            html,
+        )
+        self.assertIn("semanticFields", html)
+
+    def test_long_identifiers_are_abbreviated_with_full_title(self) -> None:
+        html = self.decode(comparisons_page())
+        self.assertIn("s.length>20", html)
+        self.assertIn('title="${esc(v)}"', html)
+        self.assertIn("overflow-wrap:anywhere", html)
+
+    def test_raw_json_is_secondary_to_semantic_content(self) -> None:
+        html = self.decode(comparison_detail_page("suite-demo"))
+        self.assertIn("<details>", html)
+        self.assertIn("Measured downstream effect", html)
+        self.assertNotIn('<pre id="preflight">', html)
+        self.assertNotIn("<th>Decision</th>", html)
+
+    def test_responsive_and_accessible_form_contracts_are_present(self) -> None:
+        html = self.decode(new_comparison_page(self.catalog, self.fixtures))
+        self.assertIn("@media(max-width:700px)", html)
+        self.assertIn("<fieldset>", html)
+        self.assertIn("<legend>", html)
+        self.assertIn("Hard maximum inference starts", html)
+        self.assertIn("Measurement only", html)
+
+    def test_empty_and_error_states_are_explicit(self) -> None:
+        list_html = self.decode(comparisons_page())
+        self.assertIn("No comparison suites match these filters.", list_html)
+        error_html = self.decode(
+            error_page(404, "Comparison not found", "No suite exists.")
+        )
+        self.assertIn("HTTP 404", error_html)
+        self.assertIn("Return to dashboard", error_html)
+
+    def test_blind_page_uses_semantic_decisions_and_hides_contract(self) -> None:
+        html = self.decode(blind_page("suite-demo"))
+        self.assertIn("decisionCard(pair[0].normalized_decision_json", html)
+        self.assertIn("remain hidden until submission", html)
+        self.assertNotIn('<pre id="a"', html)
+
+    def test_cost_profiles_have_semantic_history_cards(self) -> None:
+        html = self.decode(cost_profiles_page(self.catalog))
+        self.assertIn("profileCard", html)
+        self.assertIn("Relative multiplier", html)
+        self.assertIn("API-equivalent", html)
+        self.assertNotIn('<pre id="profiles"', html)
+
+    def test_dashboard_bounds_primary_lists_and_keeps_raw_details(self) -> None:
+        dashboard = (Path(__file__).parents[1] / "web" / "index.html").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(".slice(0,20)", dashboard)
+        self.assertIn("/api/candidates?limit=24", dashboard)
+        self.assertIn("Raw action record", dashboard)
+        self.assertIn("Candidate metadata", dashboard)
+        self.assertNotIn("['Parameters', r => esc(JSON.stringify", dashboard)
+
+
+if __name__ == "__main__":
+    unittest.main()

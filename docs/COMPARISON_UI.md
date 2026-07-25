@@ -185,6 +185,12 @@ The main dashboard links to comparisons and shows the measured default,
 `stateless_turns`, with recommendation basis
 `single controlled S2/P2 pair`.
 
+The comparison interface uses semantic suite, plan, decision, effect, and cost
+cards. Protocol JSON is available only through technical-detail disclosures.
+Long identifiers are abbreviated visually while preserving their full value
+for inspection. Both light and dark themes are available from the persistent
+header toggle; the preference is saved in browser local storage.
+
 ## Quality layers
 
 Automatic hard validity, human judgment, and downstream scientific outcome
@@ -217,5 +223,6 @@ Missing human quality never receives a fabricated coordinate.
   `app_server_turns` rows.
 - The preserved fixture import stores a safe public descriptor and hashes, not
   private runtime payloads.
-- Visual redesign is deferred; the pages intentionally reuse the plain
-  standard-library dashboard style.
+- Comparison execution remains outside this UI milestone. Start controls
+  expose the prepared lifecycle but do not weaken the existing authorization
+  or measurement-only contract.

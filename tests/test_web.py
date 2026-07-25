@@ -12,7 +12,9 @@ from sglab.web import create_server
 class WebAssetsTests(unittest.TestCase):
     def test_index_exists(self) -> None:
         root = Path(__file__).resolve().parents[1]
-        self.assertTrue((root / "web" / "index.html").is_file())
+        page = root / "web" / "index.html"
+        self.assertTrue(page.is_file())
+        self.assertIn("Structural Graph Lab", page.read_text(encoding="utf-8"))
 
     def test_http_api_smoke_and_control_validation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

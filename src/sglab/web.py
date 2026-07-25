@@ -18,6 +18,7 @@ from .comparison_web import (
     comparison_detail_page,
     comparisons_page,
     cost_profiles_page,
+    error_page,
     new_comparison_page,
 )
 from .comparisons import ComparisonStore, ModelCatalog, default_context_summary
@@ -328,7 +329,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 try:
                     store.suite_detail(suite_id)
                 except KeyError:
-                    self.send_error(404)
+                    self._html(
+                        404,
+                        error_page(
+                            404,
+                            "Comparison not found",
+                            "No comparison suite exists with that identifier.",
+                        ),
+                    )
                     return
             body = (
                 blind_page(suite_id)

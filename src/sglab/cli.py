@@ -226,7 +226,7 @@ def cmd_dashboard_smoke(_: Namespace) -> int:
             with urlopen(f"http://{host}:{port}/", timeout=2) as response:
                 page = response.read()
                 status = response.status
-            if status != 200 or b"STRUCTURAL GRAPH LAB" not in page:
+            if status != 200 or b"Structural Graph Lab" not in page:
                 raise RuntimeError("dashboard static page failed its smoke check")
             print("dashboard smoke: ok")
         finally:
