@@ -1,0 +1,186 @@
+{
+  "report_schema_version": "1.0",
+  "date": "2026-07-25",
+  "tested_commit": "e9ebe39e9ec51cec1002f4677c77eb1900a5ba9a",
+  "workspace": "/home/xai/DEV/heg/workspace/model-comparisons-live",
+  "workspace_marker": {
+    "workspace_kind": "model_comparison_live",
+    "synthetic_data": false
+  },
+  "database": {
+    "schema_version": 12,
+    "integrity_check": "ok",
+    "foreign_key_check_rows": 0
+  },
+  "suite": {
+    "name": "Luna high vs xhigh — A4 resource-accounting rerun",
+    "suite_id": "comparison-aaabfae5a010445e9d966ea50a0958a8",
+    "status": "prepared",
+    "authorization_status": "unauthorized",
+    "plan_schema_version": "2.1",
+    "resource_accounting_version": 2,
+    "plan_fingerprint": "a44e96f67628cb9afcacbc6c76b8f0e6e65696ba075a62c587d5f02b9b41c6d7",
+    "recomputed_fingerprint": "a44e96f67628cb9afcacbc6c76b8f0e6e65696ba075a62c587d5f02b9b41c6d7",
+    "fingerprint_matches": true,
+    "consumed_inference_starts": 0,
+    "authorization_rows": 0,
+    "execution_attempts": 0,
+    "inference_reservations": 0,
+    "comparison_turns": 0,
+    "resource_samples": 0
+  },
+  "fixture": {
+    "display_name": "M6 executable preserved A4",
+    "fixture_id": "m6-executable-preserved-a4",
+    "fixture_type": "campaign_snapshot",
+    "fixture_sha256": "2abb54b631942cd721dfd4bbaa6481135c73d818d35b9046c8f2f15d2c03af77",
+    "estimated_client_owned_tokens": 6516
+  },
+  "arms": [
+    {
+      "effective_order": 1,
+      "arm_id": "arm-14a8a736ee554229a793961f55b28b66",
+      "display_name": "Luna high",
+      "model": "gpt-5.6-luna",
+      "reasoning_effort": "high",
+      "context_mode": "stateless_turns",
+      "repetitions": 1,
+      "fresh_thread": true,
+      "resume_prior_thread": false,
+      "status": "planned"
+    },
+    {
+      "effective_order": 2,
+      "arm_id": "arm-1429a6a782504ca2b8c56d5528fcd6d9",
+      "display_name": "Luna xhigh",
+      "model": "gpt-5.6-luna",
+      "reasoning_effort": "xhigh",
+      "context_mode": "stateless_turns",
+      "repetitions": 1,
+      "fresh_thread": true,
+      "resume_prior_thread": false,
+      "status": "planned"
+    }
+  ],
+  "limits": {
+    "planned_turns": 2,
+    "maximum_inference_starts": 2,
+    "timeout_seconds_per_turn": 300,
+    "maximum_total_authoritative_server_tokens": 40000,
+    "maximum_client_owned_estimated_tokens_per_turn": 12000,
+    "maximum_concurrent_suites": 1,
+    "maximum_worker_wall_seconds": 7200,
+    "max_preserved_artifact_bytes": 67108864,
+    "max_runtime_scratch_bytes": 536870912,
+    "max_single_preserved_artifact_bytes": 33554432,
+    "max_single_runtime_file_bytes": 268435456,
+    "max_wire_log_bytes": 8388608,
+    "max_stderr_bytes": 262144,
+    "max_stdout_bytes": 1048576
+  },
+  "ordering": {
+    "randomized": true,
+    "persisted_seed": 20260725
+  },
+  "scientific_input_equality": {
+    "all_equal": true,
+    "director_state_v2_sha256": "2abb54b631942cd721dfd4bbaa6481135c73d818d35b9046c8f2f15d2c03af77",
+    "prompt_sha256": "12bada6af03626bf10a3b5313a8e058e39555bf0083529ff72fd0fff91d004f7",
+    "output_schema_sha256": "9147d4fcc81bcfbdfc986b71fa1f194cf4986b0d0ac4f5602228a4a9a966a400",
+    "base_instructions_sha256": "bb79f9078bf017c9079d10fc1619dfe52072d58172977a7868b5201c2c37f151",
+    "developer_instructions_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "campaign_budget_sha256": "4766fb7b07941614d2b09868b95b853c36c363265624bc508cb8c706cf08398d",
+    "evidence_registry_sha256": "2b15586edf1e512f9285af13f51d6b2897e154bba9c995404c9b92eaec88048c",
+    "advisory_registry_sha256": "2c4d430e52710fa3345b6c27ce58573d6885455e4d869463e0a3025279f2d463",
+    "executable_registry_sha256": "b594c18a0112206f01258ade6daa18b3e11935d20749b769c03736ac301f83f7",
+    "applicable_action_space_sha256": "437647c85fc5a970a0d49c381967ea7eb5b541c3ba2310a4fbd2c94abd43de8e",
+    "target_metadata_sha256": "4c358b3eb2fa244cfb1c1c00bb203d289af450a501d72f7817beaa801c81d46e",
+    "target_metadata_hash_derivation": "canonical SHA-256 of DirectorStateV2.target",
+    "fixture_sha256": "2abb54b631942cd721dfd4bbaa6481135c73d818d35b9046c8f2f15d2c03af77",
+    "only_intended_contract_difference": "reasoning_effort"
+  },
+  "resource_limit_fingerprint_checks": {
+    "max_preserved_artifact_bytes": true,
+    "max_runtime_scratch_bytes": true,
+    "max_single_preserved_artifact_bytes": true,
+    "max_single_runtime_file_bytes": true,
+    "max_wire_log_bytes": true,
+    "max_stderr_bytes": true,
+    "max_stdout_bytes": true,
+    "maximum_worker_wall_seconds": true
+  },
+  "zero_execution_contract": {
+    "measurement_only": true,
+    "execute_decisions": false,
+    "fail_closed": true,
+    "compaction_permitted": false,
+    "inference_reaching_retries_permitted": false,
+    "model_tools_permitted": false,
+    "expected_graph_search_batches": 0,
+    "expected_action_dispatches": 0,
+    "actual_model_inferences": 0,
+    "actual_graph_search_batches": 0,
+    "actual_action_dispatches": 0,
+    "actual_model_tool_calls": 0
+  },
+  "worker_state": {
+    "active_worker_process": false,
+    "active_lease": false,
+    "private_runtime_homes_created": false
+  },
+  "historical_suite": {
+    "suite_id": "comparison-4407a28f8e7c47b89a7226045b61b1b4",
+    "status": "failed",
+    "stored_fingerprint": "89e09e8f82428e86f2a75ae24ff51f7187536c22c2ad023152dcb80b60512886",
+    "recomputed_fingerprint": "89e09e8f82428e86f2a75ae24ff51f7187536c22c2ad023152dcb80b60512886",
+    "consumed_inference_starts": 1,
+    "luna_high_status": "completed",
+    "luna_xhigh_status": "planned_not_started",
+    "resource_telemetry_rows": 0,
+    "unchanged": true
+  },
+  "ui_and_api": {
+    "playwright_cdp_used": true,
+    "safe_detail_api_status": 200,
+    "rendered_workspace_verified": true,
+    "separated_resource_labels_verified": true,
+    "deprecated_ambiguous_label_active": false,
+    "authorize_request_sent": false,
+    "start_request_sent": false,
+    "credential_path_exposed": false
+  },
+  "screenshots": [
+    {
+      "path": "docs/reports/m7-second-real-comparison-prep/suite-configuration.png",
+      "sha256": "c2aef929165b8b4e40df4f4042a4a525eb67f80df308ecc337eb8462f05be14c"
+    },
+    {
+      "path": "docs/reports/m7-second-real-comparison-prep/prepared-plan.png",
+      "sha256": "21815d2096505149b0fe950a68a5c5a882f23ae8d3fcf94ed5dd3badd5bdb251"
+    },
+    {
+      "path": "docs/reports/m7-second-real-comparison-prep/two-arm-contracts.png",
+      "sha256": "8f503138571619e4bef7dc5b2580dda27ecbc8aa8e7b027ad12de4ef030599ec"
+    },
+    {
+      "path": "docs/reports/m7-second-real-comparison-prep/inference-cap.png",
+      "sha256": "23bf358b2eb88c24e932a00b281f22c98419a5394486c0fb69531220315c5031"
+    },
+    {
+      "path": "docs/reports/m7-second-real-comparison-prep/resource-limits.png",
+      "sha256": "9d68366c375bc10a9b3f0db516c3b6fcb5396d3aebb3df70fa9b355a5f42eb59"
+    },
+    {
+      "path": "docs/reports/m7-second-real-comparison-prep/plan-fingerprint.png",
+      "sha256": "412666106859762aa3144d31abea0e5a923af289b0bf8b10bedb66670a7c5651"
+    }
+  ],
+  "authorization_boundary": {
+    "credential_contents_read": false,
+    "credential_copied": false,
+    "authorized": false,
+    "started": false,
+    "deterministic_gates_passed": true,
+    "explicit_authorization_required_for_fingerprint": "a44e96f67628cb9afcacbc6c76b8f0e6e65696ba075a62c587d5f02b9b41c6d7"
+  }
+}
