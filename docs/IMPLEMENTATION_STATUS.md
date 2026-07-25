@@ -2,6 +2,30 @@
 
 Last implementation audit: **2026-07-25**.
 
+## M7 deterministic UI-review fixture complete
+
+The `sglab ui-fixture create` command now creates a rich, isolated and
+reproducible `ui_demo` workspace for browser review. Fixed IDs, timestamps and
+seeded content cover campaign, Director action/effect, lane, candidate,
+hypothesis, telemetry, App Server lifecycle, event, comparison, rating and
+cost-profile states without model calls, auth access, external network or a
+production search campaign. Replacement is allowed only for a workspace with
+the exact synthetic demo marker.
+
+The generated review workspace contains 8 campaigns, 24 decisions, 12 lanes,
+40 campaign candidates, 110 metric windows, 12 hypotheses, 12 App Server
+turns and 9 comparison suites, including the unchanged read-only M6 S2/P1/P2
+result. Two same-seed generations produce byte-identical SQLite databases and
+the same logical SHA-256. The fixture is 0.72 MiB, schema v10 integrity is
+`ok`, and view-data construction remains below 20 ms maximum in the recorded
+local sample.
+
+Focused fixture tests pass 5/5, the complete safe suite passes 158/158, and
+doctor, check, benchmark/dashboard smoke and SQLite foreign-key checks pass.
+Phase A deliberately stops before starting the port-8787 server or any
+Playwright-CDP inspection. See
+`docs/reports/M7_UI_REVIEW_FIXTURE.md`.
+
 ## M7 controlled comparison UI and persistence complete
 
 SQLite schema v10 now provides a comparison subsystem separate from research

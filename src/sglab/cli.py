@@ -53,6 +53,7 @@ from .state import (
     utc_now,
 )
 from .targets import TARGETS
+from .ui_fixture import create_ui_fixture
 from .web import create_server, serve
 
 
@@ -579,6 +580,17 @@ def cmd_comparisons(args: Namespace) -> int:
     return 0 if report["ok"] else 1
 
 
+def cmd_ui_fixture(args: Namespace) -> int:
+    result = create_ui_fixture(
+        _workspace(args.workspace),
+        profile=args.profile,
+        replace=bool(args.replace),
+        seed=args.seed,
+    )
+    print(json.dumps(result.as_dict(), indent=2, sort_keys=True))
+    return 0
+
+
 def build_parser() -> ArgumentParser:
     parser = ArgumentParser(prog="sglab")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -789,6 +801,17 @@ def build_parser() -> ArgumentParser:
     comparison_replay = comparison_commands.add_parser("replay-dry-run")
     comparison_replay.add_argument("--workspace", required=True)
     comparison_replay.set_defaults(func=cmd_comparisons)
+
+    ui_fixture = subparsers.add_parser("ui-fixture")
+    ui_fixture_commands = ui_fixture.add_subparsers(
+        dest="ui_fixture_command", required=True
+    )
+    ui_fixture_create = ui_fixture_commands.add_parser("create")
+    ui_fixture_create.add_argument("--workspace", required=True)
+    ui_fixture_create.add_argument("--profile", choices=("full",), default="full")
+    ui_fixture_create.add_argument("--seed", type=int, default=20260725)
+    ui_fixture_create.add_argument("--replace", action="store_true")
+    ui_fixture_create.set_defaults(func=cmd_ui_fixture)
 
     return parser
 

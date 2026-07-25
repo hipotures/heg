@@ -1,0 +1,168 @@
+{
+  "schema_version": "1.0",
+  "date": "2026-07-25",
+  "phase": "A",
+  "repository": {
+    "initial_commit": "45c93e3441a2a8e95733d5cf56848a31d8c2b6c3",
+    "working_branch": "m7-ui-review-phase-a",
+    "final_commit": null,
+    "planning_untouched": true,
+    "preserved_m6_json_sha256": "a1f01415059494161b5c0d9feb608160e48afff1e3b23404e234eec87f27883c",
+    "preserved_m6_markdown_sha256": "b339e14e959755ba8fec5f475b443cb1df39652a92af22c5249d722ae82ceef8"
+  },
+  "generator": {
+    "command": "PYTHONPATH=src python3 -m sglab ui-fixture create --workspace workspace/ui-review-demo --profile full --replace",
+    "profile": "full",
+    "seed": 20260725,
+    "fixture_version": 1,
+    "generated_at": "2026-07-25T12:00:00Z",
+    "generation_seconds": 0.09268716257065535,
+    "workspace_kind": "ui_demo",
+    "synthetic_data": true,
+    "replace_requires_demo_marker": true,
+    "production_workspace_replacement_refused": true
+  },
+  "workspace": {
+    "path": "workspace/ui-review-demo",
+    "logical_fixture_sha256": "8946be289122d42312983727ef9330b98a6a54c52822da03d9533b9a91a2f8c9",
+    "database_sha256": "d6fe9f7a130afeaf51b9fc35af7ca2e713e248255eeac06b684aa148451d4610",
+    "workspace_marker_sha256": "045dd9feb4da535954253d7525e8cbf11544bd535f6fd3e3502ae9559405d328",
+    "fixture_summary_sha256": "e7c36f01150764efe30020235aa244b5b2a624fa3380c1f3424a6fb4a01a99c8",
+    "database_bytes": 692224,
+    "approximate_directory_bytes": 756505,
+    "file_count": 123,
+    "sqlite_schema_version": 10,
+    "sqlite_integrity_check": "ok",
+    "sqlite_foreign_key_check": []
+  },
+  "record_counts": {
+    "research_campaigns": 8,
+    "director_actions": 24,
+    "director_action_outcomes": 20,
+    "research_lanes": 12,
+    "campaign_candidates": 40,
+    "research_hypotheses_v2": 12,
+    "lane_metric_windows": 110,
+    "app_server_turns": 12,
+    "runs": 8,
+    "run_metrics": 40,
+    "candidates": 40,
+    "comparison_suites": 9,
+    "comparison_arms": 24,
+    "comparison_turns": 11,
+    "manual_ratings": 3,
+    "pairwise_ratings": 1,
+    "model_cost_profiles": 7
+  },
+  "coverage": {
+    "campaign_states": [
+      "completed_deadline_reached",
+      "running",
+      "paused_by_operator",
+      "stopped_by_operator",
+      "paused_fault",
+      "created",
+      "turn_timeout",
+      "verifier_disagreement"
+    ],
+    "action_types": [
+      "start_lane",
+      "request_diagnostic",
+      "set_review_trigger",
+      "promote_candidate",
+      "schedule_verification",
+      "stop_lane",
+      "patch_lane",
+      "restart_lane",
+      "fork_lane",
+      "reallocate_resources"
+    ],
+    "effect_shapes": [
+      "score_improvement",
+      "no_improvement",
+      "regression",
+      "plateau",
+      "exact_verifier_rejection",
+      "synthetic_demo_exact_pass",
+      "timeout",
+      "mutation_ancestry",
+      "cycle_profile"
+    ],
+    "comparison_states": [
+      "draft",
+      "prepared",
+      "authorized",
+      "running",
+      "completed",
+      "failed",
+      "stopped",
+      "read_only_historical"
+    ],
+    "historical_m6_imported": true,
+    "historical_m6_read_only": true,
+    "nullable_usage_present": true,
+    "nullable_final_response_present": true,
+    "long_text_present": true,
+    "long_identifier_present": true,
+    "synthetic_prohibited_tool_attempt_present": true,
+    "real_tool_execution": false
+  },
+  "performance": {
+    "campaign_status_mean_ms": 2.741,
+    "campaign_status_max_ms": 9.481,
+    "comparison_list_and_detail_mean_ms": 10.369,
+    "comparison_list_and_detail_max_ms": 19.62,
+    "bounded_campaign_actions": 32,
+    "bounded_campaign_lanes": 32,
+    "bounded_campaign_turns": 10,
+    "bounded_candidates": 50,
+    "bounded_runs": 100,
+    "bounded_comparison_suites": 200
+  },
+  "verification": {
+    "fixture_focused_tests": {
+      "passed": 5,
+      "failed": 0
+    },
+    "full_safe_suite": {
+      "passed": 158,
+      "failed": 0
+    },
+    "make_doctor": "pass",
+    "make_check": "pass",
+    "make_benchmark_smoke": "pass",
+    "make_dashboard_smoke": "pass",
+    "same_seed_logical_hash_equal": true,
+    "same_seed_database_bytes_equal": true,
+    "credential_scan": "pass",
+    "private_path_scan": "pass"
+  },
+  "boundaries": {
+    "model_inferences": 0,
+    "real_auth_reads": 0,
+    "real_auth_copies": 0,
+    "authenticated_app_server_turns": 0,
+    "paid_comparisons": 0,
+    "production_search_campaigns": 0,
+    "playwright_audit_started": false,
+    "server_8787_started_by_agent": false,
+    "production_research_records_modified": false,
+    "preserved_m6_runtime_artifacts_modified": false
+  },
+  "next_step": {
+    "user_command": "PYTHONPATH=src python3 -m sglab serve --workspace workspace/ui-review-demo --host 127.0.0.1 --port 8787",
+    "requires_user_confirmation": "http://127.0.0.1:8787 is running",
+    "phase_b_started": false
+  },
+  "status": {
+    "ui_demo_workspace_created": true,
+    "fixture_generator_deterministic": true,
+    "fixture_safety_gates_passed": true,
+    "historical_m6_preserved": true,
+    "all_pages_inventoried": false,
+    "before_playwright_audit_completed": false,
+    "after_playwright_audit_completed": false,
+    "ready_for_phase_b_browser_audit": true,
+    "ready_for_real_user_ui_testing": false
+  }
+}
