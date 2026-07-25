@@ -87,12 +87,12 @@ def suite_payload(**changes):
 
 
 class ComparisonDatabaseTests(unittest.TestCase):
-    def test_schema_v11_tables_foreign_keys_and_integrity(self) -> None:
+    def test_schema_v12_tables_foreign_keys_and_integrity(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             database = Path(directory) / "results.sqlite3"
             connection = connect(database)
-            self.assertEqual(SCHEMA_VERSION, 11)
-            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 11)
+            self.assertEqual(SCHEMA_VERSION, 12)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 12)
             tables = {
                 row[0]
                 for row in connection.execute(
@@ -112,6 +112,7 @@ class ComparisonDatabaseTests(unittest.TestCase):
                 "comparison_stop_requests",
                 "comparison_inference_reservations",
                 "comparison_arm_transitions",
+                "comparison_resource_samples",
             ):
                 self.assertIn(table, tables)
             self.assertTrue(
@@ -291,6 +292,38 @@ class ComparisonPlanningTests(unittest.TestCase):
             self.store.start(suite_id, auth_available=True)
         suite = self.store.suite_detail(suite_id)["suite"]
         self.assertEqual(suite["authorization_status"], "invalidated")
+
+    def test_resource_quota_is_fingerprinted_and_legacy_maps_only_preserved(self) -> None:
+        legacy = self.store.create_suite(
+            suite_payload(maximum_artifact_directory_bytes=32 * 1024 * 1024)
+        )
+        legacy_row = self.store._suite_row(legacy)
+        self.assertEqual(
+            legacy_row["max_preserved_artifact_bytes"], 32 * 1024 * 1024
+        )
+        self.assertEqual(
+            legacy_row["max_runtime_scratch_bytes"], 512 * 1024 * 1024
+        )
+        suite_id = self.store.create_suite(suite_payload())
+        plan = self.store.prepare(suite_id)
+        self.assertEqual(plan["resource_accounting_version"], 2)
+        self.assertIn("max_runtime_scratch_bytes", plan)
+        self.store.authorize(suite_id, plan["plan_fingerprint"])
+        with self.store.connection:
+            self.store.connection.execute(
+                """
+                UPDATE comparison_suites
+                SET max_runtime_scratch_bytes=max_runtime_scratch_bytes+1
+                WHERE suite_id=?
+                """,
+                (suite_id,),
+            )
+        with self.assertRaisesRegex(ValueError, "changed"):
+            self.store.start(suite_id, auth_available=True)
+        self.assertEqual(
+            self.store._suite_row(suite_id)["authorization_status"],
+            "invalidated",
+        )
 
     def test_effective_model_effort_contract_aborts_on_mismatch(self) -> None:
         suite_id = self.store.create_suite(

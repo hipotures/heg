@@ -44,6 +44,8 @@ reasoning_item_ids = (
 )
 skills_enabled = True
 turn_count = 0
+scratch_path = None
+secondary_scratch_path = None
 
 
 def screen_snapshot_id(params: dict) -> str:
@@ -101,6 +103,8 @@ def screen_decision(snapshot_id: str) -> dict:
         decision.pop("next_review")
     if MODE == "director-screen-semantic-invalid":
         decision["actions"][0]["evidence_ids"] = ["unknown-evidence"]
+    if MODE == "director-screen-large-response":
+        decision["campaign_assessment"] = "x" * (2 * 1024 * 1024)
     return decision
 
 
@@ -288,6 +292,42 @@ for line in sys.stdin:
             )
     elif method == "turn/start":
         turn_count += 1
+        if MODE in {
+            "director-screen-scratch-80m",
+            "director-screen-scratch-exceed",
+            "director-screen-wal-growth",
+            "director-screen-hardlink",
+        }:
+            scratch_name = (
+                "state_5.sqlite-wal"
+                if MODE == "director-screen-wal-growth"
+                else "transient-runtime.bin"
+            )
+            scratch_path = os.path.join(
+                os.environ["CODEX_SQLITE_HOME"], scratch_name
+            )
+            with open(scratch_path, "wb"):
+                pass
+            os.truncate(
+                scratch_path,
+                80 * 1024 * 1024
+                if MODE == "director-screen-scratch-80m"
+                else 4 * 1024 * 1024
+                if MODE == "director-screen-hardlink"
+                else 8 * 1024 * 1024,
+            )
+            if MODE == "director-screen-hardlink":
+                secondary_scratch_path = scratch_path + ".link"
+                os.link(scratch_path, secondary_scratch_path)
+        if MODE == "director-screen-symlink-escape":
+            scratch_path = os.path.join(
+                os.environ["CODEX_SQLITE_HOME"], "escape-link"
+            )
+            os.symlink("/etc/passwd", scratch_path)
+        if MODE == "director-screen-log-growth":
+            chunk = b"synthetic-stderr-growth\n" * 4096
+            for _ in range(16):
+                os.write(2, chunk)
         params = request.get("params", {})
         snapshot_id = screen_snapshot_id(params)
         if DIRECTOR_SCREEN:
@@ -485,3 +525,20 @@ for line in sys.stdin:
 if MODE == "director-screen-forced-shutdown":
     while True:
         time.sleep(1)
+if MODE == "director-screen-scratch-on-shutdown":
+    scratch_path = os.path.join(
+        os.environ["CODEX_SQLITE_HOME"], "shutdown-growth.bin"
+    )
+    with open(scratch_path, "wb"):
+        pass
+    os.truncate(scratch_path, 8 * 1024 * 1024)
+if scratch_path is not None and MODE != "director-screen-scratch-on-shutdown":
+    try:
+        os.unlink(scratch_path)
+    except FileNotFoundError:
+        pass
+if secondary_scratch_path is not None:
+    try:
+        os.unlink(secondary_scratch_path)
+    except FileNotFoundError:
+        pass

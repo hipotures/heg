@@ -5,7 +5,7 @@ from typing import Any, Iterable
 import json
 import sqlite3
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 MAX_METRIC_ROWS = 100_000
 
 BASE_SCHEMA_SQL = """
@@ -828,6 +828,54 @@ CREATE INDEX IF NOT EXISTS idx_comparison_arm_transitions_suite
 PRAGMA user_version=11;
 """
 
+COMPARISON_RESOURCE_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS comparison_resource_samples (
+    resource_sample_id TEXT PRIMARY KEY,
+    suite_id TEXT NOT NULL REFERENCES comparison_suites(suite_id),
+    attempt_id TEXT REFERENCES comparison_execution_attempts(attempt_id),
+    arm_id TEXT REFERENCES comparison_arms(arm_id),
+    category TEXT NOT NULL,
+    sample_kind TEXT NOT NULL,
+    lifecycle_stage TEXT NOT NULL,
+    sampled_at TEXT NOT NULL,
+    current_apparent_bytes INTEGER NOT NULL,
+    current_allocated_bytes INTEGER NOT NULL,
+    peak_apparent_bytes INTEGER NOT NULL,
+    peak_allocated_bytes INTEGER NOT NULL,
+    file_count INTEGER NOT NULL,
+    largest_contributor_relative_path TEXT,
+    largest_contributor_bytes INTEGER,
+    largest_files_json TEXT NOT NULL,
+    largest_directories_json TEXT NOT NULL,
+    last_growth_event_json TEXT,
+    enforcement_decision TEXT NOT NULL,
+    configured_limit_bytes INTEGER,
+    interruption_sent INTEGER NOT NULL DEFAULT 0,
+    cleanup_reduced_size INTEGER,
+    accounting_errors_json TEXT NOT NULL DEFAULT '[]',
+    CHECK(category IN (
+        'preserved_artifacts', 'runtime_scratch',
+        'credential_material', 'logs'
+    )),
+    CHECK(sample_kind IN (
+        'latest', 'peak', 'threshold_crossing', 'terminal'
+    )),
+    CHECK(current_apparent_bytes >= 0),
+    CHECK(current_allocated_bytes >= 0),
+    CHECK(peak_apparent_bytes >= 0),
+    CHECK(peak_allocated_bytes >= 0),
+    CHECK(file_count >= 0),
+    CHECK(interruption_sent IN (0, 1)),
+    CHECK(cleanup_reduced_size IS NULL OR cleanup_reduced_size IN (0, 1)),
+    UNIQUE(suite_id, attempt_id, category, sample_kind)
+);
+
+CREATE INDEX IF NOT EXISTS idx_comparison_resource_samples_suite
+    ON comparison_resource_samples(suite_id, sampled_at);
+
+PRAGMA user_version=12;
+"""
+
 
 def connect(path: str | Path) -> sqlite3.Connection:
     target = Path(path)
@@ -865,6 +913,7 @@ def migrate(connection: sqlite3.Connection) -> None:
     _ensure_app_server_turn_lifecycle_columns(connection)
     _ensure_comparison_schema(connection)
     _ensure_comparison_worker_schema(connection)
+    _ensure_comparison_resource_schema(connection)
 
 
 def _ensure_m6_lane_columns(connection: sqlite3.Connection) -> None:
@@ -1119,6 +1168,52 @@ def _ensure_comparison_worker_schema(connection: sqlite3.Connection) -> None:
                 )
     connection.executescript(COMPARISON_WORKER_SCHEMA_SQL)
     connection.execute("PRAGMA user_version=11")
+    connection.commit()
+
+
+def _ensure_comparison_resource_schema(connection: sqlite3.Connection) -> None:
+    exists = connection.execute(
+        """
+        SELECT 1 FROM sqlite_master
+        WHERE type='table' AND name='comparison_suites'
+        """
+    ).fetchone()
+    if exists is None:
+        return
+    suite_columns = {
+        "resource_accounting_version": "INTEGER NOT NULL DEFAULT 1",
+        "max_preserved_artifact_bytes": (
+            "INTEGER NOT NULL DEFAULT 67108864"
+        ),
+        "max_runtime_scratch_bytes": (
+            "INTEGER NOT NULL DEFAULT 536870912"
+        ),
+        "max_single_preserved_artifact_bytes": (
+            "INTEGER NOT NULL DEFAULT 33554432"
+        ),
+        "max_single_runtime_file_bytes": (
+            "INTEGER NOT NULL DEFAULT 268435456"
+        ),
+        "resource_exceeded_category": "TEXT",
+        "resource_exceeded_limit_bytes": "INTEGER",
+        "resource_peak_bytes": "INTEGER",
+        "resource_largest_contributor": "TEXT",
+        "resource_enforcement_stage": "TEXT",
+        "resource_cleanup_status": "TEXT",
+        "resource_active_turn_completed": "INTEGER",
+        "resource_later_arms_blocked": "INTEGER",
+    }
+    present = {
+        str(row[1])
+        for row in connection.execute("PRAGMA table_info(comparison_suites)")
+    }
+    for name, definition in suite_columns.items():
+        if name not in present:
+            connection.execute(
+                f"ALTER TABLE comparison_suites ADD COLUMN {name} {definition}"
+            )
+    connection.executescript(COMPARISON_RESOURCE_SCHEMA_SQL)
+    connection.execute("PRAGMA user_version=12")
     connection.commit()
 
 

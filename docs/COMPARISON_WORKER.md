@@ -29,7 +29,7 @@ sglab comparisons import-campaign-snapshot \
 
 The importer takes an SQLite Online Backup for consistent read-only
 validation, copies only the hash-verified snapshot artifact, creates a fresh
-schema-v11 database, and derives the prompt, schema, registries, action space,
+schema-v12 database, and derives the prompt, schema, registries, action space,
 base instructions, and campaign budget deterministically. It rejects
 synthetic/demo sources and private or absolute runtime references.
 
@@ -151,8 +151,9 @@ audit
 Only the server-configured regular file named `auth.json` is copied, with mode
 `0600`, after plan verification. No config, history, sessions, SQLite,
 skills, prompts, or AGENTS.md are copied. The original auth-source environment
-variable is removed before App Server launch, and auth is excluded from size
-accounting and reports.
+variable is removed before App Server launch. Credential contents are never
+inspected by resource accounting; credential metadata has a redacted private
+category and is excluded from manifests and public reports.
 
 The existing hardened client supplies strict config, custom base instructions,
 empty developer instructions, personality none, read-only sandbox, approval
@@ -193,13 +194,65 @@ Plans bound:
 - authoritative total server tokens;
 - estimated client tokens per turn;
 - App Server stdout, stderr, and wire retention;
-- artifact-directory size;
+- preserved artifacts and each preserved file;
+- private runtime scratch and each runtime file;
 - worker wall time;
 - concurrent suites.
 
 Cached input and reasoning output remain subsets of their parent categories.
 Server `totalTokens` is authoritative. Missing usage is `null`; when a strict
 total-token cap is configured, missing usage stops the suite fail closed.
+
+## Resource accounting
+
+Schema v12 replaces the ambiguous whole-execution-tree
+`maximum_artifact_directory_bytes` check with four stable categories:
+
+- `preserved_artifacts`: immutable request, response, DirectorStateV2,
+  registries/schema material, bounded preserved logs, plan verification,
+  manifests, reports, and explicitly requested SQLite Online Backups;
+- `runtime_scratch`: private Codex homes, SQLite homes, WAL/SHM files,
+  sessions, rollouts, work directories, and process temporary files;
+- `credential_material`: only the isolated credential file, whose contents
+  are never opened by the accounting code;
+- `logs`: live App Server wire/stderr/stdout and worker log material before
+  final preservation.
+
+New suites default to 64 MiB total preserved artifacts, 512 MiB runtime
+scratch, 32 MiB for one preserved file, and 256 MiB for one runtime file.
+Wire, stderr, stdout, and worker wall time retain independent configurable
+limits. The deprecated artifact-directory field maps only to the preserved
+quota; it never also becomes the scratch quota. Every limit is serialized
+into the schema-2.1 plan and therefore changes the authorization fingerprint.
+Legacy schema-2.0 plans remain reproducible for audit but cannot start a new
+worker.
+
+One `lstat`-based traversal supplies both telemetry and enforcement. It never
+follows symlinks, reports escaping links, deduplicates regular files by
+device/inode, records apparent and allocated bytes, detects sparse files, and
+fails on inaccessible entries or bounded traversal limits. It traverses only
+the suite execution root.
+
+`comparison_resource_samples` retains at most the latest, peak,
+threshold-crossing, and terminal row for each category and attempt. Samples
+include file count, largest bounded file/directory summaries, the last growth
+event, lifecycle stage, enforcement decision, interruption status, and
+cleanup result. At a threshold crossing the worker commits the SQLite row and
+a bounded private diagnostic before interrupting or cleaning up the runtime.
+The diagnostic contains only safe relative labels and never credential
+contents or hashes.
+
+Preserved writes with known size are checked before the write. Runtime-scratch
+crossings interrupt an active turn when applicable, drain late events, close
+the App Server, fail the suite, and block later arms. A turn already persisted
+as completed and valid is not rewritten to failed when later shutdown or
+preservation infrastructure fails; the suite records the infrastructure
+failure separately.
+
+The bounded in-memory log collector retains the original observed byte count
+and emits a truncation marker when it discards older bytes. This prevents
+silent unbounded log growth while keeping the preserved copy inside its own
+limit.
 
 ## Web progress
 
@@ -226,8 +279,12 @@ The production worker state machine is exercised against the existing stdio
 App Server client with a synthetic fake executable. Covered outcomes include
 success, persistent resume, schema/semantic invalidity, timeout, late abort,
 missing usage, tool attempt, model/context mismatch, malformed JSONL,
-unsupported request, retry rejection, process crash, graceful close, and
-forced shutdown.
+unsupported request, retry rejection, process crash, graceful close, forced
+shutdown, 80 MiB transient scratch below quota, scratch and WAL threshold
+crossings, preserved-write and single-file rejection, bounded log growth, and
+an infrastructure failure after a valid completed arm. Standalone accounting
+tests cover sparse files, hard links, symlink escape, redacted credentials,
+and traversal bounds.
 
 The HTTP replay demonstration creates, prepares, authorizes, and starts a
 four-arm suite. Stateless S2 and persistent P1 complete, persistent P2 times
@@ -238,12 +295,15 @@ executions.
 
 ## Known limitations
 
-- No authenticated or paid comparison was run in this milestone.
+- The first bounded authenticated comparison remains an incomplete historical
+  high-only measurement. Its suite and consumed authorization are terminal
+  and must not be reused.
 - Public M6 historical fixtures intentionally contain only safe descriptors
   and hashes; they stay read-only and are not executable. A new executable
   suite needs a complete immutable fixture bundle.
-- The real runtime path is deterministically covered with the fake App Server,
-  but still requires a separately authorized authenticated smoke comparison.
+- The corrected runtime path is deterministically covered with the fake App
+  Server. Any fresh authenticated smoke requires a new suite, fingerprint,
+  authorization, and private runtime homes.
 - `compacted_thread` execution and retry policies require new fingerprinted
   authorization.
 - Default-context evidence is one controlled S2/P2 pair, not statistical

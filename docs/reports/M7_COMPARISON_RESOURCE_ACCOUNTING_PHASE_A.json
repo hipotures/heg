@@ -1,0 +1,202 @@
+{
+  "schema_version": "1.0",
+  "report_kind": "m7_comparison_resource_accounting_phase_a",
+  "generated_at": "2026-07-25",
+  "base_head": "492bc5f1f8d24d840dde65f7a3034e5ae8429357",
+  "production_ui_fix": "124d581ede6f31ab74392699af42e03cc0eea419",
+  "historical_suite": {
+    "suite_id": "comparison-4407a28f8e7c47b89a7226045b61b1b4",
+    "status": "failed",
+    "consumed_inference_starts": 1,
+    "high_arm_status": "completed",
+    "xhigh_persisted_status": "planned",
+    "xhigh_inference_started": false,
+    "active_worker_leases": 0,
+    "new_resource_sample_rows": 0,
+    "stored_plan_fingerprint": "89e09e8f82428e86f2a75ae24ff51f7187536c22c2ad023152dcb80b60512886",
+    "recomputed_plan_fingerprint": "89e09e8f82428e86f2a75ae24ff51f7187536c22c2ad023152dcb80b60512886"
+  },
+  "historical_terminal_tree": {
+    "preserved_artifacts": {
+      "apparent_bytes": 490240,
+      "allocated_bytes": 499712,
+      "file_count": 6
+    },
+    "runtime_scratch": {
+      "apparent_bytes": 5593175,
+      "allocated_bytes": 5746688,
+      "file_count": 73
+    },
+    "non_credential_total": {
+      "apparent_bytes": 6083415,
+      "allocated_bytes": 6246400,
+      "file_count": 79
+    },
+    "symlink_count": 0,
+    "hardlink_duplicates": 0,
+    "sparse_file_count": 0,
+    "largest_safe_relative_contributors": [
+      {
+        "kind": "runtime_sqlite_log_wal",
+        "apparent_bytes": 2311352
+      },
+      {
+        "kind": "runtime_sqlite_state_wal",
+        "apparent_bytes": 2163032
+      },
+      {
+        "kind": "preserved_wire_log",
+        "apparent_bytes": 424804
+      },
+      {
+        "kind": "runtime_model_cache",
+        "apparent_bytes": 304145
+      },
+      {
+        "kind": "runtime_rollout_jsonl",
+        "apparent_bytes": 64992
+      }
+    ],
+    "exact_transient_peak_available": false,
+    "exact_transient_contributor_available": false
+  },
+  "artifact_hashes_unchanged": {
+    "runtime_markdown": "13101b1b8c1d9454fd827b7c748eb41806f0e6c8d1d4f85b189c9de68ad36ad1",
+    "runtime_json": "e058596283801f742762aca158b8c5b2470f4134c17ede4a0097ffb7b017eb76",
+    "plan_verification": "a1697bb980cec34cadd08b68b56c3cf014311b2aff6dc6e5b6eba3e0fae9273c",
+    "request": "7c05e9745f2488e27a2a2c814a1c987b28eb75af541caba0e567f4a2e69c10c4",
+    "director_state_v2": "ae72cd0e1067fd90c2027e6ae8f9437ee71586551d7d64ca97d0fb1734938d53",
+    "response": "b3b247d7778beb4b9d83c056c90165895ce4c60f569c6f11229149826c1578b4",
+    "wire_log": "94b8291924da7e888af551e7b1cfa61f71082103d8cc2ec171aa753e25064db5"
+  },
+  "resource_contract": {
+    "accounting_version": 2,
+    "plan_schema_version": "2.1",
+    "categories": [
+      "preserved_artifacts",
+      "runtime_scratch",
+      "credential_material",
+      "logs"
+    ],
+    "defaults": {
+      "max_preserved_artifact_bytes": 67108864,
+      "max_runtime_scratch_bytes": 536870912,
+      "max_single_preserved_artifact_bytes": 33554432,
+      "max_single_runtime_file_bytes": 268435456,
+      "max_wire_log_bytes": 8388608,
+      "max_stderr_bytes": 262144,
+      "max_stdout_bytes": 1048576
+    },
+    "deprecated_mapping": {
+      "maximum_artifact_directory_bytes": "max_preserved_artifact_bytes"
+    },
+    "all_limits_fingerprinted": true,
+    "legacy_plan_execution_refused": true
+  },
+  "accounting": {
+    "lstat_only": true,
+    "symlinks_followed": false,
+    "escaping_symlinks_reported_and_rejected": true,
+    "hardlinks_deduplicated_by_device_inode": true,
+    "apparent_and_allocated_bytes_reported": true,
+    "sparse_files_identified": true,
+    "inaccessible_entries_are_errors": true,
+    "traversal_time_and_entry_count_bounded": true,
+    "credential_contents_opened": false,
+    "credential_paths_public": false,
+    "unrelated_workspaces_traversed": false
+  },
+  "persistence": {
+    "sqlite_schema_version": 12,
+    "bounded_sample_kinds": [
+      "latest",
+      "peak",
+      "threshold_crossing",
+      "terminal"
+    ],
+    "crossing_diagnostic_before_cleanup": true,
+    "largest_files_and_directories_bounded": true,
+    "interruption_and_cleanup_recorded": true
+  },
+  "deterministic_cases": {
+    "a_transient_scratch_below_quota": "passed",
+    "b_scratch_quota_exceeded": "passed",
+    "c_preserved_quota_exceeded": "passed",
+    "d_single_file_cap": "passed",
+    "e_sparse_file": "passed",
+    "f_hard_link": "passed",
+    "g_symlink_escape": "passed",
+    "h_sqlite_wal_growth": "passed",
+    "i_log_growth": "passed",
+    "j_two_valid_arms": "passed",
+    "completed_arm_survives_later_infrastructure_failure": "passed"
+  },
+  "root_cause": {
+    "old_whole_tree_counting_defect": "proven",
+    "closest_shape_reproduction": "proven",
+    "original_trigger_category": "strongly_supported_runtime_scratch",
+    "exact_original_transient_path": "unresolved_due_to_missing_transient_evidence",
+    "classification": "strongly_supported"
+  },
+  "verification": {
+    "focused_tests_passed": 63,
+    "full_suite_first": {
+      "passed": 209,
+      "failed": 0
+    },
+    "full_suite_second": {
+      "passed": 209,
+      "failed": 0
+    },
+    "full_suite_final": {
+      "passed": 211,
+      "failed": 0
+    },
+    "fake_worker_soak": {
+      "iterations": 10,
+      "passed": 10
+    },
+    "make_doctor": "passed",
+    "make_check": "passed",
+    "make_benchmark_smoke": "passed",
+    "make_dashboard_smoke": "passed",
+    "loopback_http_tests": "passed",
+    "playwright_rendered_ui": "passed",
+    "v11_to_v12_online_backup": "passed",
+    "sqlite_integrity_check": "ok",
+    "sqlite_foreign_key_check_rows": 0,
+    "orphan_processes": 0
+  },
+  "zero_effects": {
+    "model_inferences": 0,
+    "real_auth_accesses": 0,
+    "authenticated_app_server_turns": 0,
+    "graph_search_batches": 0,
+    "action_dispatches": 0,
+    "model_tool_calls": 0
+  },
+  "status": {
+    "resource_categories_separated": true,
+    "preserved_artifact_quota_enforced": true,
+    "runtime_scratch_quota_enforced": true,
+    "log_quotas_enforced": true,
+    "symlink_escape_prevented": true,
+    "hardlink_deduplication": true,
+    "sparse_file_accounting": true,
+    "peak_resource_attribution_persisted": true,
+    "quota_crossing_diagnostic_persisted": true,
+    "completed_arm_preserved_on_suite_failure": true,
+    "two_fake_arms_complete": true,
+    "historical_failed_suite_unchanged": true,
+    "zero_model_inferences": true,
+    "zero_real_auth_access": true,
+    "zero_graph_search_batches": true,
+    "zero_action_dispatches": true,
+    "zero_tool_calls": true,
+    "http_tests_passed": true,
+    "sqlite_schema_version": 12,
+    "sqlite_integrity_check": "ok",
+    "root_cause_classification": "strongly_supported",
+    "ready_for_fresh_bounded_comparison": true
+  }
+}

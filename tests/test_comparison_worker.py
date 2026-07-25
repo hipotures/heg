@@ -28,6 +28,7 @@ from sglab.db import (
     ACTIVE_DIRECTOR_SCHEMA_SQL,
     BASE_SCHEMA_SQL,
     COMPARISON_SCHEMA_SQL,
+    COMPARISON_WORKER_SCHEMA_SQL,
     SCHEMA_VERSION,
     connect,
 )
@@ -256,6 +257,27 @@ class ComparisonWorkerTests(unittest.TestCase):
             launcher=(sys.executable, str(self.fake), f"--fake-mode={mode}"),
         ).run()
 
+    def _authorize_with_limits(
+        self, **changes: int
+    ) -> tuple[str, list[str]]:
+        payload = worker_suite_payload()
+        payload.update(changes)
+        with ComparisonStore(self.database) as store:
+            suite_id = store.create_suite(payload, created_by="worker-test")
+            plan = store.prepare(suite_id)
+            store.authorize(suite_id, plan["plan_fingerprint"])
+            arm_ids = [
+                str(row["arm_id"])
+                for row in store.connection.execute(
+                    """
+                    SELECT arm_id FROM comparison_arms WHERE suite_id=?
+                    ORDER BY effective_order
+                    """,
+                    (suite_id,),
+                )
+            ]
+        return suite_id, arm_ids
+
     def test_success_uses_stateless_fresh_and_persistent_group(self) -> None:
         suite_id, arm_ids = self._authorize(three_arms=True)
         result = self._run(suite_id, "director-screen-success")
@@ -308,6 +330,302 @@ class ComparisonWorkerTests(unittest.TestCase):
                     for arm_id in arm_ids
                 ],
                 ["completed", "completed", "completed"],
+            )
+
+    def test_transient_80m_scratch_does_not_consume_preserved_quota(self) -> None:
+        suite_id, _ = self._authorize()
+        result = self._run(suite_id, "director-screen-scratch-80m")
+        self.assertTrue(result.ok, result.terminal_reason)
+        self.assertEqual(result.inference_starts, 2)
+        with ComparisonStore(self.database) as store:
+            scratch = store.connection.execute(
+                """
+                SELECT * FROM comparison_resource_samples
+                WHERE suite_id=? AND category='runtime_scratch'
+                  AND sample_kind='terminal'
+                """,
+                (suite_id,),
+            ).fetchone()
+            preserved = store.connection.execute(
+                """
+                SELECT * FROM comparison_resource_samples
+                WHERE suite_id=? AND category='preserved_artifacts'
+                  AND sample_kind='terminal'
+                """,
+                (suite_id,),
+            ).fetchone()
+            self.assertGreaterEqual(
+                scratch["peak_apparent_bytes"], 80 * 1024 * 1024
+            )
+            peak = store.connection.execute(
+                """
+                SELECT * FROM comparison_resource_samples
+                WHERE suite_id=? AND category='runtime_scratch'
+                  AND sample_kind='peak'
+                """,
+                (suite_id,),
+            ).fetchone()
+            peak_files = json.loads(peak["largest_files_json"])
+            self.assertTrue(any(row["sparse"] for row in peak_files))
+            self.assertLess(
+                peak["current_allocated_bytes"],
+                peak["current_apparent_bytes"],
+            )
+            self.assertLess(
+                scratch["current_apparent_bytes"],
+                scratch["peak_apparent_bytes"],
+            )
+            self.assertLess(
+                preserved["peak_apparent_bytes"], 64 * 1024 * 1024
+            )
+
+    def test_scratch_quota_crossing_is_attributed_before_cleanup(self) -> None:
+        suite_id, arm_ids = self._authorize_with_limits(
+            max_runtime_scratch_bytes=4 * 1024 * 1024,
+            max_single_runtime_file_bytes=4 * 1024 * 1024,
+        )
+        result = self._run(suite_id, "director-screen-scratch-exceed")
+        self.assertFalse(result.ok)
+        self.assertEqual(result.inference_starts, 1)
+        with ComparisonStore(self.database) as store:
+            crossing = store.connection.execute(
+                """
+                SELECT * FROM comparison_resource_samples
+                WHERE suite_id=? AND category='runtime_scratch'
+                  AND sample_kind='threshold_crossing'
+                """,
+                (suite_id,),
+            ).fetchone()
+            self.assertIsNotNone(crossing)
+            self.assertGreaterEqual(
+                crossing["peak_apparent_bytes"], 8 * 1024 * 1024
+            )
+            self.assertIn(
+                "transient-runtime.bin",
+                crossing["largest_contributor_relative_path"],
+            )
+            self.assertEqual(crossing["interruption_sent"], 1)
+            latest = [
+                store.connection.execute(
+                    """
+                    SELECT lifecycle_state FROM comparison_arm_transitions
+                    WHERE arm_id=? ORDER BY sequence_number DESC LIMIT 1
+                    """,
+                    (arm_id,),
+                ).fetchone()[0]
+                for arm_id in arm_ids
+            ]
+            self.assertEqual(latest, ["failed", "blocked"])
+
+    def test_preserved_artifact_quota_fails_before_large_response_write(self) -> None:
+        suite_id, arm_ids = self._authorize_with_limits(
+            max_preserved_artifact_bytes=1024 * 1024,
+            max_single_preserved_artifact_bytes=1024 * 1024,
+            maximum_stdout_bytes=8 * 1024 * 1024,
+        )
+        result = self._run(suite_id, "director-screen-large-response")
+        self.assertFalse(result.ok)
+        with ComparisonStore(self.database) as store:
+            suite = store._suite_row(suite_id)
+            self.assertEqual(
+                suite["resource_exceeded_category"], "preserved_artifacts"
+            )
+            first_root = (
+                self.workspace
+                / ".sglab"
+                / "comparisons"
+                / suite_id
+                / "arms"
+                / arm_ids[0]
+            )
+            self.assertFalse((first_root / "response.json").exists())
+            self.assertEqual(
+                store.connection.execute(
+                    """
+                    SELECT lifecycle_state FROM comparison_arm_transitions
+                    WHERE arm_id=? ORDER BY sequence_number DESC LIMIT 1
+                    """,
+                    (arm_ids[1],),
+                ).fetchone()[0],
+                "blocked",
+            )
+
+    def test_single_preserved_file_cap_identifies_pending_file(self) -> None:
+        suite_id, _ = self._authorize_with_limits(
+            max_preserved_artifact_bytes=4 * 1024 * 1024,
+            max_single_preserved_artifact_bytes=1024 * 1024,
+            maximum_stdout_bytes=8 * 1024 * 1024,
+        )
+        result = self._run(suite_id, "director-screen-large-response")
+        self.assertFalse(result.ok)
+        with ComparisonStore(self.database) as store:
+            suite = store._suite_row(suite_id)
+            self.assertEqual(
+                suite["resource_exceeded_limit_bytes"], 1024 * 1024
+            )
+            self.assertIn("response.json", suite["resource_largest_contributor"])
+
+    def test_wal_peak_survives_shutdown_cleanup(self) -> None:
+        suite_id, _ = self._authorize_with_limits(
+            max_runtime_scratch_bytes=4 * 1024 * 1024,
+            max_single_runtime_file_bytes=4 * 1024 * 1024,
+        )
+        result = self._run(suite_id, "director-screen-wal-growth")
+        self.assertFalse(result.ok)
+        with ComparisonStore(self.database) as store:
+            crossing = store.connection.execute(
+                """
+                SELECT * FROM comparison_resource_samples
+                WHERE suite_id=? AND category='runtime_scratch'
+                  AND sample_kind='threshold_crossing'
+                """,
+                (suite_id,),
+            ).fetchone()
+            terminal = store.connection.execute(
+                """
+                SELECT * FROM comparison_resource_samples
+                WHERE suite_id=? AND category='runtime_scratch'
+                  AND sample_kind='terminal'
+                """,
+                (suite_id,),
+            ).fetchone()
+            self.assertIn(
+                "state_5.sqlite-wal",
+                crossing["largest_contributor_relative_path"],
+            )
+            self.assertLess(
+                terminal["current_apparent_bytes"],
+                crossing["peak_apparent_bytes"],
+            )
+            self.assertEqual(terminal["cleanup_reduced_size"], 1)
+
+    def test_runtime_hardlink_is_not_double_counted_by_worker(self) -> None:
+        suite_id, _ = self._authorize_with_limits(
+            max_runtime_scratch_bytes=6 * 1024 * 1024,
+            max_single_runtime_file_bytes=6 * 1024 * 1024,
+        )
+        result = self._run(suite_id, "director-screen-hardlink")
+        self.assertTrue(result.ok, result.terminal_reason)
+        with ComparisonStore(self.database) as store:
+            peak = store.connection.execute(
+                """
+                SELECT * FROM comparison_resource_samples
+                WHERE suite_id=? AND category='runtime_scratch'
+                  AND sample_kind='peak'
+                """,
+                (suite_id,),
+            ).fetchone()
+            self.assertLess(
+                peak["peak_apparent_bytes"], 6 * 1024 * 1024
+            )
+            contributors = json.loads(peak["largest_files_json"])
+            self.assertEqual(
+                sum(
+                    "transient-runtime.bin" in row["relative_path"]
+                    for row in contributors
+                ),
+                1,
+            )
+
+    def test_runtime_symlink_escape_is_rejected_without_following(self) -> None:
+        suite_id, arm_ids = self._authorize()
+        result = self._run(suite_id, "director-screen-symlink-escape")
+        self.assertFalse(result.ok)
+        self.assertEqual(result.inference_starts, 1)
+        with ComparisonStore(self.database) as store:
+            crossing = store.connection.execute(
+                """
+                SELECT * FROM comparison_resource_samples
+                WHERE suite_id=? AND category='runtime_scratch'
+                  AND sample_kind='threshold_crossing'
+                """,
+                (suite_id,),
+            ).fetchone()
+            self.assertIn("escape-link", crossing["accounting_errors_json"])
+            self.assertEqual(
+                store.connection.execute(
+                    """
+                    SELECT lifecycle_state FROM comparison_arm_transitions
+                    WHERE arm_id=? ORDER BY sequence_number DESC LIMIT 1
+                    """,
+                    (arm_ids[1],),
+                ).fetchone()[0],
+                "blocked",
+            )
+
+    def test_completed_arm_remains_valid_when_shutdown_scratch_fails_suite(self) -> None:
+        suite_id, arm_ids = self._authorize_with_limits(
+            max_runtime_scratch_bytes=4 * 1024 * 1024,
+            max_single_runtime_file_bytes=4 * 1024 * 1024,
+        )
+        result = self._run(suite_id, "director-screen-scratch-on-shutdown")
+        self.assertFalse(result.ok)
+        self.assertEqual(result.inference_starts, 1)
+        with ComparisonStore(self.database) as store:
+            turn = store.connection.execute(
+                "SELECT * FROM comparison_turns WHERE arm_id=?",
+                (arm_ids[0],),
+            ).fetchone()
+            self.assertEqual(turn["lifecycle_status"], "completed")
+            self.assertEqual(turn["schema_valid"], 1)
+            self.assertEqual(turn["semantic_valid"], 1)
+            latest = [
+                store.connection.execute(
+                    """
+                    SELECT lifecycle_state FROM comparison_arm_transitions
+                    WHERE arm_id=? ORDER BY sequence_number DESC LIMIT 1
+                    """,
+                    (arm_id,),
+                ).fetchone()[0]
+                for arm_id in arm_ids
+            ]
+            self.assertEqual(latest, ["completed", "blocked"])
+            suite = store._suite_row(suite_id)
+            self.assertEqual(suite["status"], "failed")
+            self.assertEqual(suite["resource_active_turn_completed"], 1)
+            self.assertEqual(suite["resource_later_arms_blocked"], 1)
+
+    def test_log_growth_is_bounded_with_observed_size_marker(self) -> None:
+        suite_id, arm_ids = self._authorize_with_limits(
+            maximum_stderr_bytes=4096
+        )
+        result = self._run(suite_id, "director-screen-log-growth")
+        self.assertTrue(result.ok, result.terminal_reason)
+        for arm_id in arm_ids:
+            stderr = (
+                self.workspace
+                / ".sglab"
+                / "comparisons"
+                / suite_id
+                / "arms"
+                / arm_id
+                / "stderr.log"
+            )
+            self.assertLessEqual(stderr.stat().st_size, 4096)
+            self.assertIn("original_observed_bytes", stderr.read_text())
+
+    def test_two_valid_fake_arms_release_lease_without_orphan(self) -> None:
+        suite_id, _ = self._authorize()
+        result = self._run(suite_id, "director-screen-success")
+        self.assertTrue(result.ok, result.terminal_reason)
+        self.assertEqual(result.inference_starts, 2)
+        with ComparisonStore(self.database) as store:
+            self.assertNotIn(
+                "credential_material",
+                {
+                    row["category"]
+                    for row in store.suite_detail(suite_id)["resource_samples"]
+                },
+            )
+            self.assertEqual(
+                store.connection.execute(
+                    """
+                    SELECT count(*) FROM comparison_worker_leases
+                    WHERE suite_id=? AND released_at IS NULL
+                    """,
+                    (suite_id,),
+                ).fetchone()[0],
+                0,
             )
 
     def test_timeout_on_persistent_second_blocks_no_replacement(self) -> None:
@@ -804,7 +1122,7 @@ class ComparisonWorkerMigrationTests(unittest.TestCase):
                     canonical_sha256(metadata["materials"]["output_schema"]),
                 )
 
-    def test_v10_online_backup_migrates_to_v11_and_preserves_rows(self) -> None:
+    def test_v11_online_backup_migrates_to_v12_and_preserves_rows(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = root / "source.sqlite3"
@@ -813,6 +1131,7 @@ class ComparisonWorkerMigrationTests(unittest.TestCase):
             connection.executescript(BASE_SCHEMA_SQL)
             connection.executescript(ACTIVE_DIRECTOR_SCHEMA_SQL)
             connection.executescript(COMPARISON_SCHEMA_SQL)
+            connection.executescript(COMPARISON_WORKER_SCHEMA_SQL)
             connection.execute(
                 """
                 INSERT INTO comparison_fixtures
@@ -845,8 +1164,8 @@ class ComparisonWorkerMigrationTests(unittest.TestCase):
             backup.close()
             connection.close()
             migrated = connect(backup_path)
-            self.assertEqual(SCHEMA_VERSION, 11)
-            self.assertEqual(migrated.execute("PRAGMA user_version").fetchone()[0], 11)
+            self.assertEqual(SCHEMA_VERSION, 12)
+            self.assertEqual(migrated.execute("PRAGMA user_version").fetchone()[0], 12)
             self.assertEqual(
                 migrated.execute("PRAGMA integrity_check").fetchone()[0],
                 "ok",
@@ -856,11 +1175,12 @@ class ComparisonWorkerMigrationTests(unittest.TestCase):
             )
             preserved = migrated.execute(
                 """
-                SELECT read_only, runtime_executed_elsewhere
+                SELECT read_only, runtime_executed_elsewhere,
+                       resource_accounting_version
                 FROM comparison_suites WHERE suite_id='old-suite'
                 """
             ).fetchone()
-            self.assertEqual(tuple(preserved), (1, 1))
+            self.assertEqual(tuple(preserved), (1, 1, 1))
             migrated.close()
 
 

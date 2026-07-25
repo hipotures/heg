@@ -166,8 +166,10 @@ class _BoundedBytes:
         self.limit = limit
         self.parts: deque[bytes] = deque()
         self.size = 0
+        self.observed_size = 0
 
     def append(self, value: bytes) -> None:
+        self.observed_size += len(value)
         if len(value) >= self.limit:
             self.parts.clear()
             self.parts.append(value[-self.limit :])
@@ -180,12 +182,22 @@ class _BoundedBytes:
             self.size -= len(removed)
 
     def value(self) -> bytes:
-        return b"".join(self.parts)
+        value = b"".join(self.parts)
+        if self.observed_size <= len(value):
+            return value
+        marker = (
+            b'{"sglab_truncated":true,"original_observed_bytes":'
+            + str(self.observed_size).encode("ascii")
+            + b"}\n"
+        )
+        available = max(0, self.limit - len(marker))
+        return marker[-self.limit :] if available == 0 else marker + value[-available:]
 
     def take(self) -> bytes:
         value = self.value()
         self.parts.clear()
         self.size = 0
+        self.observed_size = 0
         return value
 
 

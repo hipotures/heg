@@ -2,6 +2,38 @@
 
 Last implementation audit: **2026-07-25**.
 
+## M7 comparison resource accounting repaired deterministically
+
+SQLite schema v12 and the comparison worker now separate preserved artifacts,
+private runtime scratch, credential material, and logs. New plans fingerprint
+independent 64 MiB preserved, 512 MiB scratch, 32 MiB single-preserved-file,
+256 MiB single-runtime-file, wire, stderr, stdout, and wall-time limits. The
+deprecated artifact-directory limit maps only to preserved artifacts. Legacy
+plans remain hash-stable and cannot be executed again.
+
+One bounded `lstat` traversal supplies enforcement and telemetry, does not
+follow symlinks, rejects escape, deduplicates hard links by device/inode,
+reports apparent and allocated bytes, identifies sparse files, redacts
+credential paths, and fails closed on inaccessible or over-bound traversal.
+The worker persists bounded latest/peak/crossing/terminal summaries and a
+private threshold diagnostic before interruption or cleanup. A valid completed
+arm remains valid when later shutdown infrastructure fails.
+
+The fake App Server proves 80 MiB transient scratch no longer consumes the
+preserved quota; scratch/WAL crossings retain exact attribution after cleanup;
+large preserved writes fail before creation; single-file and log bounds work;
+two valid arms complete sequentially; the lease is released and no fake
+process remains. The closest original-shape reproduction proves the old code
+incorrectly combined runtime scratch with artifacts. The exact historical
+transient contributor is unresolved because only the 6,083,415-byte
+post-shutdown non-auth tree remains.
+
+The failed Luna suite is unchanged: one consumed inference, high completed
+valid, xhigh never started, and the original fingerprint recomputes exactly.
+The UI now renders that history as an incomplete legacy infrastructure
+failure and shows separated resource controls for future suites. See
+`docs/reports/M7_COMPARISON_RESOURCE_ACCOUNTING_PHASE_A.md`.
+
 ## M7 first real comparison runtime failed closed
 
 Fresh explicit authorization bound the prepared Luna high-versus-xhigh suite

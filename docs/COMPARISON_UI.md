@@ -107,7 +107,7 @@ model_contract_matched
 
 A mismatch marks preflight failed and must abort before inference.
 
-## Schema v11
+## Schema v12
 
 The v10 comparison schema contains:
 
@@ -140,6 +140,32 @@ fresh/resumed-thread provenance, runtime-relative references, terminal
 reasons, resource limits, and immutable fixture material. Historical
 comparison suites and imported M6 rows are neither rewritten nor made
 executable.
+
+Schema v12 adds the separated resource contract without changing historical
+plan fingerprints. Existing rows receive `resource_accounting_version=1` and
+continue to render their original ambiguous artifact-directory authorization.
+New suites use version 2 and persist:
+
+- total and single-file limits for preserved artifacts;
+- total and single-file limits for private runtime scratch;
+- independent wire, stderr, and stdout limits;
+- bounded latest, peak, threshold-crossing, and terminal resource summaries;
+- exceeded category, exact limit, largest safe relative contributor, lifecycle
+  stage, interruption state, and cleanup outcome.
+
+The New suite form and immutable-plan card show each quota separately. Runtime
+progress shows current/peak scratch, current/peak preserved bytes, the largest
+safe runtime contributor, quota state, and cleanup state. Terminal
+infrastructure failures show the exceeded category and whether the active arm
+had already completed and later arms were blocked. Private absolute paths,
+credential paths, credential hashes, and credential contents are never
+rendered.
+
+The historical first Luna suite remains terminal and unchanged. Its high arm
+renders as completed valid, xhigh renders as blocked/not started for clarity,
+and the suite renders as an incomplete legacy infrastructure failure. This is
+a presentation inference; the historical xhigh database row remains
+`planned`.
 
 Cost profiles are append-only inputs to a snapshot. Each arm and rendered turn
 retains the exact profile ID, multiplier, API-equivalent rates, and currency
@@ -211,7 +237,8 @@ These are labelled “API-equivalent estimate,” not subscription charges.
 - `/comparisons/new` creates arm matrices from presets or custom rows.
 - `/comparisons/<id>` shows preflight, usage, cost, latency, hard validity,
   decisions, ratings, pairwise summaries, quality-cost points, worker lease,
-  stop state, current arm, and live progress.
+  stop state, current arm, live progress, separated quotas, resource peaks,
+  and terminal resource attribution.
 - `/comparisons/<id>/blind` hides model, effort, context, usage, latency, and
   cost until a rating is submitted.
 - `/model-cost-profiles` appends relative and optional API-equivalent profiles.

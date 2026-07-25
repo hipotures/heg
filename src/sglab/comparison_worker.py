@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import socket
+import stat
 import uuid
 
 from .comparisons import ComparisonStore, canonical_bytes, canonical_sha256
@@ -27,7 +28,15 @@ from .research.app_server_client import (
 from .research.context import DirectorContextMode, evidence_registry_ids
 from .research.store import ResearchStore, new_id
 from .research.validation import DecisionContext, validate_decision
-from .state import atomic_write_json, utc_now
+from .resource_accounting import (
+    CREDENTIAL_MATERIAL,
+    LOGS,
+    PRESERVED_ARTIFACTS,
+    RUNTIME_SCRATCH,
+    ResourceAccountingError,
+    account_execution_root,
+)
+from .state import atomic_write_json, read_json, utc_now
 
 
 LEASE_SECONDS = 15
@@ -60,6 +69,26 @@ class ComparisonWorkerError(RuntimeError):
 
 class WorkerStopped(ComparisonWorkerError):
     pass
+
+
+class ComparisonResourceLimitError(ComparisonWorkerError):
+    def __init__(
+        self,
+        category: str,
+        limit_bytes: int,
+        peak_bytes: int,
+        contributor: str,
+        stage: str,
+    ):
+        self.category = category
+        self.limit_bytes = limit_bytes
+        self.peak_bytes = peak_bytes
+        self.contributor = contributor
+        self.stage = stage
+        super().__init__(
+            f"{category} limit exceeded at {stage}: "
+            f"{peak_bytes} > {limit_bytes}; largest={contributor or 'none'}"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -356,6 +385,10 @@ class ComparisonWorker:
         self._groups: dict[str, RuntimeGroup] = {}
         self._research_store: ResearchStore | None = None
         self._runtime_campaign_id: str | None = None
+        self._resource_peaks: dict[str, tuple[int, int]] = {}
+        self._resource_previous: dict[str, int] = {}
+        self._resource_last_sample = 0.0
+        self._active_plan: dict[str, Any] | None = None
 
     def run(self) -> WorkerResult:
         terminal = "failed"
@@ -392,14 +425,18 @@ class ComparisonWorker:
 
     async def _run(self) -> WorkerResult:
         plan, authorization = self._verify_exact_plan()
+        self._active_plan = plan
         self._create_attempt(plan, authorization)
+        self._sample_resources(plan, "before_auth_preparation")
         self._acquire_lease()
         self._mark_suite_running()
         self._ensure_runtime_campaign()
         arms = list(plan["arms"])
         nonfatal_failures: list[str] = []
+        current_arm_id: str | None = None
         try:
             for actual_order, arm in enumerate(arms):
+                current_arm_id = str(arm["arm_id"])
                 with ComparisonStore(
                     self.database
                 ) as store, store.connection:
@@ -484,10 +521,41 @@ class ComparisonWorker:
                 str(error),
                 self.inference_starts,
             )
-        except BaseException:
+        except BaseException as error:
+            if current_arm_id is not None:
+                if self._latest_transition(current_arm_id) not in TERMINAL_STATES:
+                    self._transition(
+                        current_arm_id,
+                        "failed",
+                        f"infrastructure failure: {type(error).__name__}",
+                    )
+                self._block_remaining(
+                    arms,
+                    current_arm_id,
+                    f"infrastructure failure: {type(error).__name__}",
+                    include_current=False,
+                )
+            self._sample_resources(
+                plan,
+                "before_graceful_shutdown",
+                arm_id=current_arm_id,
+                enforce=False,
+            )
             await self._close_groups()
+            self._sample_resources(
+                plan,
+                "after_cleanup",
+                arm_id=current_arm_id,
+                enforce=False,
+                terminal=True,
+                cleanup=True,
+            )
+            self._record_resource_terminal_context(current_arm_id)
             raise
         await self._close_groups()
+        self._sample_resources(
+            plan, "after_cleanup", enforce=False, terminal=True, cleanup=True
+        )
         if nonfatal_failures:
             reason = "; ".join(nonfatal_failures)
             self._finish_attempt("failed", reason)
@@ -538,6 +606,10 @@ class ComparisonWorker:
                 raise ComparisonWorkerError("historical comparison suite is read-only")
             if suite["status"] != "authorized":
                 raise ComparisonWorkerError("suite is not authorized")
+            if int(suite["resource_accounting_version"]) < 2:
+                raise ComparisonWorkerError(
+                    "legacy resource plan cannot execute; create a fresh suite"
+                )
             if not suite["measurement_only"] or suite["execute_decisions"]:
                 raise ComparisonWorkerError(
                     "worker permits measurement-only non-executing suites"
@@ -692,7 +764,9 @@ class ComparisonWorker:
             "verified_at": utc_now(),
             "ok": True,
         }
-        digest = _write_private_json(artifact, payload)
+        digest = self._write_preserved_json(
+            artifact, payload, "plan_verification_write"
+        )
         relative = artifact.relative_to(self.workspace)
         with ComparisonStore(self.database) as store, store.connection:
             store.connection.execute(
@@ -937,6 +1011,7 @@ class ComparisonWorker:
             self._transition(arm_id, "failed", "runtime contract mismatch")
             return "failed"
         self._transition(arm_id, "thread_ready")
+        self._sample_resources(plan, "after_thread_start", arm_id=arm_id)
         reservation_id = self._reserve_inference(
             authorization, arm_id, str(plan["maximum_inference_starts"])
         )
@@ -944,6 +1019,7 @@ class ComparisonWorker:
         app_turn_record_id, comparison_turn_id = self._begin_turn(
             arm, runtime, contract
         )
+        self._sample_resources(plan, "after_turn_start", arm_id=arm_id)
         reached = False
 
         def on_event(event: AppServerTurnEvent) -> None:
@@ -979,6 +1055,12 @@ class ComparisonWorker:
                 ),
             )
             self._sync_comparison_turn(comparison_turn_id, app_turn_record_id)
+            now = monotonic()
+            if now - self._resource_last_sample >= 0.25:
+                self._sample_resources(
+                    plan, "wire_log_growth", arm_id=arm_id
+                )
+                self._resource_last_sample = now
             if any(
                 item_type not in {"userMessage", "reasoning", "agentMessage"}
                 for _, item_type in event.items
@@ -1004,7 +1086,12 @@ class ComparisonWorker:
                 on_event,
                 float(plan["timeout_seconds"]),
                 int(plan["maximum_worker_wall_seconds"]),
+                plan,
+                arm_id,
             )
+            self._sample_resources(plan, "after_final_answer", arm_id=arm_id)
+            if result.usage is not None:
+                self._sample_resources(plan, "after_usage", arm_id=arm_id)
         except AppServerTurnTimeout:
             if not reached:
                 self._release_reservation(reservation_id, "timeout_before_inference")
@@ -1174,7 +1261,7 @@ class ComparisonWorker:
         )
         self._release_reservation(reservation_id, status)
         self._transition(arm_id, status, "; ".join(issues) or None)
-        self._check_artifact_limit(plan)
+        self._sample_resources(plan, "after_preservation", arm_id=arm_id)
         if arm["context_mode"] == DirectorContextMode.STATELESS_TURNS.value:
             await self._close_group(group_id)
         return status
@@ -1199,6 +1286,9 @@ class ComparisonWorker:
             directory.chmod(0o700)
         _copy_auth_only(self.auth_source, application_data)
         self._transition(str(arm["arm_id"]), "auth_prepared")
+        self._sample_resources(
+            plan, "after_runtime_home_creation", arm_id=str(arm["arm_id"])
+        )
         config = AppServerConfig(
             application_data=application_data,
             launcher=self.launcher,
@@ -1217,8 +1307,14 @@ class ComparisonWorker:
             ),
         )
         client = AppServerClient(config)
+        self._sample_resources(
+            plan, "after_private_directories", arm_id=str(arm["arm_id"])
+        )
         await client.start()
         self._transition(str(arm["arm_id"]), "server_started")
+        self._sample_resources(
+            plan, "after_app_server_start", arm_id=str(arm["arm_id"])
+        )
         session = await client.start_thread(contract.base_instructions)
         session_record_id = self._record_session(session, arm)
         return RuntimeGroup(client, session, session_record_id, application_data)
@@ -1271,9 +1367,13 @@ class ComparisonWorker:
             "executed": False,
         }
         request_path = root / "request.json"
-        request_digest = _write_private_json(request_path, request)
+        request_digest = self._write_preserved_json(
+            request_path, request, "request_preservation"
+        )
         snapshot_path = root / "director-state-v2.json"
-        snapshot_digest = _write_private_json(snapshot_path, contract.state)
+        snapshot_digest = self._write_preserved_json(
+            snapshot_path, contract.state, "director_state_preservation"
+        )
         wire_path = root / "wire.jsonl"
         self._research_store.record_snapshot(
             snapshot_id=snapshot_id,
@@ -1345,6 +1445,8 @@ class ComparisonWorker:
         on_event: Callable[[AppServerTurnEvent], None],
         timeout_seconds: float,
         maximum_worker_wall_seconds: int,
+        plan: dict[str, Any],
+        arm_id: str,
     ) -> AppServerTurnResult:
         task = asyncio.create_task(
             client.turn(
@@ -1360,6 +1462,9 @@ class ComparisonWorker:
                 await asyncio.sleep(0.1)
                 if monotonic() >= next_heartbeat:
                     self._heartbeat()
+                    self._sample_resources(
+                        plan, "turn_runtime_poll", arm_id=arm_id
+                    )
                     next_heartbeat = monotonic() + HEARTBEAT_SECONDS
                 if monotonic() - self.started > maximum_worker_wall_seconds:
                     await client.interrupt_active_turn()
@@ -1379,6 +1484,20 @@ class ComparisonWorker:
                         pass
                     raise WorkerStopped("operator stop requested")
             return await asyncio.wait_for(task, timeout=timeout_seconds)
+        except ComparisonResourceLimitError:
+            await client.interrupt_active_turn()
+            self._mark_resource_interruption()
+            try:
+                await asyncio.wait_for(
+                    asyncio.shield(task),
+                    timeout=client.config.timeout_drain_seconds,
+                )
+            except (TimeoutError, AppServerError):
+                pass
+            if not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+            raise
         except BaseException:
             if not task.done():
                 task.cancel()
@@ -1667,17 +1786,22 @@ class ComparisonWorker:
         assert arm_row is not None
         root = self._execution_root() / "arms" / str(arm_row["arm_id"])
         response_path = root / "response.json"
-        response_digest = _write_private_json(
+        response_digest = self._write_preserved_json(
             response_path,
             result.parsed if isinstance(result.parsed, dict) else {"raw": result.text},
+            "response_preservation",
         )
         group = self._groups[str(arm_row["conversation_group_id"])]
         wire = group.client.take_wire_bytes()
         wire_path = root / "wire.jsonl"
-        wire_digest = _write_private_bytes(wire_path, wire)
+        wire_digest = self._write_preserved_bytes(
+            wire_path, wire, "wire_log_preservation"
+        )
         stderr_path = root / "stderr.log"
-        _write_private_bytes(
-            stderr_path, group.client.stderr_text.encode("utf-8")
+        self._write_preserved_bytes(
+            stderr_path,
+            group.client.stderr_text.encode("utf-8"),
+            "stderr_log_preservation",
         )
         usage = _usage_payload(result)
         self._research_store.complete_turn(
@@ -1841,7 +1965,19 @@ class ComparisonWorker:
         runtime = self._groups.pop(group_id, None)
         if runtime is None:
             return
+        if self._active_plan is not None:
+            self._sample_resources(
+                self._active_plan,
+                "during_shutdown_draining",
+                enforce=False,
+            )
         await runtime.client.close(force=interrupted)
+        if self._active_plan is not None:
+            self._sample_resources(
+                self._active_plan,
+                "after_app_server_shutdown",
+                enforce=not interrupted,
+            )
         if (
             runtime.client.last_shutdown_mode in {"sigterm", "sigkill"}
             and self._stop_requested()
@@ -1959,14 +2095,576 @@ class ComparisonWorker:
         if monotonic() - self.started > int(plan["maximum_worker_wall_seconds"]):
             raise ComparisonWorkerError("maximum worker wall time exceeded")
 
-    def _check_artifact_limit(self, plan: dict[str, Any]) -> None:
-        total = sum(
-            path.stat().st_size
-            for path in self._execution_root().rglob("*")
-            if path.is_file() and path.name != "auth.json"
+    def _resource_limit(self, plan: dict[str, Any], category: str) -> int | None:
+        if category == PRESERVED_ARTIFACTS:
+            return int(plan["max_preserved_artifact_bytes"])
+        if category == RUNTIME_SCRATCH:
+            return int(plan["max_runtime_scratch_bytes"])
+        return None
+
+    def _write_preserved_json(
+        self, path: Path, value: dict[str, Any], stage: str
+    ) -> str:
+        encoded = (json.dumps(value, sort_keys=True, indent=2) + "\n").encode(
+            "utf-8"
         )
-        if total > int(plan["maximum_artifact_directory_bytes"]):
-            raise ComparisonWorkerError("comparison artifact directory limit exceeded")
+        self._preflight_preserved_write(path, len(encoded), stage)
+        return _write_private_json(path, value)
+
+    def _write_preserved_bytes(
+        self, path: Path, value: bytes, stage: str
+    ) -> str:
+        self._preflight_preserved_write(path, len(value), stage)
+        return _write_private_bytes(path, value)
+
+    def _preflight_preserved_write(
+        self, path: Path, size: int, stage: str
+    ) -> None:
+        plan = self._active_plan
+        if plan is None:
+            raise ComparisonWorkerError("resource plan is unavailable")
+        root = self._execution_root()
+        try:
+            relative = path.absolute().relative_to(root.absolute())
+        except ValueError as error:
+            raise ComparisonWorkerError(
+                "preserved artifact path escapes execution root"
+            ) from error
+        accounting = account_execution_root(root)
+        total = accounting.categories[PRESERVED_ARTIFACTS].apparent_bytes
+        if path.exists():
+            metadata = path.lstat()
+            if not stat.S_ISREG(metadata.st_mode):
+                raise ComparisonWorkerError(
+                    "preserved artifact target is not a regular file"
+                )
+            total -= int(metadata.st_size)
+        prospective = total + size
+        single_limit = int(plan["max_single_preserved_artifact_bytes"])
+        total_limit = int(plan["max_preserved_artifact_bytes"])
+        log_limit: int | None = None
+        lowered = relative.as_posix().lower()
+        if "wire" in lowered:
+            log_limit = int(plan["maximum_wire_log_bytes"])
+        elif "stderr" in lowered:
+            log_limit = int(plan["maximum_stderr_bytes"])
+        elif "stdout" in lowered:
+            log_limit = int(plan["maximum_stdout_bytes"])
+        if log_limit is not None and size > log_limit:
+            self._raise_prospective_limit(
+                accounting, LOGS, log_limit, size, relative.as_posix(), stage
+            )
+        if size > single_limit:
+            self._raise_prospective_limit(
+                accounting,
+                PRESERVED_ARTIFACTS,
+                single_limit,
+                size,
+                relative.as_posix(),
+                stage,
+            )
+        if prospective > total_limit:
+            self._raise_prospective_limit(
+                accounting,
+                PRESERVED_ARTIFACTS,
+                total_limit,
+                prospective,
+                relative.as_posix(),
+                stage,
+            )
+
+    def _raise_prospective_limit(
+        self,
+        accounting: Any,
+        category: str,
+        limit: int,
+        measured: int,
+        contributor: str,
+        stage: str,
+    ) -> None:
+        old_peak = self._resource_peaks.get(category, (0, 0))
+        peak = max(old_peak[0], measured)
+        self._resource_peaks[category] = (peak, old_peak[1])
+        self._persist_resource_sample(
+            accounting=accounting,
+            category=category,
+            sample_kind="threshold_crossing",
+            stage=stage,
+            arm_id=None,
+            peak=(peak, old_peak[1]),
+            growth={
+                "stage": stage,
+                "pending_write_bytes": measured,
+                "pending_relative_path": contributor,
+            },
+            decision="exceeded",
+            limit=limit,
+            cleanup=False,
+            errors=[],
+        )
+        self._persist_resource_diagnostic(
+            accounting,
+            category,
+            limit,
+            peak,
+            contributor,
+            stage,
+            None,
+        )
+        if self.attempt_id is not None:
+            with ComparisonStore(self.database) as store, store.connection:
+                store.connection.execute(
+                    """
+                    UPDATE comparison_suites
+                    SET resource_exceeded_category=?,
+                        resource_exceeded_limit_bytes=?,
+                        resource_peak_bytes=?,
+                        resource_largest_contributor=?,
+                        resource_enforcement_stage=?,
+                        resource_cleanup_status='pending'
+                    WHERE suite_id=?
+                    """,
+                    (
+                        category,
+                        limit,
+                        peak,
+                        contributor,
+                        stage,
+                        self.suite_id,
+                    ),
+                )
+        raise ComparisonResourceLimitError(
+            category, limit, peak, contributor, stage
+        )
+
+    def _sample_resources(
+        self,
+        plan: dict[str, Any],
+        stage: str,
+        *,
+        arm_id: str | None = None,
+        enforce: bool = True,
+        terminal: bool = False,
+        cleanup: bool = False,
+    ) -> None:
+        try:
+            accounting = account_execution_root(self._execution_root())
+        except ResourceAccountingError as error:
+            raise ComparisonWorkerError(
+                f"resource accounting failed at {stage}: {error}"
+            ) from error
+        violation: tuple[str, int, int, str] | None = None
+        errors = list(accounting.escaping_symlinks)
+        for category, totals in accounting.categories.items():
+            previous = self._resource_previous.get(category, 0)
+            old_peak = self._resource_peaks.get(category, (0, 0))
+            peak = (
+                max(old_peak[0], totals.apparent_bytes),
+                max(old_peak[1], totals.allocated_bytes),
+            )
+            is_new_peak = peak != old_peak
+            self._resource_peaks[category] = peak
+            self._resource_previous[category] = totals.apparent_bytes
+            growth = (
+                {
+                    "stage": stage,
+                    "previous_apparent_bytes": previous,
+                    "current_apparent_bytes": totals.apparent_bytes,
+                    "growth_bytes": totals.apparent_bytes - previous,
+                }
+                if totals.apparent_bytes > previous
+                else None
+            )
+            limit = self._resource_limit(plan, category)
+            contributor = (
+                totals.largest_files[0].relative_path
+                if totals.largest_files
+                else None
+            )
+            decision = "within_limit"
+            if accounting.escaping_symlinks and category == RUNTIME_SCRATCH:
+                decision = "accounting_error"
+                violation = (
+                    RUNTIME_SCRATCH,
+                    int(plan["max_runtime_scratch_bytes"]),
+                    totals.apparent_bytes,
+                    accounting.escaping_symlinks[0],
+                )
+            elif (
+                limit is not None
+                and totals.apparent_bytes > limit
+                and violation is None
+            ):
+                decision = "exceeded"
+                violation = (
+                    category,
+                    limit,
+                    totals.apparent_bytes,
+                    contributor or "",
+                )
+            self._persist_resource_sample(
+                accounting=accounting,
+                category=category,
+                sample_kind="terminal" if terminal else "latest",
+                stage=stage,
+                arm_id=arm_id,
+                peak=peak,
+                growth=growth,
+                decision=decision,
+                limit=limit,
+                cleanup=cleanup,
+                errors=errors,
+            )
+            if is_new_peak:
+                self._persist_resource_sample(
+                    accounting=accounting,
+                    category=category,
+                    sample_kind="peak",
+                    stage=stage,
+                    arm_id=arm_id,
+                    peak=peak,
+                    growth=growth,
+                    decision=decision,
+                    limit=limit,
+                    cleanup=cleanup,
+                    errors=errors,
+                )
+
+        for value in accounting.files:
+            cap: int | None = None
+            if value.category == PRESERVED_ARTIFACTS:
+                cap = int(plan["max_single_preserved_artifact_bytes"])
+            elif value.category == RUNTIME_SCRATCH:
+                cap = int(plan["max_single_runtime_file_bytes"])
+            elif value.category == LOGS:
+                lowered = value.relative_path.lower()
+                if "wire" in lowered:
+                    cap = int(plan["maximum_wire_log_bytes"])
+                elif "stderr" in lowered:
+                    cap = int(plan["maximum_stderr_bytes"])
+                elif "stdout" in lowered:
+                    cap = int(plan["maximum_stdout_bytes"])
+                else:
+                    cap = int(plan["max_single_runtime_file_bytes"])
+            if (
+                cap is not None
+                and value.apparent_bytes > cap
+                and violation is None
+            ):
+                violation = (
+                    value.category,
+                    cap,
+                    value.apparent_bytes,
+                    value.relative_path,
+                )
+
+        if violation is not None and enforce:
+            category, limit, measured, contributor = violation
+            peak = max(self._resource_peaks.get(category, (0, 0))[0], measured)
+            self._persist_resource_sample(
+                accounting=accounting,
+                category=category,
+                sample_kind="threshold_crossing",
+                stage=stage,
+                arm_id=arm_id,
+                peak=(peak, self._resource_peaks.get(category, (0, 0))[1]),
+                growth=None,
+                decision="exceeded",
+                limit=limit,
+                cleanup=False,
+                errors=errors,
+            )
+            self._persist_resource_diagnostic(
+                accounting,
+                category,
+                limit,
+                peak,
+                contributor,
+                stage,
+                arm_id,
+            )
+            with ComparisonStore(self.database) as store, store.connection:
+                store.connection.execute(
+                    """
+                    UPDATE comparison_suites
+                    SET resource_exceeded_category=?,
+                        resource_exceeded_limit_bytes=?,
+                        resource_peak_bytes=?,
+                        resource_largest_contributor=?,
+                        resource_enforcement_stage=?,
+                        resource_cleanup_status='pending'
+                    WHERE suite_id=?
+                    """,
+                    (
+                        category,
+                        limit,
+                        peak,
+                        contributor,
+                        stage,
+                        self.suite_id,
+                    ),
+                )
+            raise ComparisonResourceLimitError(
+                category, limit, peak, contributor, stage
+            )
+
+    def _persist_resource_sample(
+        self,
+        *,
+        accounting: Any,
+        category: str,
+        sample_kind: str,
+        stage: str,
+        arm_id: str | None,
+        peak: tuple[int, int],
+        growth: dict[str, Any] | None,
+        decision: str,
+        limit: int | None,
+        cleanup: bool,
+        errors: list[str],
+    ) -> None:
+        if self.attempt_id is None:
+            return
+        totals = accounting.categories[category]
+        largest = totals.largest_files[0] if totals.largest_files else None
+        cleanup_reduced = (
+            int(totals.apparent_bytes < peak[0]) if cleanup else None
+        )
+        values = (
+            _identifier("resource-sample"),
+            self.suite_id,
+            self.attempt_id,
+            arm_id,
+            category,
+            sample_kind,
+            stage,
+            utc_now(),
+            totals.apparent_bytes,
+            totals.allocated_bytes,
+            peak[0],
+            peak[1],
+            totals.file_count,
+            largest.relative_path if largest else None,
+            largest.apparent_bytes if largest else None,
+            json.dumps(
+                [value.as_dict() for value in totals.largest_files],
+                sort_keys=True,
+            ),
+            json.dumps(totals.largest_directories, sort_keys=True),
+            json.dumps(growth, sort_keys=True) if growth else None,
+            decision,
+            limit,
+            0,
+            cleanup_reduced,
+            json.dumps(errors, sort_keys=True),
+        )
+        with ComparisonStore(self.database) as store, store.connection:
+            store.connection.execute(
+                """
+                INSERT INTO comparison_resource_samples
+                (resource_sample_id, suite_id, attempt_id, arm_id, category,
+                 sample_kind, lifecycle_stage, sampled_at,
+                 current_apparent_bytes, current_allocated_bytes,
+                 peak_apparent_bytes, peak_allocated_bytes, file_count,
+                 largest_contributor_relative_path,
+                 largest_contributor_bytes, largest_files_json,
+                 largest_directories_json, last_growth_event_json,
+                 enforcement_decision, configured_limit_bytes,
+                 interruption_sent, cleanup_reduced_size,
+                 accounting_errors_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(suite_id, attempt_id, category, sample_kind)
+                DO UPDATE SET
+                    arm_id=excluded.arm_id,
+                    lifecycle_stage=excluded.lifecycle_stage,
+                    sampled_at=excluded.sampled_at,
+                    current_apparent_bytes=excluded.current_apparent_bytes,
+                    current_allocated_bytes=excluded.current_allocated_bytes,
+                    peak_apparent_bytes=MAX(
+                        comparison_resource_samples.peak_apparent_bytes,
+                        excluded.peak_apparent_bytes
+                    ),
+                    peak_allocated_bytes=MAX(
+                        comparison_resource_samples.peak_allocated_bytes,
+                        excluded.peak_allocated_bytes
+                    ),
+                    file_count=excluded.file_count,
+                    largest_contributor_relative_path=
+                        excluded.largest_contributor_relative_path,
+                    largest_contributor_bytes=
+                        excluded.largest_contributor_bytes,
+                    largest_files_json=excluded.largest_files_json,
+                    largest_directories_json=excluded.largest_directories_json,
+                    last_growth_event_json=COALESCE(
+                        excluded.last_growth_event_json,
+                        comparison_resource_samples.last_growth_event_json
+                    ),
+                    enforcement_decision=excluded.enforcement_decision,
+                    configured_limit_bytes=excluded.configured_limit_bytes,
+                    interruption_sent=MAX(
+                        comparison_resource_samples.interruption_sent,
+                        excluded.interruption_sent
+                    ),
+                    cleanup_reduced_size=COALESCE(
+                        excluded.cleanup_reduced_size,
+                        comparison_resource_samples.cleanup_reduced_size
+                    ),
+                    accounting_errors_json=excluded.accounting_errors_json
+                """,
+                values,
+            )
+
+    def _persist_resource_diagnostic(
+        self,
+        accounting: Any,
+        category: str,
+        limit: int,
+        peak: int,
+        contributor: str,
+        stage: str,
+        arm_id: str | None,
+    ) -> None:
+        if self.attempt_id is None:
+            return
+        totals = accounting.categories[category]
+        payload = {
+            "schema_version": "1.0",
+            "suite_id": self.suite_id,
+            "attempt_id": self.attempt_id,
+            "arm_id": arm_id,
+            "category": category,
+            "configured_limit_bytes": limit,
+            "current_apparent_bytes": totals.apparent_bytes,
+            "current_allocated_bytes": totals.allocated_bytes,
+            "peak_apparent_bytes": peak,
+            "largest_contributor": contributor,
+            "largest_files": [
+                value.as_dict() for value in totals.largest_files[:8]
+            ],
+            "largest_directories": totals.largest_directories[:8],
+            "lifecycle_stage": stage,
+            "interruption_sent": False,
+            "cleanup_reduced_size": None,
+            "sampled_at": utc_now(),
+        }
+        path = (
+            self._execution_root()
+            / "resource-diagnostics"
+            / f"{self.attempt_id}-{category}.json"
+        )
+        _write_private_json(path, payload)
+
+    def _mark_resource_interruption(self) -> None:
+        if self.attempt_id is None:
+            return
+        with ComparisonStore(self.database) as store, store.connection:
+            store.connection.execute(
+                """
+                UPDATE comparison_resource_samples SET interruption_sent=1
+                WHERE suite_id=? AND attempt_id=?
+                  AND sample_kind='threshold_crossing'
+                """,
+                (self.suite_id, self.attempt_id),
+            )
+        self._update_resource_diagnostic(interruption_sent=True)
+
+    def _record_resource_terminal_context(
+        self, arm_id: str | None
+    ) -> None:
+        if self.attempt_id is None:
+            return
+        with ComparisonStore(self.database) as store, store.connection:
+            completed = False
+            if arm_id is not None:
+                row = store.connection.execute(
+                    """
+                    SELECT lifecycle_status FROM comparison_turns
+                    WHERE arm_id=?
+                    """,
+                    (arm_id,),
+                ).fetchone()
+                completed = row is not None and row["lifecycle_status"] == "completed"
+            blocked = bool(
+                store.connection.execute(
+                    """
+                    SELECT count(*) FROM comparison_arm_transitions
+                    WHERE suite_id=? AND lifecycle_state='blocked'
+                    """,
+                    (self.suite_id,),
+                ).fetchone()[0]
+            )
+            store.connection.execute(
+                """
+                UPDATE comparison_suites
+                SET resource_cleanup_status='sampled_after_cleanup',
+                    resource_active_turn_completed=?,
+                    resource_later_arms_blocked=?
+                WHERE suite_id=?
+                """,
+                (int(completed), int(blocked), self.suite_id),
+            )
+        self._update_resource_diagnostic(
+            active_turn_completed=completed,
+            later_arms_blocked=blocked,
+            cleanup_reduced_size=True,
+        )
+
+    def _update_resource_diagnostic(
+        self,
+        *,
+        interruption_sent: bool | None = None,
+        active_turn_completed: bool | None = None,
+        later_arms_blocked: bool | None = None,
+        cleanup_reduced_size: bool | None = None,
+    ) -> None:
+        if self.attempt_id is None:
+            return
+        with ComparisonStore(self.database) as store:
+            categories = [
+                str(row["category"])
+                for row in store.connection.execute(
+                    """
+                    SELECT category FROM comparison_resource_samples
+                    WHERE suite_id=? AND attempt_id=?
+                      AND sample_kind='threshold_crossing'
+                    """,
+                    (self.suite_id, self.attempt_id),
+                )
+            ]
+        for category in categories:
+            path = (
+                self._execution_root()
+                / "resource-diagnostics"
+                / f"{self.attempt_id}-{category}.json"
+            )
+            if not path.is_file() or path.is_symlink():
+                continue
+            payload = read_json(path)
+            if interruption_sent is not None:
+                payload["interruption_sent"] = interruption_sent
+            if active_turn_completed is not None:
+                payload["active_turn_completed"] = active_turn_completed
+            if later_arms_blocked is not None:
+                payload["later_arms_blocked"] = later_arms_blocked
+            if cleanup_reduced_size is not None:
+                with ComparisonStore(self.database) as store:
+                    row = store.connection.execute(
+                        """
+                        SELECT cleanup_reduced_size
+                        FROM comparison_resource_samples
+                        WHERE suite_id=? AND attempt_id=? AND category=?
+                          AND sample_kind='terminal'
+                        """,
+                        (self.suite_id, self.attempt_id, category),
+                    ).fetchone()
+                payload["cleanup_reduced_size"] = (
+                    bool(row["cleanup_reduced_size"])
+                    if row is not None
+                    and row["cleanup_reduced_size"] is not None
+                    else cleanup_reduced_size
+                )
+            _write_private_json(path, payload)
 
     def _block_remaining(
         self,

@@ -328,6 +328,10 @@ class ComparisonStore:
             "maximum_stderr_bytes",
             "maximum_wire_log_bytes",
             "maximum_artifact_directory_bytes",
+            "max_preserved_artifact_bytes",
+            "max_runtime_scratch_bytes",
+            "max_single_preserved_artifact_bytes",
+            "max_single_runtime_file_bytes",
             "maximum_worker_wall_seconds",
             "notes",
         }
@@ -383,6 +387,20 @@ class ComparisonStore:
             raise ValueError("maximum client-owned token limit is out of bounds")
         if int(fixture["estimated_client_owned_tokens"]) > max_client:
             raise ValueError("fixture exceeds the client-owned token limit")
+        legacy_artifact_limit = payload.get("maximum_artifact_directory_bytes")
+        preserved_limit = payload.get("max_preserved_artifact_bytes")
+        if legacy_artifact_limit is not None and preserved_limit is not None:
+            if legacy_artifact_limit != preserved_limit:
+                raise ValueError(
+                    "deprecated maximum_artifact_directory_bytes must equal "
+                    "max_preserved_artifact_bytes"
+                )
+        if preserved_limit is None:
+            preserved_limit = (
+                legacy_artifact_limit
+                if legacy_artifact_limit is not None
+                else 64 * 1024 * 1024
+            )
         resource_limits = {
             "maximum_stdout_bytes": _bounded_integer(
                 payload.get("maximum_stdout_bytes", 1024 * 1024),
@@ -402,11 +420,33 @@ class ComparisonStore:
                 4096,
                 128 * 1024 * 1024,
             ),
-            "maximum_artifact_directory_bytes": _bounded_integer(
-                payload.get("maximum_artifact_directory_bytes", 64 * 1024 * 1024),
-                "maximum_artifact_directory_bytes",
+            "max_preserved_artifact_bytes": _bounded_integer(
+                preserved_limit,
+                "max_preserved_artifact_bytes",
                 1024 * 1024,
                 1024 * 1024 * 1024,
+            ),
+            "max_runtime_scratch_bytes": _bounded_integer(
+                payload.get("max_runtime_scratch_bytes", 512 * 1024 * 1024),
+                "max_runtime_scratch_bytes",
+                1024 * 1024,
+                4 * 1024 * 1024 * 1024,
+            ),
+            "max_single_preserved_artifact_bytes": _bounded_integer(
+                payload.get(
+                    "max_single_preserved_artifact_bytes", 32 * 1024 * 1024
+                ),
+                "max_single_preserved_artifact_bytes",
+                1024,
+                1024 * 1024 * 1024,
+            ),
+            "max_single_runtime_file_bytes": _bounded_integer(
+                payload.get(
+                    "max_single_runtime_file_bytes", 256 * 1024 * 1024
+                ),
+                "max_single_runtime_file_bytes",
+                1024,
+                4 * 1024 * 1024 * 1024,
             ),
             "maximum_worker_wall_seconds": _bounded_integer(
                 payload.get(
@@ -417,6 +457,18 @@ class ComparisonStore:
                 MAX_WORKER_WALL_SECONDS,
             ),
         }
+        if (
+            resource_limits["max_single_preserved_artifact_bytes"]
+            > resource_limits["max_preserved_artifact_bytes"]
+        ):
+            raise ValueError(
+                "single preserved artifact limit exceeds preserved total"
+            )
+        if (
+            resource_limits["max_single_runtime_file_bytes"]
+            > resource_limits["max_runtime_scratch_bytes"]
+        ):
+            raise ValueError("single runtime file limit exceeds scratch total")
 
         suite_id = _id("comparison")
         randomized = ordering == "randomized"
@@ -481,9 +533,12 @@ class ComparisonStore:
                  fail_closed, notes, maximum_stdout_bytes,
                  maximum_stderr_bytes, maximum_wire_log_bytes,
                  maximum_artifact_directory_bytes,
-                 maximum_worker_wall_seconds)
+                 maximum_worker_wall_seconds, resource_accounting_version,
+                 max_preserved_artifact_bytes, max_runtime_scratch_bytes,
+                 max_single_preserved_artifact_bytes,
+                 max_single_runtime_file_bytes)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', 1, 0, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, 2, ?, ?, ?, ?)
                 """,
                 (
                     suite_id,
@@ -506,8 +561,12 @@ class ComparisonStore:
                     resource_limits["maximum_stdout_bytes"],
                     resource_limits["maximum_stderr_bytes"],
                     resource_limits["maximum_wire_log_bytes"],
-                    resource_limits["maximum_artifact_directory_bytes"],
+                    resource_limits["max_preserved_artifact_bytes"],
                     resource_limits["maximum_worker_wall_seconds"],
+                    resource_limits["max_preserved_artifact_bytes"],
+                    resource_limits["max_runtime_scratch_bytes"],
+                    resource_limits["max_single_preserved_artifact_bytes"],
+                    resource_limits["max_single_runtime_file_bytes"],
                 ),
             )
             for planned_order, arm in enumerate(arms):
@@ -717,7 +776,7 @@ class ComparisonStore:
             key: len({str(arm[key]) for arm in arms}) <= 1
             for key in compared_hashes
         }
-        return {
+        plan = {
             "schema_version": "2.0",
             "suite_id": suite_id,
             "fixture_reference": suite["fixture_reference"],
@@ -749,6 +808,27 @@ class ComparisonStore:
                 "maximum_worker_wall_seconds"
             ],
         }
+        if int(suite["resource_accounting_version"]) >= 2:
+            plan["schema_version"] = "2.1"
+            plan["resource_accounting_version"] = 2
+            plan["max_preserved_artifact_bytes"] = suite[
+                "max_preserved_artifact_bytes"
+            ]
+            plan["max_runtime_scratch_bytes"] = suite[
+                "max_runtime_scratch_bytes"
+            ]
+            plan["max_single_preserved_artifact_bytes"] = suite[
+                "max_single_preserved_artifact_bytes"
+            ]
+            plan["max_single_runtime_file_bytes"] = suite[
+                "max_single_runtime_file_bytes"
+            ]
+            plan["deprecated_resource_limit_mapping"] = {
+                "maximum_artifact_directory_bytes": (
+                    "max_preserved_artifact_bytes"
+                )
+            }
+        return plan
 
     def plan_payload(self, suite_id: str) -> dict[str, Any]:
         return self._plan_payload(suite_id)
@@ -1285,6 +1365,14 @@ class ComparisonStore:
                 latest["lifecycle_state"] if latest else arm["status"]
             )
             arm["lifecycle_reason"] = latest["reason"] if latest else None
+            arm["display_lifecycle_state"] = arm["lifecycle_state"]
+            if (
+                suite["status"] == "failed"
+                and arm["lifecycle_state"] == "planned"
+                and int(suite["consumed_inference_starts"])
+                < int(suite["planned_inference_count"])
+            ):
+                arm["display_lifecycle_state"] = "blocked / not started"
         turns = [
             dict(row)
             for row in self.connection.execute(
@@ -1358,6 +1446,17 @@ class ComparisonStore:
             """,
             (suite_id,),
         ).fetchone()
+        resource_samples = [
+            dict(row)
+            for row in self.connection.execute(
+                """
+                SELECT * FROM comparison_resource_samples
+                WHERE suite_id=? AND category<>'credential_material'
+                ORDER BY sampled_at, category, sample_kind
+                """,
+                (suite_id,),
+            )
+        ]
         worker = {
             "attempt": dict(attempt) if attempt is not None else None,
             "lease": dict(lease) if lease is not None else None,
@@ -1372,6 +1471,7 @@ class ComparisonStore:
                 int(turn["server_reported_total_tokens"] or 0)
                 for turn in turns
             ),
+            "resource_samples": resource_samples,
         }
         blind_order_seed = None
         if blind:
@@ -1435,6 +1535,7 @@ class ComparisonStore:
             "blind_order_seed": blind_order_seed,
             "worker": worker,
             "arm_transitions": transitions,
+            "resource_samples": [] if blind else resource_samples,
         }
 
     def list_suites(self, filters: dict[str, str] | None = None) -> list[dict[str, Any]]:
