@@ -134,6 +134,62 @@ const id=v=>v?`<span class="id-value">${idText(v)}${copyButton(v)}</span>`:'—'
 const statusTone=v=>{const s=String(v??'').toLowerCase();if(/complete|valid|pass|applied|running|active|certified/.test(s))return'good';if(/fail|invalid|reject|error|abort|disagree/.test(s))return'bad';if(/time|stop|block|pause|unknown|pressure/.test(s))return'warn';return'neutral'};
 const badge=v=>`<span class="badge ${statusTone(v)}">${esc(label(v??'unknown'))}</span>`;
 const expandedDetails=new Set();
+const detailScrollPositions=new Map();
+const refreshDetailsSelector='details[data-persist-details][open],details[data-turn-communication][open]';
+function detailIdentity(details){
+  if(!details)return null;
+  if(details.dataset.persistDetails!==undefined)return `persist:${details.dataset.persistDetails}`;
+  if(details.dataset.turnCommunication!==undefined)return `turn:${details.dataset.turnCommunication}`;
+  return null;
+}
+function findDetails(identity){
+  if(!identity)return null;
+  return [...document.querySelectorAll(refreshDetailsSelector)].find(details=>detailIdentity(details)===identity)||null;
+}
+function captureRefreshView(){
+  const openDetails=[...document.querySelectorAll(refreshDetailsSelector)];
+  for(const details of openDetails){
+    const identity=detailIdentity(details);
+    if(!identity)continue;
+    detailScrollPositions.set(identity,[...details.querySelectorAll('pre')].map(pre=>({top:pre.scrollTop,left:pre.scrollLeft})));
+  }
+  const pointX=Math.max(1,Math.min(window.innerWidth-1,Math.round(window.innerWidth/2)));
+  const pointY=Math.max(1,Math.min(window.innerHeight-1,Math.round(window.innerHeight/2)));
+  let anchor=document.elementFromPoint(pointX,pointY)?.closest(refreshDetailsSelector)||null;
+  if(!anchor){
+    const visible=openDetails.filter(details=>{const rect=details.getBoundingClientRect();return rect.bottom>0&&rect.top<window.innerHeight});
+    anchor=visible.sort((a,b)=>{
+      const ar=a.getBoundingClientRect(),br=b.getBoundingClientRect();
+      const aDistance=ar.top<=pointY&&ar.bottom>=pointY?0:Math.min(Math.abs(ar.top-pointY),Math.abs(ar.bottom-pointY));
+      const bDistance=br.top<=pointY&&br.bottom>=pointY?0:Math.min(Math.abs(br.top-pointY),Math.abs(br.bottom-pointY));
+      return aDistance-bDistance||(ar.height-br.height);
+    })[0]||null;
+  }
+  return {
+    identity:detailIdentity(anchor),
+    top:anchor?.getBoundingClientRect().top??0,
+    left:anchor?.getBoundingClientRect().left??0,
+    scrollX:window.scrollX,
+    scrollY:window.scrollY,
+  };
+}
+function restoreRefreshView(view){
+  if(!view)return;
+  for(const details of document.querySelectorAll(refreshDetailsSelector)){
+    const positions=detailScrollPositions.get(detailIdentity(details))||[];
+    [...details.querySelectorAll('pre')].forEach((pre,index)=>{
+      const position=positions[index];
+      if(position){pre.scrollTop=position.top;pre.scrollLeft=position.left}
+    });
+  }
+  const anchor=findDetails(view.identity);
+  if(anchor){
+    const rect=anchor.getBoundingClientRect();
+    window.scrollBy(rect.left-view.left,rect.top-view.top);
+  }else{
+    window.scrollTo(view.scrollX,view.scrollY);
+  }
+}
 const technical=(title,value,key)=>value===null||value===undefined?'':`<details data-persist-details="${esc(key||title)}"${expandedDetails.has(key||title)?' open':''}><summary>${esc(title)}</summary><pre>${esc(typeof value==='string'?value:JSON.stringify(value,null,2))}</pre></details>`;
 const field=(name,value)=>{const technicalKey=/(^|[\s_-])(id|ids|hash|sha-?256|fingerprint)($|[\s_-])|prompt|director state|output schema/i.test(name);return value===null||value===undefined||value===''?'':`<div><dt>${esc(label(name))}</dt><dd>${typeof value==='string'&&technicalKey?id(value):esc(value)}</dd></div>`};
 function semanticValue(value,key=''){
@@ -233,12 +289,12 @@ function turnsView(rows){
   if(!rows.length)return '<div class="empty">No Director turns yet.</div>';
   return `<div class="turn-list">${rows.map(row=>`<article class="turn-card"><div class="turn-card-head"><div><div class="chips">${badge(row.status)} ${badge(row.thread_lifecycle||'unrecorded')}</div><h3>Director turn ${idText(row.turn_id||'pending')}</h3><div class="meta">Thread ${id(row.thread_id)}</div></div>${row.error_kind?`<div class="effect bad"><strong>${esc(label(row.error_kind))}</strong></div>`:''}</div><div class="turn-metrics"><div class="metric"><span>Latency</span><strong>${Number(row.wall_seconds||0).toFixed(2)} s</strong></div><div class="metric"><span>Input</span><strong>${fmt(row.input_tokens)} tokens</strong><span>${fmt(row.cached_input_tokens)} cached</span></div><div class="metric"><span>Output</span><strong>${fmt(row.output_tokens)} tokens</strong><span>${fmt(row.reasoning_output_tokens)} reasoning</span></div><div class="metric emphasis"><span>Server total</span><strong>${fmt(row.total_tokens)}</strong></div></div>${turnCommunication(row)}</article>`).join('')}</div>`;
 }
-async function loadTurnCommunication(details){
+async function loadTurnCommunication(details,refreshView=null){
   const key=details.dataset.turnCommunication,body=details.querySelector('[data-communication-body]');
   const cached=turnCommunicationCache.get(key);
-  if(cached&&cached.response!==null&&cached.response!==undefined){body.innerHTML=communicationContent(cached,key);return}
+  if(cached&&cached.response!==null&&cached.response!==undefined){body.innerHTML=communicationContent(cached,key);if(refreshView)requestAnimationFrame(()=>restoreRefreshView(refreshView));return}
   body.innerHTML='<div class="empty">Loading persisted communication…</div>';
-  try{const value=await api(`/api/research-campaign/turn/${encodeURIComponent(key)}/communication`);turnCommunicationCache.set(key,value);if(details.isConnected&&details.open)body.innerHTML=communicationContent(value,key)}catch(error){if(details.isConnected)body.innerHTML=`<div class="empty">${esc(error.message)}</div>`}
+  try{const value=await api(`/api/research-campaign/turn/${encodeURIComponent(key)}/communication`);turnCommunicationCache.set(key,value);if(details.isConnected&&details.open){body.innerHTML=communicationContent(value,key);if(refreshView)requestAnimationFrame(()=>restoreRefreshView(refreshView))}}catch(error){if(details.isConnected)body.innerHTML=`<div class="empty">${esc(error.message)}</div>`}
 }
 const expandedLists=new Set();
 function boundedList(targetId,rows,renderer,limit=6){
@@ -261,8 +317,7 @@ function boundedList(targetId,rows,renderer,limit=6){
 async function refresh(){
   try{
     const [state,campaign,logs,candidates,runs,comparison]=await Promise.all([api('/api/status'),api('/api/research-campaign'),api('/api/logs?limit=30'),api('/api/candidates?limit=24'),api('/api/runs'),api('/api/comparisons-summary')]);
-    const openDetails=document.querySelector('details[data-turn-communication][open]');
-    const viewAnchor=openDetails?{key:openDetails.dataset.turnCommunication,top:openDetails.getBoundingClientRect().top,scrollY:window.scrollY}:{key:null,top:0,scrollY:window.scrollY};
+    const viewAnchor=captureRefreshView();
     const last=comparison.last_suite;
     const campaignMode=Boolean(campaign.campaign_id);
     const controllable=campaign.state==='running'||campaign.state==='paused_by_operator';
@@ -283,12 +338,12 @@ async function refresh(){
     boundedList('lanes-list',campaign.lanes||[],laneCard);
     boundedList('revisions',campaign.revisions||[],r=>`<article class="card"><div class="card-head"><div><h3>${idText(r.lane_id)}</h3><span class="meta">Version ${esc(r.old_lane_version)} → ${esc(r.new_lane_version)} · ${esc(r.applied_at)} · ${copyButton(r.lane_id)}</span></div>${badge(r.action_id?'Director action':'Recovery')}</div>${semantic({before:r.old_parameters,after:r.new_parameters})}${technical('Revision record',r,`revision:${r.lane_id}:${r.new_lane_version}`)}</article>`);
     turns.innerHTML=turnsView(campaign.turns||[]);
-    for(const details of turns.querySelectorAll('details[data-turn-communication][open]'))loadTurnCommunication(details);
+    for(const details of turns.querySelectorAll('details[data-turn-communication][open]'))loadTurnCommunication(details,viewAnchor);
     metrics('metrics',[['Status',state.status],['Run',shortId(state.run_id||'—')],['Target',state.target||'—'],['Order',state.configuration?.order??'—'],['Algorithm',label(state.configuration?.algorithm||'—')],['Seed',state.configuration?.seed??'—'],['Elapsed',`${Number(state.elapsed_seconds||0).toFixed(1)} s`],['Candidates / s',Number(state.throughput?.candidates_per_second||0).toFixed(1)],['Candidates',fmt(state.throughput?.candidates||0)],['Workers',`${state.workers?.alive??0} / ${state.workers?.configured??0}`],['Aggregate RSS',`${((state.resources?.aggregate_rss_bytes||0)/1048576).toFixed(1)} MiB`],['Exact queue',state.exact_verification?.queued??0],['Verified candidates',state.exact_verification?.verified_candidates??0],['Best score',JSON.stringify(state.best?.score?.ordering_key||[])]]);
     boundedList('logs',logs.lines||[],eventLine);
     boundedList('candidates-list',campaignMode?(campaign.candidates||[]):(candidates.candidates||[]),candidateCard);
     document.getElementById('runs').innerHTML=compactTable((runs.runs||[]).slice(0,20),[['Run',r=>id(r.run_id)],['Created',r=>esc(r.created_at)],['Target',r=>esc(r.target)],['Configuration',r=>`${esc(r.parameters?.order??'—')} · ${esc(label(r.parameters?.algorithm||'—'))}`],['Status',r=>badge(r.live_status)],['Candidates',r=>fmt(r.candidates??0)],['Throughput',r=>`${Number(r.candidates_per_second||0).toFixed(1)}/s`],['Best score',r=>esc(JSON.stringify(r.best_score||[]))]]);
-    requestAnimationFrame(()=>{if(viewAnchor.key){const restored=[...document.querySelectorAll('details[data-turn-communication]')].find(item=>item.dataset.turnCommunication===viewAnchor.key);if(restored)window.scrollBy(0,restored.getBoundingClientRect().top-viewAnchor.top);else window.scrollTo(window.scrollX,viewAnchor.scrollY)}else window.scrollTo(window.scrollX,viewAnchor.scrollY)});
+    requestAnimationFrame(()=>restoreRefreshView(viewAnchor));
   }catch(error){notice.textContent=error.message}
 }
 const campaignForm=document.getElementById('campaign-form');
