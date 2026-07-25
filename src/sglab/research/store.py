@@ -89,6 +89,29 @@ class ResearchStore:
             raise KeyError(campaign_id)
         return dict(row)
 
+    def start_prepared_campaign(
+        self,
+        campaign_id: str,
+        *,
+        deadline_at: str,
+    ) -> None:
+        now = utc_now()
+        with self.transaction() as database:
+            cursor = database.execute(
+                """
+                UPDATE research_campaigns
+                SET state='running', state_version=state_version+1,
+                    deadline_at=?, updated_at=?
+                WHERE campaign_id=? AND state='prepared'
+                  AND deadline_at IS NULL
+                """,
+                (deadline_at, now, campaign_id),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError(
+                    "prepared campaign cannot be started in its current state"
+                )
+
     def transition_campaign(
         self,
         campaign_id: str,

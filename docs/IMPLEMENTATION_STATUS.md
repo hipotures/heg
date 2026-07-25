@@ -2,6 +2,33 @@
 
 Last implementation audit: **2026-07-25**.
 
+## First real graph campaign authorization gate
+
+The production campaign CLI now has a deterministic `prepare` boundary for a
+fresh non-synthetic workspace. It creates a durable `prepared` campaign row,
+an exact plan artifact, campaign ID, and canonical fingerprint before any
+credential access. Campaign-specific auth import and start both require that
+exact fingerprint. The fixed one-hour contract binds Luna/high/stateless,
+twelve scientific cycles, at most twenty-four App Server turns including one
+possible replan per state, eight bounded search lanes, M4 verifier limits, and
+App Server diagnostic/runtime quotas. Per-lane and aggregate CPU-share bounds
+are explicit in the fingerprinted search contract.
+
+The existing production orchestrator and action space remain authoritative;
+there is no scripted experiment sequence. Valid Director actions are
+dispatched. Invalid responses are persisted and never executed. One invalid
+response may be replanned only on a fresh stateless thread with the identical
+DirectorStateV2 and validation errors; a second invalid response stops the
+runtime fail-closed. Prepared campaigns disable App Server retries and provider
+recovery.
+
+The campaign's private App Server tree now uses the reviewed no-follow
+resource-accounting and expected-wrapper policy. Scratch and single-file
+limits, bounded wire/stderr/stdout, safe peak telemetry, strict model/effort
+matching, and graceful shutdown are part of the fingerprinted contract.
+Preparation and installed protocol compliance perform no model turn and do
+not access authentication.
+
 ## M7 hypothesis and independent-arm contracts
 
 SQLite schema v14 adds a nullable, fingerprinted arm-failure policy. Historical

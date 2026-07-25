@@ -24,6 +24,13 @@ sglab ai-experiment run --workspace ./new-private-workspace \
   --evaluation-cap <cap-from-phase-a> \
   --context-mode persistent_thread
 
+sglab research-campaign prepare --workspace ./workspace --time-limit 1h
+sglab research-campaign auth-import --workspace ./workspace \
+  --campaign-id <campaign-id> \
+  --plan-fingerprint <authorized-fingerprint> \
+  --from-codex-home /explicit/authorized/codex/home
+sglab research-campaign start --workspace ./workspace --time-limit 1h \
+  --plan-fingerprint <authorized-fingerprint>
 sglab research-campaign start --workspace ./workspace --time-limit 24h
 sglab research-campaign start --workspace ./workspace --until-success
 sglab research-campaign status --workspace ./workspace
@@ -60,6 +67,14 @@ Normal campaign start exposes no scientific tuning flags. The installed target
 is read-only, and the AI Director chooses algorithms, graph sizes, lane count,
 seeds, mutation parameters, resource shares, and review cadence. `run` below
 is retained as the legacy fixed-configuration engine command.
+
+The prepared real-campaign contract fixes Luna/high/stateless execution,
+allows at most one fresh stateless replan for the same invalid scientific
+state, and fingerprints the Director, search, verifier, App Server, filesystem
+policy, and wall-time bounds. Authentication import and start both require the
+exact fingerprint. Invalid decisions are persisted but never dispatched.
+The search contract also records the maximum per-lane resource share and the
+aggregate share implied by the maximum active-lane count.
 
 ## Workspace and diagnosis
 

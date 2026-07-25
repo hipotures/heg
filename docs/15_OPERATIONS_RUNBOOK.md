@@ -20,15 +20,39 @@ Before importing credentials, run the no-model protocol/configuration audit:
 sglab ai-director compliance-audit --workspace ./workspace
 ```
 
-Import an existing Codex login only after explicit authorization:
+For a fingerprint-bound real campaign, prepare the immutable runtime contract
+before importing credentials:
 
 ```bash
-sglab ai-director auth-import \
+sglab research-campaign prepare \
   --workspace ./workspace \
+  --time-limit 1h
+```
+
+Record the returned campaign ID and plan fingerprint, inspect the fixed model,
+turn, lane, per-lane and aggregate CPU-share, verifier, and runtime bounds,
+then stop for explicit authorization.
+After authorization for that exact fingerprint, import an existing Codex login
+only into that campaign's private runtime:
+
+```bash
+sglab research-campaign auth-import \
+  --workspace ./workspace \
+  --campaign-id <campaign-id> \
+  --plan-fingerprint <authorized-fingerprint> \
   --from-codex-home /explicit/authorized/codex/home
 ```
 
-Then choose exactly one stop contract:
+Start rejects a changed plan or a missing exact fingerprint:
+
+```bash
+sglab research-campaign start \
+  --workspace ./workspace \
+  --time-limit 1h \
+  --plan-fingerprint <authorized-fingerprint>
+```
+
+The legacy operator path still accepts exactly one stop contract:
 
 ```bash
 sglab research-campaign start --workspace ./workspace --time-limit 24h

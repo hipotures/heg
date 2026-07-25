@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from types import SimpleNamespace
 import copy
 import hashlib
 import json
@@ -10,6 +11,7 @@ import unittest
 from pathlib import Path
 
 from sglab.research.app_server_client import (
+    AppServerError,
     AppServerSession,
     AppServerTurnResult,
     AppServerUsage,
@@ -512,6 +514,8 @@ class StubDecisionClient:
             effort="high",
             resumed=False,
             raw_thread={},
+            server_reported_model="model",
+            server_reported_effort="high",
         )
 
     async def resume_thread(self, thread_id: str, _: str) -> AppServerSession:
@@ -561,6 +565,46 @@ class StubDecisionClient:
 
 
 class ActiveDirectorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_strict_campaign_model_contract_fails_before_turn(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = ResearchStore(root / "campaign.sqlite3")
+            store.create_campaign(
+                campaign_id="campaign-contract",
+                target="erdos_gyarfas",
+                target_definition_sha256="a" * 64,
+                stop_mode="time_limit",
+                deadline_at="2026-07-25T00:00:00Z",
+            )
+            client = StubDecisionClient([valid_decision()])
+            client.config = SimpleNamespace(
+                model="gpt-5.6-luna",
+                effort="high",
+            )
+            director = ActiveDirector(
+                client=client,  # type: ignore[arg-type]
+                store=store,
+                campaign_id="campaign-contract",
+                campaign_dir=root,
+                codex_version="0.145.0",
+                executable_sha256="c" * 64,
+                protocol_schema_sha256="d" * 64,
+                enforce_model_contract=True,
+            )
+            with self.assertRaisesRegex(
+                AppServerError,
+                "model contract mismatch",
+            ):
+                await director.start()
+            self.assertEqual(
+                store.connection.execute(
+                    "SELECT count(*) FROM app_server_turns"
+                ).fetchone()[0],
+                0,
+            )
+            await director.close()
+            store.close()
+
     async def test_single_turn_request_never_spends_a_repair_turn(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -624,7 +668,7 @@ class ActiveDirectorTests(unittest.IsolatedAsyncioTestCase):
             await director.close()
             store.close()
 
-    async def test_one_repair_turn_uses_same_snapshot_and_private_artifacts(self) -> None:
+    async def test_one_repair_turn_uses_fresh_stateless_thread(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             store = ResearchStore(root / "campaign.sqlite3")
@@ -755,9 +799,8 @@ class ActiveDirectorTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(statuses["action-start"], "accepted")
             self.assertEqual(statuses["action-patch"], "rejected_stale_state")
             self.assertEqual(store.campaign("campaign-1")["state_version"], 1)
-            self.assertTrue(director.rollover_due(maximum_turns=2))
-            rolled = await director.rollover()
-            self.assertEqual(rolled.thread_id, "thread-2")
+            self.assertEqual(client.thread_count, 2)
+            self.assertFalse(director.rollover_due(maximum_turns=2))
             sessions = store.connection.execute(
                 """
                 SELECT thread_id, parent_thread_id, state
@@ -773,7 +816,7 @@ class ActiveDirectorTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(
                 len(list((root / "director" / "rollovers").glob("*.json"))),
-                1,
+                0,
             )
             wire_dir = root / "director" / "wire"
             for index in range(70):

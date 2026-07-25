@@ -1,4 +1,7 @@
 import asyncio
+import json
+import os
+import shutil
 import tempfile
 import unittest
 from datetime import UTC, datetime, timedelta
@@ -6,15 +9,249 @@ from pathlib import Path
 
 from sglab.cli import build_parser
 from sglab.research.campaign import (
+    CampaignPlanError,
+    PRODUCTION_CONTEXT_MODE,
+    PRODUCTION_DIRECTOR_EFFORT,
+    PRODUCTION_DIRECTOR_MODEL,
+    PRODUCTION_MAXIMUM_DIRECTOR_TURNS,
     ResearchCampaignRunner,
     campaign_status,
+    load_prepared_campaign_plan,
     parse_duration,
+    prepare_campaign_plan,
     request_campaign_control,
 )
 from sglab.research.store import ResearchStore
+from sglab.resource_accounting import EXPECTED_APP_SERVER_WRAPPERS
 
 
 class CampaignOperatorContractTests(unittest.TestCase):
+    def test_prepare_persists_exact_non_auth_campaign_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            (workspace / "workspace.json").write_text(
+                json.dumps(
+                    {
+                        "workspace_kind": "first_real_graph_campaign",
+                        "synthetic_data": False,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with ResearchStore(workspace / "results.sqlite3"):
+                pass
+            plan = prepare_campaign_plan(
+                workspace,
+                duration_seconds=3600,
+            )
+            self.assertEqual(
+                plan["director"]["model"],
+                PRODUCTION_DIRECTOR_MODEL,
+            )
+            self.assertEqual(
+                plan["director"]["reasoning_effort"],
+                PRODUCTION_DIRECTOR_EFFORT,
+            )
+            self.assertEqual(
+                plan["director"]["context_mode"],
+                PRODUCTION_CONTEXT_MODE.value,
+            )
+            self.assertEqual(
+                plan["director"]["maximum_turns_including_replans"],
+                PRODUCTION_MAXIMUM_DIRECTOR_TURNS,
+            )
+            self.assertEqual(
+                plan["decision_policy"]["valid_actions"],
+                "execute",
+            )
+            self.assertEqual(
+                plan["search_limits"]["maximum_resource_share_per_lane"],
+                1.0,
+            )
+            self.assertEqual(
+                plan["search_limits"]["maximum_aggregate_resource_share"],
+                float(plan["search_limits"]["maximum_active_lanes"]),
+            )
+            self.assertFalse(
+                plan["scientific_contract"]["fixed_experiment_sequence"]
+            )
+            loaded = load_prepared_campaign_plan(
+                workspace,
+                campaign_id=plan["campaign_id"],
+                expected_fingerprint=plan["plan_fingerprint"],
+            )
+            self.assertEqual(loaded, plan)
+            status = campaign_status(workspace, plan["campaign_id"])
+            self.assertEqual(status["state"], "prepared")
+            self.assertFalse(status["auth_imported"])
+            self.assertEqual(status["turns"], [])
+            self.assertEqual(status["lanes"], [])
+
+    def test_prepared_plan_tamper_and_wrong_fingerprint_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            (workspace / "workspace.json").write_text(
+                json.dumps(
+                    {
+                        "workspace_kind": "first_real_graph_campaign",
+                        "synthetic_data": False,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with ResearchStore(workspace / "results.sqlite3"):
+                pass
+            plan = prepare_campaign_plan(
+                workspace,
+                duration_seconds=3600,
+            )
+            with self.assertRaisesRegex(
+                CampaignPlanError,
+                "authorized fingerprint",
+            ):
+                load_prepared_campaign_plan(
+                    workspace,
+                    expected_fingerprint="0" * 64,
+                )
+            plan_path = (
+                workspace
+                / "research-campaigns"
+                / plan["campaign_id"]
+                / "campaign-plan.json"
+            )
+            changed = json.loads(plan_path.read_text(encoding="utf-8"))
+            changed["director"]["model"] = "different"
+            plan_path.write_text(
+                json.dumps(changed),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                CampaignPlanError,
+                "fingerprint mismatch",
+            ):
+                load_prepared_campaign_plan(workspace)
+
+    def test_prepared_campaign_requires_auth_before_state_change(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            (workspace / "workspace.json").write_text(
+                json.dumps(
+                    {
+                        "workspace_kind": "first_real_graph_campaign",
+                        "synthetic_data": False,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with ResearchStore(workspace / "results.sqlite3"):
+                pass
+            plan = prepare_campaign_plan(
+                workspace,
+                duration_seconds=3600,
+            )
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "authentication is not imported",
+            ):
+                ResearchCampaignRunner(
+                    workspace=workspace,
+                    stop_mode="time_limit",
+                    duration_seconds=3600,
+                    campaign_id=plan["campaign_id"],
+                    maximum_director_turns=plan["director"][
+                        "maximum_cycles"
+                    ],
+                    context_mode=plan["director"]["context_mode"],
+                    prepared_plan=plan,
+                ).run()
+            with ResearchStore(workspace / "results.sqlite3") as store:
+                self.assertEqual(
+                    store.campaign(plan["campaign_id"])["state"],
+                    "prepared",
+                )
+                self.assertEqual(
+                    store.connection.execute(
+                        "SELECT count(*) FROM app_server_turns"
+                    ).fetchone()[0],
+                    0,
+                )
+
+    def test_campaign_runtime_accepts_expected_wrapper_symlinks(self) -> None:
+        codex = shutil.which("codex")
+        if codex is None:
+            self.skipTest("installed codex is unavailable")
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            (workspace / "workspace.json").write_text(
+                json.dumps(
+                    {
+                        "workspace_kind": "first_real_graph_campaign",
+                        "synthetic_data": False,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with ResearchStore(workspace / "results.sqlite3"):
+                pass
+            plan = prepare_campaign_plan(
+                workspace,
+                duration_seconds=3600,
+            )
+            arg0 = (
+                workspace
+                / ".sglab"
+                / "research-campaigns"
+                / plan["campaign_id"]
+                / "runtime-groups"
+                / "director"
+                / "director"
+                / "codex-home"
+                / "tmp"
+                / "arg0"
+                / "codex-arg0-test"
+            )
+            arg0.mkdir(parents=True)
+            target = Path(codex).resolve()
+            for name in EXPECTED_APP_SERVER_WRAPPERS:
+                os.symlink(target, arg0 / name)
+            runner = ResearchCampaignRunner(
+                workspace=workspace,
+                stop_mode="time_limit",
+                duration_seconds=3600,
+                campaign_id=plan["campaign_id"],
+                maximum_director_turns=plan["director"][
+                    "maximum_cycles"
+                ],
+                context_mode=plan["director"]["context_mode"],
+                prepared_plan=plan,
+            )
+            campaign_dir = (
+                workspace
+                / "research-campaigns"
+                / plan["campaign_id"]
+            )
+            runner._sample_runtime_resources(
+                plan["campaign_id"],
+                campaign_dir,
+                stage="test",
+                force=True,
+            )
+            telemetry = json.loads(
+                (
+                    campaign_dir
+                    / "director"
+                    / "runtime-resource-telemetry.json"
+                ).read_text(encoding="utf-8")
+            )
+            self.assertEqual(telemetry["enforcement"], "continue")
+            self.assertEqual(
+                {
+                    row["classification"]
+                    for row in telemetry["symlinks"]
+                },
+                {"expected_runtime_wrapper"},
+            )
+
     def test_normal_start_accepts_exactly_one_stop_mode_and_no_tuning(self) -> None:
         parser = build_parser()
         time_args = parser.parse_args(

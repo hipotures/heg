@@ -11,6 +11,7 @@ import os
 
 from .app_server_client import (
     AppServerClient,
+    AppServerError,
     AppServerSession,
     AppServerTurnEvent,
     AppServerTurnResult,
@@ -131,6 +132,7 @@ class ActiveDirector:
         executable_sha256: str,
         protocol_schema_sha256: str,
         context_mode: DirectorContextMode | str = DEFAULT_DIRECTOR_CONTEXT_MODE,
+        enforce_model_contract: bool = False,
     ):
         self.client = client
         self.store = store
@@ -140,6 +142,7 @@ class ActiveDirector:
         self.executable_sha256 = executable_sha256
         self.protocol_schema_sha256 = protocol_schema_sha256
         self.context_mode = DirectorContextMode(context_mode)
+        self.enforce_model_contract = enforce_model_contract
         self.session: AppServerSession | None = None
         self.session_record_id: str | None = None
         self.audit_dir = self.campaign_dir / "director"
@@ -170,6 +173,32 @@ class ActiveDirector:
         else:
             session = await self.client.resume_thread(
                 resume_thread_id, base_instructions()
+            )
+        expected_model = getattr(
+            getattr(self.client, "config", None),
+            "model",
+            None,
+        )
+        expected_effort = getattr(
+            getattr(self.client, "config", None),
+            "effort",
+            None,
+        )
+        if (
+            self.enforce_model_contract
+            and expected_model is not None
+            and session.server_reported_model != expected_model
+        ):
+            raise AppServerError(
+                "app-server Director model contract mismatch"
+            )
+        if (
+            self.enforce_model_contract
+            and expected_effort is not None
+            and session.server_reported_effort != expected_effort
+        ):
+            raise AppServerError(
+                "app-server Director effort contract mismatch"
             )
         record_id = self.store.record_session(
             record_id=new_id("app-session"),
@@ -598,6 +627,11 @@ class ActiveDirector:
             repair_prompt = canonical_json(
                 repair_payload, max_bytes=MAX_SNAPSHOT_BYTES
             ).decode("ascii")
+            if (
+                self.context_mode
+                is DirectorContextMode.STATELESS_TURNS
+            ):
+                await self._prepare_context_boundary()
             return await self._request(
                 snapshot=snapshot,
                 trigger_id=trigger_id,

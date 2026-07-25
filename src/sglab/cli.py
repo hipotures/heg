@@ -33,9 +33,13 @@ from .research.auth import (
     import_authorized_auth,
 )
 from .research.campaign import (
+    PREPARED_CAMPAIGN_POINTER,
     ResearchCampaignRunner,
+    campaign_application_data,
     campaign_status,
+    load_prepared_campaign_plan,
     parse_duration,
+    prepare_campaign_plan,
     request_campaign_control,
 )
 from .research.compliance import run_no_model_compliance_audit
@@ -508,13 +512,76 @@ def cmd_ai_experiment(args: Namespace) -> int:
 def cmd_research_campaign(args: Namespace) -> int:
     workspace = _workspace(args.workspace)
     command = args.research_campaign_command
+    if command == "prepare":
+        duration = parse_duration(args.time_limit)
+        report = prepare_campaign_plan(
+            workspace,
+            duration_seconds=duration,
+        )
+        print(json.dumps(report, indent=2, sort_keys=True))
+        return 0
+    if command == "auth-import":
+        plan = load_prepared_campaign_plan(
+            workspace,
+            campaign_id=args.campaign_id,
+            expected_fingerprint=args.plan_fingerprint,
+        )
+        import_authorized_auth(
+            Path(args.from_codex_home),
+            campaign_application_data(
+                workspace,
+                str(plan["campaign_id"]),
+            ),
+        )
+        print(
+            json.dumps(
+                {
+                    "campaign_id": plan["campaign_id"],
+                    "plan_fingerprint": plan["plan_fingerprint"],
+                    "imported": True,
+                    "copied": ["auth.json"],
+                },
+                sort_keys=True,
+            )
+        )
+        return 0
     if command == "start":
         duration = parse_duration(args.time_limit) if args.time_limit else None
         stop_mode = "until_success" if args.until_success else "time_limit"
+        prepared = None
+        campaign_id = None
+        maximum_cycles = None
+        context_mode = "stateless_turns"
+        if args.plan_fingerprint:
+            prepared = load_prepared_campaign_plan(
+                workspace,
+                expected_fingerprint=args.plan_fingerprint,
+            )
+            if duration != float(
+                prepared["stop_contract"]["campaign_wall_seconds"]
+            ):
+                raise SystemExit(
+                    "start duration does not match the prepared campaign"
+                )
+            campaign_id = str(prepared["campaign_id"])
+            maximum_cycles = int(
+                prepared["director"]["maximum_cycles"]
+            )
+            context_mode = str(
+                prepared["director"]["context_mode"]
+            )
+        elif (workspace / PREPARED_CAMPAIGN_POINTER).exists():
+            raise SystemExit(
+                "prepared campaign requires its exact plan fingerprint"
+            )
         report = ResearchCampaignRunner(
             workspace=workspace,
             stop_mode=stop_mode,
             duration_seconds=duration,
+            campaign_id=campaign_id,
+            maximum_director_turns=maximum_cycles,
+            context_mode=context_mode,
+            prepared_plan=prepared,
         ).run()
         print(json.dumps(report, indent=2, sort_keys=True))
         return 0
@@ -838,7 +905,18 @@ def build_parser() -> ArgumentParser:
     campaign_stop_mode.add_argument("--time-limit")
     campaign_stop_mode.add_argument("--until-success", action="store_true")
     campaign_start.add_argument("--workspace", required=True)
+    campaign_start.add_argument("--plan-fingerprint")
     campaign_start.set_defaults(func=cmd_research_campaign)
+    campaign_prepare = campaign_commands.add_parser("prepare")
+    campaign_prepare.add_argument("--workspace", required=True)
+    campaign_prepare.add_argument("--time-limit", required=True)
+    campaign_prepare.set_defaults(func=cmd_research_campaign)
+    campaign_auth = campaign_commands.add_parser("auth-import")
+    campaign_auth.add_argument("--workspace", required=True)
+    campaign_auth.add_argument("--campaign-id", required=True)
+    campaign_auth.add_argument("--plan-fingerprint", required=True)
+    campaign_auth.add_argument("--from-codex-home", required=True)
+    campaign_auth.set_defaults(func=cmd_research_campaign)
     campaign_status_parser = campaign_commands.add_parser("status")
     campaign_status_parser.add_argument("--workspace", required=True)
     campaign_status_parser.add_argument("--campaign-id")
