@@ -49,6 +49,8 @@ class ResearchStore:
         target_definition_sha256: str,
         stop_mode: str,
         deadline_at: str | None,
+        effective_context_mode: str | None = None,
+        context_recommendation_basis: str | None = None,
     ) -> None:
         if stop_mode not in {"time_limit", "until_success"}:
             raise ValueError("invalid campaign stop mode")
@@ -61,8 +63,9 @@ class ResearchStore:
                 INSERT INTO research_campaigns
                 (campaign_id, created_at, updated_at, target,
                  target_definition_sha256, state, state_version, stop_mode,
-                 deadline_at)
-                VALUES (?, ?, ?, ?, ?, 'running', 0, ?, ?)
+                 deadline_at, effective_context_mode,
+                 context_recommendation_basis)
+                VALUES (?, ?, ?, ?, ?, 'running', 0, ?, ?, ?, ?)
                 """,
                 (
                     campaign_id,
@@ -72,6 +75,8 @@ class ResearchStore:
                     target_definition_sha256,
                     stop_mode,
                     deadline_at,
+                    effective_context_mode,
+                    context_recommendation_basis,
                 ),
             )
 
@@ -307,6 +312,7 @@ class ResearchStore:
         executable_sha256: str,
         protocol_schema_sha256: str,
         resumed: bool = False,
+        context_mode: str | None = None,
     ) -> str:
         now = utc_now()
         with self.transaction() as database:
@@ -325,10 +331,11 @@ class ResearchStore:
                     """
                     UPDATE app_server_sessions
                     SET app_server_session_id=?, thread_path=?, state='active',
-                        last_resumed_at=?, closed_at=NULL
+                        last_resumed_at=?, closed_at=NULL,
+                        context_mode=COALESCE(?, context_mode)
                     WHERE session_record_id=?
                     """,
-                    (session_id, thread_path, now, existing_id),
+                    (session_id, thread_path, now, context_mode, existing_id),
                 )
                 return existing_id
             database.execute(
@@ -338,8 +345,8 @@ class ResearchStore:
                  app_server_session_id, thread_path, parent_thread_id,
                  model_requested, effort_requested, codex_version,
                  codex_executable_sha256, protocol_schema_sha256, state,
-                 started_at, last_resumed_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
+                 started_at, last_resumed_at, context_mode)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
                 """,
                 (
                     record_id,
@@ -355,6 +362,7 @@ class ResearchStore:
                     protocol_schema_sha256,
                     now,
                     now if resumed else None,
+                    context_mode,
                 ),
             )
             return record_id
@@ -373,6 +381,7 @@ class ResearchStore:
         wire_artifact_ref: str,
         evidence_registry_artifact_ref: str | None = None,
         evidence_registry_sha256: str | None = None,
+        thread_lifecycle: str | None = None,
     ) -> None:
         with self.transaction() as database:
             database.execute(
@@ -382,9 +391,10 @@ class ResearchStore:
                  snapshot_id, trigger_id, status, request_artifact_ref,
                  request_sha256, wire_log_artifact_ref,
                  evidence_registry_artifact_ref,
-                 evidence_registry_sha256, lifecycle_status, started_at)
+                 evidence_registry_sha256, lifecycle_status, started_at,
+                 thread_lifecycle)
                 VALUES (?, ?, ?, ?, ?, ?, 'in_progress', ?, ?, ?, ?, ?,
-                        'requested', ?)
+                        'requested', ?, ?)
                 """,
                 (
                     turn_record_id,
@@ -399,6 +409,7 @@ class ResearchStore:
                     evidence_registry_artifact_ref,
                     evidence_registry_sha256,
                     utc_now(),
+                    thread_lifecycle,
                 ),
             )
 

@@ -15,7 +15,11 @@ from .app_server_protocol import generate_protocol_preflight
 from .auth import auth_is_imported, director_work
 from .campaign import campaign_status, target_definition_sha256
 from .candidates import CandidateArchive
-from .context import DirectorContextMode, prepare_director_state_v2
+from .context import (
+    DEFAULT_DIRECTOR_CONTEXT_MODE,
+    DirectorContextMode,
+    prepare_director_state_v2,
+)
 from .director import ActiveDirector
 from .lanes import (
     LaneManager,
@@ -1007,9 +1011,7 @@ def run_authenticated_experiment(
     codex: str = "codex",
     evaluation_cap: int,
     resume: bool = False,
-    context_mode: DirectorContextMode | str = (
-        DirectorContextMode.PERSISTENT_THREAD
-    ),
+    context_mode: DirectorContextMode | str = DEFAULT_DIRECTOR_CONTEXT_MODE,
 ) -> dict[str, Any]:
     return asyncio.run(
         _run_authenticated_experiment(

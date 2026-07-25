@@ -35,8 +35,10 @@
   <header>
     <h1>STRUCTURAL GRAPH LAB</h1>
     <div>Engineering telemetry — not a mathematical claim.</div>
+    <nav><a href="/comparisons">Comparisons</a> · <a href="/model-cost-profiles">Model cost profiles</a></nav>
   </header>
   <main>
+    <section class="wide"><h2>Controlled comparisons</h2><div id="comparison-summary" class="metrics"></div></section>
     <section>
       <h2>AI research campaign</h2>
       <form id="campaign-form">
@@ -77,9 +79,18 @@ function table(rows, columns) {
 }
 async function refresh() {
   try {
-    const [state, campaign, logs, candidates, runs] = await Promise.all([
-      api('/api/status'), api('/api/research-campaign'), api('/api/logs?limit=50'), api('/api/candidates?limit=50'), api('/api/runs')
+    const [state, campaign, logs, candidates, runs, comparison] = await Promise.all([
+      api('/api/status'), api('/api/research-campaign'), api('/api/logs?limit=50'), api('/api/candidates?limit=50'), api('/api/runs'), api('/api/comparisons-summary')
     ]);
+    const last = comparison.last_suite;
+    document.getElementById('comparison-summary').innerHTML = [
+      ['Default Director context mode', comparison.default_context_mode],
+      ['Recommendation basis', comparison.recommendation_basis],
+      ['Last suite', last ? `<a href="/comparisons/${esc(last.suite_id)}">${esc(last.name)}</a>` : '—'],
+      ['Completed / planned', last ? `${last.completion_count} / ${last.planned_inference_count}` : '—'],
+      ['Total server tokens', last ? last.total_server_tokens : '—'],
+      ['Relative cost units', last ? Number(last.relative_cost_units || 0).toFixed(2) : '—']
+    ].map(([label, value]) => `<div class="metric"><span>${esc(label)}</span><strong>${label === 'Last suite' ? value : esc(value)}</strong></div>`).join('');
     const campaignValues = [
       ['State', campaign.state || 'IDLE'], ['Campaign', campaign.campaign_id || '—'],
       ['Target', campaign.target || 'erdos_gyarfas'], ['Stop mode', campaign.stop_mode || '—'],
@@ -87,6 +98,7 @@ async function refresh() {
       ['Director auth', campaign.auth_imported ? 'imported' : 'not imported'],
       ['Director thread', campaign.director_session?.thread_id || '—'],
       ['Director connection', campaign.director_session?.state || '—'],
+      ['Effective context mode', campaign.effective_context_mode || campaign.director_session?.context_mode || 'stateless_turns'],
       ['Fault', campaign.fault_kind || '—'],
       ['Verifier queued', campaign.verification?.queued || 0],
       ['Verifier running', campaign.verification?.running || 0],
@@ -130,7 +142,7 @@ async function refresh() {
     ]);
     document.getElementById('turns').innerHTML = table(campaign.turns || [], [
       ['Thread / turn', r => `${esc(r.thread_id)} / ${esc(r.turn_id || 'pending')}`],
-      ['Status', r => esc(r.status)], ['Latency', r => `${Number(r.wall_seconds || 0).toFixed(2)} s`],
+      ['Status', r => `${esc(r.status)} / ${esc(r.thread_lifecycle || 'unrecorded')}`], ['Latency', r => `${Number(r.wall_seconds || 0).toFixed(2)} s`],
       ['Input / cache read / cache write', r =>
         `${esc(r.input_tokens || 0)} / ${esc(r.cached_input_tokens || 0)} / ${esc(r.cache_write_input_tokens || 0)}`],
       ['Output / reasoning', r => `${esc(r.output_tokens || 0)} / ${esc(r.reasoning_output_tokens || 0)}`],

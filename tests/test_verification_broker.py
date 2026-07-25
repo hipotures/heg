@@ -268,7 +268,7 @@ class M4VerificationBrokerTests(unittest.TestCase):
                     'promote_candidate', 90, '[]', '[]', ?, 'test',
                     'Run exact verification', '{"max_wall_seconds":10,
                     "max_candidate_delta":100}', '{}', 'promote:k4',
-                    '2026-07-25T00:00:00Z', 'accepted',
+                    '2099-01-01T00:00:00Z', 'accepted',
                     '2026-07-24T00:00:00Z')
             """,
             (json.dumps({"candidate_id": candidate_id}),),

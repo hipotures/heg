@@ -1,0 +1,142 @@
+{
+  "schema_version": "1.0",
+  "date": "2026-07-25",
+  "repository": {
+    "initial_commit": "110f805e56fac39c241bd33e423ee00324c33caf",
+    "baseline_tag": "m6-context-optimization-proven",
+    "baseline_tag_target": "110f805e56fac39c241bd33e423ee00324c33caf",
+    "preserved_m6_report_sha256": "a1f01415059494161b5c0d9feb608160e48afff1e3b23404e234eec87f27883c",
+    "planning_untouched": true
+  },
+  "proven_context_result": {
+    "stateless_input_token_reduction_percent": 24.800062725419476,
+    "stateless_total_token_reduction_percent": 7.01805988587564,
+    "stateless_A4_schema_valid": true,
+    "stateless_A4_semantic_valid": true,
+    "persistent_A4_schema_valid": true,
+    "persistent_A4_semantic_valid": true,
+    "completion_reliability": "both_completed",
+    "recommended_context_mode": "stateless_turns",
+    "recommendation_basis": "single controlled S2/P2 pair",
+    "statistical_superiority_claimed": false
+  },
+  "schema": {
+    "sqlite_user_version": 10,
+    "historical_rows_rewritten": false,
+    "integrity_check": "ok",
+    "comparison_turn_references_app_server_turn": true,
+    "nullable_usage_preserved": true
+  },
+  "historical_import": {
+    "read_only": true,
+    "runtime_executed_elsewhere": true,
+    "private_runtime_material_imported": false,
+    "turns": [
+      {
+        "slot": "S2",
+        "model": "gpt-5.6-luna",
+        "reasoning_effort": "xhigh",
+        "context_mode": "stateless_turns",
+        "input_tokens": 9591,
+        "server_reported_total_tokens": 15806,
+        "semantic_valid": true,
+        "selected_action": "request_diagnostic"
+      },
+      {
+        "slot": "P1",
+        "model": "gpt-5.6-luna",
+        "reasoning_effort": "xhigh",
+        "context_mode": "persistent_thread",
+        "input_tokens": 4405,
+        "server_reported_total_tokens": 6498,
+        "semantic_valid": true,
+        "selected_action": "start_lane"
+      },
+      {
+        "slot": "P2",
+        "model": "gpt-5.6-luna",
+        "reasoning_effort": "xhigh",
+        "context_mode": "persistent_thread",
+        "input_tokens": 12754,
+        "server_reported_total_tokens": 16999,
+        "semantic_valid": true,
+        "selected_action": "schedule_verification"
+      }
+    ]
+  },
+  "deterministic_dry_run": {
+    "planned_arms": 3,
+    "simulated_turns": 3,
+    "completed_turns": 2,
+    "failed_turns": 1,
+    "model_inferences": 0,
+    "auth_access": 0,
+    "search_batches": 0,
+    "lanes": 0,
+    "action_dispatches": 0,
+    "decision_execution": 0,
+    "missing_usage_is_null": true,
+    "authorization_invalidation_proven": true,
+    "fail_closed_proven": true,
+    "inference_cap_proven": true
+  },
+  "verification": {
+    "focused_comparison_tests": {
+      "passed": 19,
+      "failed": 0
+    },
+    "full_suite_pass_1": {
+      "passed": 153,
+      "failed": 0
+    },
+    "full_suite_pass_2": {
+      "passed": 153,
+      "failed": 0
+    },
+    "doctor": "pass",
+    "check": "pass",
+    "benchmark_smoke": "pass",
+    "dashboard_smoke": "pass",
+    "loopback_http": "pass",
+    "bound_host": "127.0.0.1",
+    "clean_shutdown": true,
+    "sqlite_integrity_check": "ok",
+    "sqlite_migration_tests": "pass"
+  },
+  "runtime_boundary": {
+    "model_inferences": 0,
+    "auth_reads": 0,
+    "auth_copies": 0,
+    "authenticated_app_server_turns": 0,
+    "paid_comparisons": 0,
+    "graph_search_batches": 0,
+    "compaction_operations": 0,
+    "tool_calls": 0
+  },
+  "limitations": [
+    "The recommendation is based on one controlled S2/P2 pair.",
+    "The comparison control plane does not perform an authenticated run in this milestone.",
+    "A future separately authorized bounded worker must consume running plans.",
+    "Visual redesign is deferred."
+  ],
+  "final_status": {
+    "stateless_default_enabled": true,
+    "persistent_mode_preserved": true,
+    "comparison_schema_created": true,
+    "comparison_web_ui_created": true,
+    "model_effort_catalog_created": true,
+    "cost_profiles_created": true,
+    "usage_accounting_correct": true,
+    "manual_ratings_created": true,
+    "blind_pairwise_created": true,
+    "historical_context_result_imported": true,
+    "authorization_bound_to_plan": true,
+    "measurement_only_enforced": true,
+    "zero_model_inferences": true,
+    "zero_auth_access": true,
+    "zero_search_batches": true,
+    "http_tests_passed": true,
+    "sqlite_integrity_check": "ok",
+    "ready_for_user_created_comparisons": true
+  }
+}

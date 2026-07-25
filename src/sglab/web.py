@@ -13,6 +13,14 @@ import os
 import re
 import sys
 
+from .comparison_web import (
+    blind_page,
+    comparison_detail_page,
+    comparisons_page,
+    cost_profiles_page,
+    new_comparison_page,
+)
+from .comparisons import ComparisonStore, ModelCatalog, default_context_summary
 from .resources import recommended_workers
 from .locations import asset_path
 from .research.auth import auth_is_imported
@@ -26,6 +34,9 @@ from .state import atomic_write_json, next_control, read_json, utc_now
 
 ARTIFACT_PATTERN = re.compile(r"^[0-9a-f]{20}\.(?:graph6|json|svg)$")
 MAX_JSON_RESPONSE = 2 * 1024 * 1024
+COMPARISON_PATH = re.compile(
+    r"^/comparisons/([A-Za-z0-9][A-Za-z0-9._:-]{0,127})(/blind)?$"
+)
 
 
 class DashboardServer(ThreadingHTTPServer):
@@ -215,6 +226,20 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _html(self, status: int, body: bytes) -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; style-src 'self' 'unsafe-inline'; "
+            "script-src 'self' 'unsafe-inline'",
+        )
+        self.end_headers()
+        self.wfile.write(body)
+
     def _authorized(self) -> bool:
         if self.server.token is None:
             return True
@@ -234,7 +259,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         except ValueError:
             self._json(400, {"error": "invalid Content-Length"})
             return None
-        if length <= 0 or length > 8192:
+        if length <= 0 or length > 64 * 1024:
             self._json(400, {"error": "invalid request size"})
             return None
         try:
@@ -276,6 +301,110 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         if parsed.path.startswith("/api/") and not self._require_authorized():
+            return
+        if parsed.path == "/comparisons":
+            self._html(200, comparisons_page())
+            return
+        if parsed.path == "/comparisons/new":
+            with ComparisonStore(
+                self.server.workspace / "results.sqlite3"
+            ) as store:
+                fixtures = [
+                    dict(row)
+                    for row in store.connection.execute(
+                        "SELECT fixture_id, display_name FROM comparison_fixtures "
+                        "ORDER BY display_name"
+                    )
+                ]
+                catalog = store.catalog.as_dict()
+            self._html(200, new_comparison_page(catalog, fixtures))
+            return
+        comparison_match = COMPARISON_PATH.fullmatch(parsed.path)
+        if comparison_match:
+            suite_id = comparison_match.group(1)
+            with ComparisonStore(
+                self.server.workspace / "results.sqlite3"
+            ) as store:
+                try:
+                    store.suite_detail(suite_id)
+                except KeyError:
+                    self.send_error(404)
+                    return
+            body = (
+                blind_page(suite_id)
+                if comparison_match.group(2)
+                else comparison_detail_page(suite_id)
+            )
+            self._html(200, body)
+            return
+        if parsed.path == "/model-cost-profiles":
+            self._html(200, cost_profiles_page(ModelCatalog.load().as_dict()))
+            return
+        if parsed.path == "/api/comparisons":
+            filters = {
+                key: values[0]
+                for key, values in parse_qs(parsed.query).items()
+                if key in {"model", "effort", "context_mode", "fixture", "status"}
+                and values
+                and values[0]
+            }
+            with ComparisonStore(
+                self.server.workspace / "results.sqlite3"
+            ) as store:
+                suites = store.list_suites(filters)
+            self._json(200, {"suites": suites})
+            return
+        if parsed.path == "/api/comparisons-summary":
+            with ComparisonStore(
+                self.server.workspace / "results.sqlite3"
+            ) as store:
+                suites = store.list_suites()
+            self._json(
+                200,
+                {
+                    **default_context_summary(),
+                    "last_suite": suites[0] if suites else None,
+                },
+            )
+            return
+        api_match = re.fullmatch(
+            r"/api/comparisons/([A-Za-z0-9][A-Za-z0-9._:-]{0,127})",
+            parsed.path,
+        )
+        if api_match:
+            with ComparisonStore(
+                self.server.workspace / "results.sqlite3"
+            ) as store:
+                try:
+                    detail = store.suite_detail(
+                        api_match.group(1),
+                        blind=parse_qs(parsed.query).get("blind") == ["1"],
+                    )
+                except KeyError:
+                    self._json(404, {"error": "comparison suite not found"})
+                    return
+            configured_auth = os.environ.get("SGLAB_CODEX_AUTH_SOURCE")
+            detail["auth_availability"] = {
+                "configured": bool(configured_auth),
+                "available": bool(
+                    configured_auth and Path(configured_auth).is_file()
+                ),
+                "source_path_exposed": False,
+            }
+            self._json(200, detail)
+            return
+        if parsed.path == "/api/model-cost-profiles":
+            with ComparisonStore(
+                self.server.workspace / "results.sqlite3"
+            ) as store:
+                profiles = [
+                    dict(row)
+                    for row in store.connection.execute(
+                        "SELECT * FROM model_cost_profiles "
+                        "ORDER BY effective_from DESC, created_at DESC"
+                    )
+                ]
+            self._json(200, {"profiles": profiles})
             return
         if parsed.path == "/api/status":
             self._json(
@@ -387,6 +516,89 @@ class DashboardHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         payload = self._body()
         if payload is None:
+            return
+        if parsed.path == "/api/comparisons":
+            with ComparisonStore(
+                self.server.workspace / "results.sqlite3"
+            ) as store:
+                try:
+                    suite_id = store.create_suite(payload)
+                except ValueError as error:
+                    self._json(400, {"error": str(error)})
+                    return
+            self._json(201, {"suite_id": suite_id, "status": "draft"})
+            return
+        comparison_api = re.fullmatch(
+            r"/api/comparisons/([A-Za-z0-9][A-Za-z0-9._:-]{0,127})/"
+            r"(prepare|authorize|start|stop|ratings|pairwise-ratings)",
+            parsed.path,
+        )
+        if comparison_api:
+            suite_id, action = comparison_api.groups()
+            try:
+                with ComparisonStore(
+                    self.server.workspace / "results.sqlite3"
+                ) as store:
+                    if action == "prepare":
+                        response = store.prepare(suite_id)
+                    elif action == "authorize":
+                        if set(payload) != {"plan_fingerprint"}:
+                            raise ValueError(
+                                "authorization requires only plan_fingerprint"
+                            )
+                        response = {
+                            "authorization_id": store.authorize(
+                                suite_id, payload["plan_fingerprint"]
+                            )
+                        }
+                    elif action == "start":
+                        if payload:
+                            raise ValueError("start accepts no browser parameters")
+                        configured = os.environ.get("SGLAB_CODEX_AUTH_SOURCE")
+                        auth_available = bool(
+                            configured and Path(configured).is_file()
+                        )
+                        store.start(suite_id, auth_available=auth_available)
+                        response = {
+                            "accepted": True,
+                            "state": "running",
+                            "executor": "external_bounded_worker_required",
+                        }
+                    elif action == "stop":
+                        if payload:
+                            raise ValueError("stop accepts no browser parameters")
+                        store.stop(suite_id)
+                        response = {"accepted": True, "state": "stopped"}
+                    elif action == "ratings":
+                        response = {
+                            "rating_id": store.add_manual_rating(
+                                suite_id, payload
+                            )
+                        }
+                    else:
+                        response = {
+                            "rating_id": store.add_pairwise_rating(
+                                suite_id, payload
+                            )
+                        }
+            except KeyError:
+                self._json(404, {"error": "comparison suite not found"})
+                return
+            except (TypeError, ValueError) as error:
+                self._json(400, {"error": str(error)})
+                return
+            self._json(200, response)
+            return
+        if parsed.path == "/api/model-cost-profiles":
+            with ComparisonStore(
+                self.server.workspace / "results.sqlite3"
+            ) as store:
+                try:
+                    profile_id = store.create_cost_profile(payload)
+                except ValueError as error:
+                    self._json(400, {"error": str(error)})
+                    return
+            self._json(201, {"profile_id": profile_id})
             return
         if parsed.path == "/api/runs":
             status, response = self.server.start_run(payload)

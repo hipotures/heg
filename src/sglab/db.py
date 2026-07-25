@@ -5,7 +5,7 @@ from typing import Any, Iterable
 import json
 import sqlite3
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 MAX_METRIC_ROWS = 100_000
 
 BASE_SCHEMA_SQL = """
@@ -437,6 +437,281 @@ END;
 PRAGMA user_version=9;
 """
 
+COMPARISON_SCHEMA_SQL = """
+CREATE TABLE comparison_fixtures (
+    fixture_id TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL,
+    fixture_type TEXT NOT NULL,
+    source_artifact_reference TEXT NOT NULL,
+    fixture_sha256 TEXT NOT NULL,
+    director_state_schema_version TEXT NOT NULL,
+    target_statement_id TEXT NOT NULL,
+    status_timestamp TEXT NOT NULL,
+    serialized_bytes INTEGER NOT NULL,
+    estimated_client_owned_tokens INTEGER NOT NULL,
+    director_state_json TEXT NOT NULL,
+    prompt_sha256 TEXT NOT NULL,
+    output_schema_sha256 TEXT NOT NULL,
+    applicable_action_space_sha256 TEXT NOT NULL,
+    evidence_registry_sha256 TEXT NOT NULL,
+    advisory_registry_sha256 TEXT NOT NULL,
+    executable_registry_sha256 TEXT NOT NULL,
+    base_instructions_sha256 TEXT NOT NULL,
+    developer_instructions_sha256 TEXT NOT NULL,
+    personality TEXT,
+    campaign_budget_sha256 TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    CHECK(fixture_type IN (
+        'preserved_director_state',
+        'campaign_snapshot',
+        'custom_director_state_json'
+    )),
+    CHECK(serialized_bytes >= 0),
+    CHECK(estimated_client_owned_tokens >= 0)
+);
+
+CREATE TABLE comparison_suites (
+    suite_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    fixture_type TEXT NOT NULL,
+    fixture_reference TEXT NOT NULL REFERENCES comparison_fixtures(fixture_id),
+    fixture_sha256 TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    status TEXT NOT NULL,
+    measurement_only INTEGER NOT NULL DEFAULT 1,
+    execute_decisions INTEGER NOT NULL DEFAULT 0,
+    randomized_arm_order INTEGER NOT NULL DEFAULT 0,
+    ordering_seed INTEGER,
+    planned_inference_count INTEGER NOT NULL,
+    maximum_inference_starts INTEGER NOT NULL,
+    maximum_total_server_tokens INTEGER,
+    maximum_client_owned_tokens_per_turn INTEGER NOT NULL DEFAULT 12000,
+    timeout_seconds INTEGER NOT NULL,
+    fail_closed INTEGER NOT NULL DEFAULT 1,
+    plan_fingerprint TEXT,
+    authorization_status TEXT NOT NULL DEFAULT 'unauthorized',
+    consumed_inference_starts INTEGER NOT NULL DEFAULT 0,
+    notes TEXT NOT NULL DEFAULT '',
+    read_only INTEGER NOT NULL DEFAULT 0,
+    runtime_executed_elsewhere INTEGER NOT NULL DEFAULT 0,
+    recommendation_status TEXT,
+    recommendation_basis TEXT,
+    started_at TEXT,
+    completed_at TEXT,
+    failure_reason TEXT,
+    CHECK(status IN (
+        'draft', 'prepared', 'authorized', 'running',
+        'completed', 'failed', 'stopped'
+    )),
+    CHECK(measurement_only IN (0, 1)),
+    CHECK(execute_decisions IN (0, 1)),
+    CHECK(randomized_arm_order IN (0, 1)),
+    CHECK(fail_closed IN (0, 1)),
+    CHECK(read_only IN (0, 1)),
+    CHECK(runtime_executed_elsewhere IN (0, 1)),
+    CHECK(planned_inference_count >= 0),
+    CHECK(maximum_inference_starts >= 0),
+    CHECK(consumed_inference_starts >= 0),
+    CHECK(timeout_seconds BETWEEN 1 AND 900)
+);
+
+CREATE TABLE model_cost_profiles (
+    profile_id TEXT PRIMARY KEY,
+    model TEXT NOT NULL,
+    reasoning_effort TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    relative_cost_multiplier REAL NOT NULL,
+    api_input_per_million REAL,
+    api_cached_input_per_million REAL,
+    api_output_per_million REAL,
+    currency TEXT,
+    source_label TEXT NOT NULL,
+    effective_from TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    CHECK(relative_cost_multiplier >= 0),
+    CHECK(enabled IN (0, 1))
+);
+
+CREATE INDEX idx_model_cost_profiles_lookup
+    ON model_cost_profiles(model, reasoning_effort, enabled, effective_from);
+
+CREATE TABLE comparison_arms (
+    arm_id TEXT PRIMARY KEY,
+    suite_id TEXT NOT NULL REFERENCES comparison_suites(suite_id),
+    display_name TEXT NOT NULL,
+    model TEXT NOT NULL,
+    reasoning_effort TEXT NOT NULL,
+    context_mode TEXT NOT NULL,
+    repetition_index INTEGER NOT NULL,
+    planned_order INTEGER NOT NULL,
+    effective_order INTEGER,
+    expected_model TEXT NOT NULL,
+    expected_reasoning_effort TEXT NOT NULL,
+    effective_model TEXT,
+    effective_reasoning_effort TEXT,
+    effective_context_mode TEXT,
+    model_contract_matched INTEGER,
+    prompt_sha256 TEXT NOT NULL,
+    director_state_sha256 TEXT NOT NULL,
+    output_schema_sha256 TEXT NOT NULL,
+    evidence_registry_sha256 TEXT NOT NULL,
+    advisory_registry_sha256 TEXT NOT NULL,
+    executable_registry_sha256 TEXT NOT NULL,
+    applicable_action_space_sha256 TEXT NOT NULL,
+    base_instructions_sha256 TEXT NOT NULL,
+    developer_instructions_sha256 TEXT NOT NULL,
+    campaign_budget_sha256 TEXT NOT NULL,
+    status TEXT NOT NULL,
+    cost_profile_id TEXT REFERENCES model_cost_profiles(profile_id),
+    relative_cost_multiplier_snapshot REAL,
+    api_input_per_million_snapshot REAL,
+    api_cached_input_per_million_snapshot REAL,
+    api_output_per_million_snapshot REAL,
+    currency_snapshot TEXT,
+    CHECK(context_mode IN (
+        'persistent_thread', 'compacted_thread', 'stateless_turns'
+    )),
+    CHECK(status IN (
+        'planned', 'preflight', 'inference_started', 'completed',
+        'schema_invalid', 'semantic_invalid', 'timed_out', 'aborted', 'failed'
+    )),
+    CHECK(repetition_index >= 0),
+    CHECK(planned_order >= 0),
+    UNIQUE(suite_id, planned_order)
+);
+
+CREATE INDEX idx_comparison_arms_suite
+    ON comparison_arms(suite_id, effective_order, planned_order);
+
+CREATE TABLE comparison_turns (
+    comparison_turn_id TEXT PRIMARY KEY,
+    suite_id TEXT NOT NULL REFERENCES comparison_suites(suite_id),
+    arm_id TEXT NOT NULL REFERENCES comparison_arms(arm_id),
+    app_server_turn_record_id TEXT REFERENCES app_server_turns(turn_record_id),
+    lifecycle_status TEXT NOT NULL,
+    thread_lifecycle TEXT,
+    schema_valid INTEGER,
+    semantic_valid INTEGER,
+    evidence_references_valid INTEGER,
+    action_inside_applicable_space INTEGER,
+    executable_targets_valid INTEGER,
+    implemented_parameters_only INTEGER,
+    budgets_respected INTEGER,
+    no_false_counterexample_claim INTEGER,
+    no_tool_request INTEGER,
+    no_code_request INTEGER,
+    no_shell_request INTEGER,
+    no_measurement_execution_request INTEGER,
+    selected_action TEXT,
+    selected_algorithm TEXT,
+    selected_parameters_json TEXT,
+    raw_decision_json TEXT,
+    normalized_decision_json TEXT,
+    validation_issues_json TEXT NOT NULL DEFAULT '[]',
+    applicable_action_space_json TEXT,
+    active_executable_lane_count INTEGER NOT NULL DEFAULT 0,
+    active_candidate_target_count INTEGER NOT NULL DEFAULT 0,
+    historical_evidence_target_count INTEGER NOT NULL DEFAULT 0,
+    measurement_only INTEGER NOT NULL,
+    executed INTEGER NOT NULL,
+    input_tokens INTEGER,
+    cached_input_tokens INTEGER,
+    cache_write_input_tokens INTEGER,
+    output_tokens INTEGER,
+    reasoning_output_tokens INTEGER,
+    server_reported_total_tokens INTEGER,
+    first_item_latency_seconds REAL,
+    final_answer_latency_seconds REAL,
+    total_wall_seconds REAL,
+    retry_count_reaching_inference INTEGER NOT NULL DEFAULT 0,
+    tool_call_count INTEGER NOT NULL DEFAULT 0,
+    validation_issue_count INTEGER NOT NULL DEFAULT 0,
+    decision_batch_id TEXT,
+    resulting_metric_window_id TEXT,
+    best_score_before REAL,
+    best_score_after REAL,
+    time_to_improvement REAL,
+    candidate_evaluations INTEGER,
+    cpu_seconds REAL,
+    exact_verifier_result TEXT,
+    cost_profile_id TEXT REFERENCES model_cost_profiles(profile_id),
+    relative_cost_multiplier_snapshot REAL,
+    api_input_per_million_snapshot REAL,
+    api_cached_input_per_million_snapshot REAL,
+    api_output_per_million_snapshot REAL,
+    currency_snapshot TEXT,
+    created_at TEXT NOT NULL,
+    completed_at TEXT,
+    CHECK(measurement_only IN (0, 1)),
+    CHECK(executed IN (0, 1)),
+    CHECK(retry_count_reaching_inference >= 0),
+    CHECK(tool_call_count >= 0),
+    UNIQUE(arm_id)
+);
+
+CREATE INDEX idx_comparison_turns_suite
+    ON comparison_turns(suite_id, created_at);
+
+CREATE TABLE manual_ratings (
+    rating_id TEXT PRIMARY KEY,
+    comparison_turn_id TEXT NOT NULL
+        REFERENCES comparison_turns(comparison_turn_id),
+    scientific_usefulness INTEGER NOT NULL,
+    clarity INTEGER NOT NULL,
+    novelty INTEGER NOT NULL,
+    would_execute TEXT NOT NULL,
+    comment TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    CHECK(scientific_usefulness BETWEEN 1 AND 5),
+    CHECK(clarity BETWEEN 1 AND 5),
+    CHECK(novelty BETWEEN 1 AND 5),
+    CHECK(would_execute IN ('yes', 'no', 'uncertain'))
+);
+
+CREATE INDEX idx_manual_ratings_turn
+    ON manual_ratings(comparison_turn_id, created_at);
+
+CREATE TABLE pairwise_ratings (
+    rating_id TEXT PRIMARY KEY,
+    suite_id TEXT NOT NULL REFERENCES comparison_suites(suite_id),
+    left_turn_id TEXT NOT NULL REFERENCES comparison_turns(comparison_turn_id),
+    right_turn_id TEXT NOT NULL REFERENCES comparison_turns(comparison_turn_id),
+    preferred TEXT NOT NULL,
+    comment TEXT NOT NULL,
+    blind_order_seed INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    CHECK(preferred IN ('left', 'equal', 'right', 'skip')),
+    CHECK(left_turn_id <> right_turn_id)
+);
+
+CREATE INDEX idx_pairwise_ratings_suite
+    ON pairwise_ratings(suite_id, created_at);
+
+CREATE TABLE comparison_authorizations (
+    authorization_id TEXT PRIMARY KEY,
+    suite_id TEXT NOT NULL REFERENCES comparison_suites(suite_id),
+    plan_fingerprint TEXT NOT NULL,
+    maximum_inference_starts INTEGER NOT NULL,
+    authorized_models TEXT NOT NULL,
+    authorized_efforts TEXT NOT NULL,
+    authorized_context_modes TEXT NOT NULL,
+    authorized_at TEXT NOT NULL,
+    consumed_inference_starts INTEGER NOT NULL DEFAULT 0,
+    revoked_at TEXT,
+    completed_at TEXT,
+    CHECK(maximum_inference_starts >= 0),
+    CHECK(consumed_inference_starts >= 0)
+);
+
+CREATE INDEX idx_comparison_authorizations_suite
+    ON comparison_authorizations(suite_id, authorized_at);
+
+PRAGMA user_version=10;
+"""
+
 
 def connect(path: str | Path) -> sqlite3.Connection:
     target = Path(path)
@@ -472,6 +747,7 @@ def migrate(connection: sqlite3.Connection) -> None:
     _ensure_m6_candidate_table(connection)
     _ensure_app_server_compliance_columns(connection)
     _ensure_app_server_turn_lifecycle_columns(connection)
+    _ensure_comparison_schema(connection)
 
 
 def _ensure_m6_lane_columns(connection: sqlite3.Connection) -> None:
@@ -614,6 +890,44 @@ def _ensure_app_server_turn_lifecycle_columns(
                 END
                 """
             )
+    if int(connection.execute("PRAGMA user_version").fetchone()[0]) < 9:
+        connection.execute("PRAGMA user_version=9")
+    connection.commit()
+
+
+def _ensure_comparison_schema(connection: sqlite3.Connection) -> None:
+    additions = {
+        "research_campaigns": {
+            "effective_context_mode": "TEXT",
+            "context_recommendation_basis": "TEXT",
+        },
+        "app_server_sessions": {"context_mode": "TEXT"},
+        "app_server_turns": {"thread_lifecycle": "TEXT"},
+    }
+    for table, columns in additions.items():
+        exists = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (table,),
+        ).fetchone()
+        if exists is None:
+            continue
+        present = {
+            str(row[1])
+            for row in connection.execute(f"PRAGMA table_info({table})")
+        }
+        for name, definition in columns.items():
+            if name not in present:
+                connection.execute(
+                    f"ALTER TABLE {table} ADD COLUMN {name} {definition}"
+                )
+    exists = connection.execute(
+        """
+        SELECT 1 FROM sqlite_master
+        WHERE type='table' AND name='comparison_suites'
+        """
+    ).fetchone()
+    if exists is None:
+        connection.executescript(COMPARISON_SCHEMA_SQL)
     connection.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
     connection.commit()
 

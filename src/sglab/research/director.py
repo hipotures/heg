@@ -17,6 +17,7 @@ from .app_server_client import (
     AppServerTurnTimeout,
 )
 from .context import (
+    DEFAULT_DIRECTOR_CONTEXT_MODE,
     CLIENT_ESTIMATED_TOKENS_MAX,
     DirectorContextBudgetExceeded,
     DirectorContextMode,
@@ -120,9 +121,7 @@ class ActiveDirector:
         codex_version: str,
         executable_sha256: str,
         protocol_schema_sha256: str,
-        context_mode: DirectorContextMode | str = (
-            DirectorContextMode.PERSISTENT_THREAD
-        ),
+        context_mode: DirectorContextMode | str = DEFAULT_DIRECTOR_CONTEXT_MODE,
     ):
         self.client = client
         self.store = store
@@ -180,6 +179,7 @@ class ActiveDirector:
                 and self.context_mode
                 is not DirectorContextMode.STATELESS_TURNS
             ),
+            context_mode=self.context_mode.value,
         )
         self.session = session
         self.session_record_id = record_id
@@ -244,6 +244,7 @@ class ActiveDirector:
             codex_version=self.codex_version,
             executable_sha256=self.executable_sha256,
             protocol_schema_sha256=self.protocol_schema_sha256,
+            context_mode=self.context_mode.value,
         )
         self.session = session
         self.session_record_id = record_id
@@ -469,6 +470,15 @@ class ActiveDirector:
             )
         request_bytes = canonical_json(request_payload, max_bytes=1024 * 1024)
         _write_private(self.campaign_dir / request_relative, request_bytes + b"\n")
+        prior_turn_count = int(
+            self.store.connection.execute(
+                """
+                SELECT count(*) FROM app_server_turns
+                WHERE session_record_id=?
+                """,
+                (self.session_record_id,),
+            ).fetchone()[0]
+        )
         self.store.begin_turn(
             turn_record_id=turn_record_id,
             session_record_id=self.session_record_id,
@@ -482,6 +492,9 @@ class ActiveDirector:
             evidence_registry_artifact_ref=str(registry_relative),
             evidence_registry_sha256=(
                 prepared_state.evidence_registry_sha256
+            ),
+            thread_lifecycle=(
+                "fresh" if prior_turn_count == 0 else "resumed"
             ),
         )
         def persist_event(event: AppServerTurnEvent) -> None:
@@ -654,6 +667,7 @@ class ActiveDirector:
             codex_version=self.codex_version,
             executable_sha256=self.executable_sha256,
             protocol_schema_sha256=self.protocol_schema_sha256,
+            context_mode=self.context_mode.value,
         )
         self.session = session
         self.session_record_id = record_id

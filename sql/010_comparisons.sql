@@ -1,0 +1,18 @@
+-- Schema v10: controlled model/effort/context comparison subsystem.
+--
+-- The executable migration is kept in src/sglab/db.py so installs do not
+-- depend on source-tree SQL files. This file records the migration boundary
+-- for review. It adds nullable context provenance to existing M6 records and
+-- creates:
+--
+-- comparison_fixtures
+-- comparison_suites
+-- comparison_arms
+-- comparison_turns
+-- manual_ratings
+-- pairwise_ratings
+-- model_cost_profiles
+-- comparison_authorizations
+--
+-- Historical research and app-server rows are not rewritten.
+PRAGMA user_version=10;

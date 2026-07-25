@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0",
+  "models": {
+    "gpt-5.6-luna": {
+      "display_name": "GPT-5.6 Luna",
+      "reasoning_efforts": ["medium", "high", "xhigh"]
+    },
+    "gpt-5.6-sol": {
+      "display_name": "GPT-5.6 Sol",
+      "reasoning_efforts": ["medium", "high", "xhigh"]
+    }
+  }
+}

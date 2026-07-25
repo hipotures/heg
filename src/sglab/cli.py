@@ -15,6 +15,7 @@ from .benchmark import calibrate, hardware_metadata, microbenchmark, soak, write
 from .model import BitGraph
 from .certification import certify, verify_cpp
 from .config import load_config
+from .comparisons import import_m6_context_report, run_replay_dry_run
 from .db import connect
 from .external import TOOLS
 from .locations import asset_path, cyclecheck_path
@@ -560,6 +561,24 @@ def cmd_research_campaign(args: Namespace) -> int:
     return 0
 
 
+def cmd_comparisons(args: Namespace) -> int:
+    workspace = _workspace(args.workspace)
+    workspace.mkdir(parents=True, exist_ok=True)
+    database = workspace / "results.sqlite3"
+    if args.comparisons_command == "import-m6-context-report":
+        suite_id = import_m6_context_report(database, Path(args.report).resolve())
+        report: dict[str, object] = {
+            "ok": True,
+            "suite_id": suite_id,
+            "read_only": True,
+            "runtime_executed_elsewhere": True,
+        }
+    else:
+        report = run_replay_dry_run(database)
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0 if report["ok"] else 1
+
+
 def build_parser() -> ArgumentParser:
     parser = ArgumentParser(prog="sglab")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -725,7 +744,7 @@ def build_parser() -> ArgumentParser:
             "compacted_thread",
             "stateless_turns",
         ],
-        default="persistent_thread",
+        default="stateless_turns",
     )
     experiment_run.set_defaults(func=cmd_ai_experiment)
 
@@ -756,6 +775,20 @@ def build_parser() -> ArgumentParser:
     campaign_export.add_argument("--campaign-id")
     campaign_export.add_argument("--output", required=True)
     campaign_export.set_defaults(func=cmd_research_campaign)
+
+    comparisons = subparsers.add_parser("comparisons")
+    comparison_commands = comparisons.add_subparsers(
+        dest="comparisons_command", required=True
+    )
+    comparison_import = comparison_commands.add_parser(
+        "import-m6-context-report"
+    )
+    comparison_import.add_argument("--workspace", default="workspace")
+    comparison_import.add_argument("--report", required=True)
+    comparison_import.set_defaults(func=cmd_comparisons)
+    comparison_replay = comparison_commands.add_parser("replay-dry-run")
+    comparison_replay.add_argument("--workspace", required=True)
+    comparison_replay.set_defaults(func=cmd_comparisons)
 
     return parser
 

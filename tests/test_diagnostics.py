@@ -188,7 +188,7 @@ class ScientificActionDispatcherTests(unittest.TestCase):
             "expected_effect": "produce deterministic evidence",
             "evaluation_window_json": "{}",
             "fallback_json": "{}",
-            "lease_expires_at": "2026-07-25T00:00:00Z",
+            "lease_expires_at": "2099-01-01T00:00:00Z",
             "validation_status": "accepted",
             "created_at": "2026-07-24T00:00:00Z",
         }

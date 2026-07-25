@@ -2,6 +2,32 @@
 
 Last implementation audit: **2026-07-25**.
 
+## M7 controlled comparison UI and persistence complete
+
+SQLite schema v10 now provides a comparison subsystem separate from research
+campaigns: immutable fixtures and plans, bounded arms and turns, exact-plan
+authorizations, append-only manual and blind pairwise ratings, and immutable
+cost-profile snapshots. The standard-library dashboard exposes suite list,
+creation, preflight/authorization, detail, blind comparison, and cost-profile
+pages with bearer-protected POST endpoints.
+
+The production Director default is now `stateless_turns`, based on the single
+controlled S2/P2 pair. Explicit `persistent_thread` and `compacted_thread`
+remain available; persistent selection emits a token-growth warning. Context
+mode and fresh/resumed thread provenance are persisted without rewriting
+historical rows.
+
+The deterministic M6 importer renders the real S2/P1/P2 results without
+private paths or another model call. Usage accounting does not double-count
+cached input or reasoning output, missing usage remains null, and human,
+automatic-validity, and downstream-science metrics stay separate.
+
+The deterministic replay dry run made zero model calls, auth accesses, search
+batches, lanes, or action dispatches. Focused tests, two complete 153-test
+runs, doctor, compile checks, benchmark/dashboard smoke, loopback HTTP, and
+SQLite v10 migration/integrity checks pass. See
+`docs/reports/M7_COMPARISON_UI_PHASE_A.md` and `docs/COMPARISON_UI.md`.
+
 ## Fresh reduced context-mode screen completed
 
 The corrected three-slot authenticated screen completed S2, P1 and P2 with

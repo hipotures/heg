@@ -32,6 +32,10 @@ class DirectorContextMode(StrEnum):
     STATELESS_TURNS = "stateless_turns"
 
 
+DEFAULT_DIRECTOR_CONTEXT_MODE = DirectorContextMode.STATELESS_TURNS
+CONTEXT_RECOMMENDATION_BASIS = "single controlled S2/P2 pair"
+
+
 class DirectorContextBudgetExceeded(RuntimeError):
     def __init__(
         self, message: str, *, size_report: dict[str, Any] | None = None

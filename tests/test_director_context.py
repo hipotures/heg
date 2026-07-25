@@ -342,10 +342,12 @@ class ContextModeBoundaryTests(unittest.IsolatedAsyncioTestCase):
                 )
                 row = store.connection.execute(
                     """
-                    SELECT thread_id, parent_thread_id, last_resumed_at
+                    SELECT thread_id, parent_thread_id, last_resumed_at,
+                           context_mode
                     FROM app_server_sessions
                     """
                 ).fetchone()
+                self.assertEqual(row["context_mode"], mode.value)
                 if mode is DirectorContextMode.STATELESS_TURNS:
                     self.assertEqual(client.resumes, 0)
                     self.assertEqual(client.thread_count, 1)

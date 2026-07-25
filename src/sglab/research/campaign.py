@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import sqlite3
+import warnings
 
 from ..locations import asset_path
 from ..resources import (
@@ -25,7 +26,11 @@ from .app_server_client import AppServerClient, AppServerConfig
 from .app_server_protocol import generate_protocol_preflight
 from .auth import auth_is_imported
 from .candidates import CandidateArchive
-from .context import DirectorContextMode
+from .context import (
+    CONTEXT_RECOMMENDATION_BASIS,
+    DEFAULT_DIRECTOR_CONTEXT_MODE,
+    DirectorContextMode,
+)
 from .diagnostics import ScientificActionDispatcher
 from .director import ActiveDirector
 from .export import export_campaign
@@ -177,7 +182,8 @@ def campaign_status(workspace: Path, campaign_id: str | None = None) -> dict[str
                        input_tokens, cached_input_tokens,
                        cache_write_input_tokens, output_tokens,
                        reasoning_output_tokens, total_tokens, started_at,
-                       completed_at, error_kind, final_agent_item_id
+                       completed_at, error_kind, final_agent_item_id,
+                       thread_lifecycle
                 FROM app_server_turns WHERE campaign_id=?
                 ORDER BY started_at DESC, rowid DESC LIMIT 10
                 """,
@@ -254,7 +260,7 @@ def campaign_status(workspace: Path, campaign_id: str | None = None) -> dict[str
             """
             SELECT thread_id, app_server_session_id, thread_path, state,
                    model_requested, effort_requested, codex_version,
-                   started_at, last_resumed_at
+                   started_at, last_resumed_at, context_mode
             FROM app_server_sessions WHERE campaign_id=?
             ORDER BY COALESCE(last_resumed_at, started_at) DESC, rowid DESC
             LIMIT 1
@@ -327,9 +333,7 @@ class ResearchCampaignRunner:
         controller_mode: str = "active_ai",
         controller_seed: int = 0,
         maximum_director_turns: int | None = None,
-        context_mode: DirectorContextMode | str = (
-            DirectorContextMode.PERSISTENT_THREAD
-        ),
+        context_mode: DirectorContextMode | str = DEFAULT_DIRECTOR_CONTEXT_MODE,
     ):
         if stop_mode not in {"time_limit", "until_success"}:
             raise ValueError("invalid stop mode")
@@ -399,6 +403,16 @@ class ResearchCampaignRunner:
         )
         resume_thread_id: str | None = None
         if self.campaign_id is None:
+            if (
+                uses_app_server
+                and self.context_mode is DirectorContextMode.PERSISTENT_THREAD
+            ):
+                warnings.warn(
+                    "Persistent context may accumulate server-side history and "
+                    "increase token usage. Stateless turns are the measured default.",
+                    UserWarning,
+                    stacklevel=2,
+                )
             deadline = (
                 datetime.now(UTC) + timedelta(seconds=float(self.duration_seconds))
                 if self.duration_seconds is not None
@@ -413,6 +427,12 @@ class ResearchCampaignRunner:
                     deadline.isoformat(timespec="seconds").replace("+00:00", "Z")
                     if deadline
                     else None
+                ),
+                effective_context_mode=(
+                    self.context_mode.value if uses_app_server else None
+                ),
+                context_recommendation_basis=(
+                    CONTEXT_RECOMMENDATION_BASIS if uses_app_server else None
                 ),
             )
         else:
