@@ -194,6 +194,9 @@ class UIFixtureTests(unittest.TestCase):
             self.assertGreaterEqual(len(status["turns"]), 10)
             self.assertTrue(status["revisions"])
             self.assertIsNotNone(status["assessment"])
+            self.assertEqual(len(status["candidates"]), 24)
+            self.assertNotIn("graph6", status["candidates"][0])
+            self.assertIn("verification_status", status["candidates"][0])
 
             self.assertGreaterEqual(
                 len(list((workspace / "best").glob("*.json"))),

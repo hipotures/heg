@@ -14,6 +14,7 @@ import sqlite3
 import warnings
 
 from ..locations import asset_path
+from ..model import BitGraph
 from ..resources import (
     current_rss_bytes,
     disk_free_bytes,
@@ -534,6 +535,46 @@ def campaign_status(workspace: Path, campaign_id: str | None = None) -> dict[str
                 (selected,),
             ).fetchone()
         )
+        candidates = []
+        for row in connection.execute(
+            """
+            SELECT candidate_id, lane_id, lane_version, graph6, score_json,
+                   state, artifact_sha256, created_at, promoted_at,
+                   certification_status
+            FROM campaign_candidates WHERE campaign_id=?
+            ORDER BY created_at DESC, rowid DESC LIMIT 24
+            """,
+            (selected,),
+        ):
+            degree_histogram: dict[str, int] = {}
+            try:
+                graph = BitGraph.from_graph6(str(row["graph6"]))
+                order = graph.n
+                size = graph.size()
+                for degree in graph.degree_sequence():
+                    key = str(degree)
+                    degree_histogram[key] = degree_histogram.get(key, 0) + 1
+            except (UnicodeError, ValueError):
+                order = None
+                size = None
+            candidates.append(
+                {
+                    "candidate_id": row["candidate_id"],
+                    "lane_id": row["lane_id"],
+                    "lane_version": row["lane_version"],
+                    "state": row["state"],
+                    "verification_status": (
+                        row["certification_status"] or row["state"]
+                    ),
+                    "order": order,
+                    "size": size,
+                    "degree_histogram": degree_histogram,
+                    "score": json.loads(row["score_json"]),
+                    "artifact_sha256": row["artifact_sha256"],
+                    "created_at": row["created_at"],
+                    "promoted_at": row["promoted_at"],
+                }
+            )
         revisions = [
             {
                 **dict(row),
@@ -581,6 +622,7 @@ def campaign_status(workspace: Path, campaign_id: str | None = None) -> dict[str
             "actions": actions,
             "hypotheses": hypotheses,
             "revisions": revisions,
+            "candidates": candidates,
             "verification": {
                 key: int(value or 0) for key, value in verification.items()
             },
