@@ -24,6 +24,13 @@ class WebAssetsTests(unittest.TestCase):
             thread = Thread(target=server.serve_forever, daemon=True)
             thread.start()
             connection = HTTPConnection(*server.server_address, timeout=2)
+            connection.request("GET", "/")
+            response = connection.getresponse()
+            self.assertEqual(response.status, 200)
+            self.assertIn(
+                f"{workspace.parent.name}/{workspace.name}".encode(),
+                response.read(),
+            )
             connection.request("GET", "/api/status")
             response = connection.getresponse()
             self.assertEqual(response.status, 200)

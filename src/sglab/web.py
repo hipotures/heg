@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from html import escape
 from pathlib import Path
 from subprocess import DEVNULL, Popen
 from threading import Lock
@@ -354,6 +355,21 @@ class DashboardServer(ThreadingHTTPServer):
 class DashboardHandler(BaseHTTPRequestHandler):
     server: DashboardServer
 
+    def _with_workspace_identity(self, body: bytes) -> bytes:
+        label = (
+            f"{self.server.workspace.parent.name}/"
+            f"{self.server.workspace.name}"
+        )
+        identity = (
+            '<aside aria-label="Workspace identity" '
+            'style="margin:0 0 1rem;padding:.65rem .85rem;'
+            'border:1px solid var(--line);border-radius:9px;'
+            'background:var(--surface-2);color:var(--muted)">'
+            f'Workspace <strong style="color:var(--text)">{escape(label)}</strong>'
+            "</aside>"
+        ).encode("utf-8")
+        return body.replace(b"<main>", b"<main>" + identity, 1)
+
     def _json(self, status: int, payload: object) -> None:
         body = json.dumps(payload, sort_keys=True).encode("utf-8")
         if len(body) > MAX_JSON_RESPONSE:
@@ -367,6 +383,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _html(self, status: int, body: bytes) -> None:
+        body = self._with_workspace_identity(body)
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -423,6 +440,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.send_error(404)
             return
         body = candidate.read_bytes()
+        if candidate.name == "index.html":
+            body = self._with_workspace_identity(body)
         content_type = (
             mimetypes.guess_type(candidate.name)[0] or "application/octet-stream"
         )
