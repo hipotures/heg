@@ -1,0 +1,245 @@
+{
+  "report": "M7_THIRD_REAL_COMPARISON_RUNTIME",
+  "date": "2026-07-25",
+  "tested_production_commit": "76b6b33c15c8584003f780220b7080b320163de5",
+  "preparation_report_commit": "92a9b70c2723346dcdc023320a65910f014414bc",
+  "workspace": "workspace/model-comparisons-live",
+  "suite": {
+    "name": "Luna high vs xhigh — A4 installed-wrapper rerun",
+    "suite_id": "comparison-24c99e0539684b9ca488cdaba4f2486b",
+    "status": "failed",
+    "failure_reason": "ComparisonWorkerError: arm ended as semantic_invalid",
+    "plan_schema_version": "2.1",
+    "resource_accounting_version": 2,
+    "plan_fingerprint": "062bc657ccd45f56808b741c042a9685f0f8b7e7135b5cc5f7af2ce4edef1790",
+    "pre_start_recomputed_fingerprint_matches": true,
+    "maximum_inference_starts": 2,
+    "consumed_inference_starts": 1,
+    "maximum_total_authoritative_server_tokens": 40000,
+    "timeout_seconds_per_turn": 300,
+    "measurement_only": true,
+    "execute_decisions": false,
+    "fail_closed": true
+  },
+  "fixture": {
+    "fixture_id": "m6-executable-preserved-a4",
+    "fixture_sha256": "2abb54b631942cd721dfd4bbaa6481135c73d818d35b9046c8f2f15d2c03af77"
+  },
+  "arms": [
+    {
+      "effective_order": 1,
+      "arm_id": "arm-72342014dab94046869814ff2a48ffc0",
+      "display_name": "Luna high",
+      "model": "gpt-5.6-luna",
+      "reasoning_effort": "high",
+      "context_mode": "stateless_turns",
+      "fresh_thread": true,
+      "status": "semantic_invalid",
+      "inference_reached": true,
+      "effective_contract_matched": true,
+      "final_answer_present": true,
+      "usage_present": true,
+      "schema_valid": true,
+      "semantic_valid": false,
+      "validation_issues": [
+        "$.hypothesis_updates[1].hypothesis_id: must reference an existing hypothesis"
+      ],
+      "selected_action": "start_lane",
+      "selected_algorithm": "simulated_annealing",
+      "returned_action_count": 4,
+      "measurement_only": true,
+      "executed": false,
+      "decision_batch_id": null,
+      "retry_count_reaching_inference": 0,
+      "tool_call_count": 0,
+      "usage": {
+        "input_tokens": 5826,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 3273,
+        "reasoning_output_tokens": 2010,
+        "server_reported_total_tokens": 9099
+      },
+      "latency_seconds": {
+        "first_item": 1.0938330143690109,
+        "final_answer": 61.480035180225968,
+        "total": 62.110854580067098
+      }
+    },
+    {
+      "effective_order": 2,
+      "arm_id": "arm-a3d5c064486e458a808a10a259dc4441",
+      "display_name": "Luna xhigh",
+      "model": "gpt-5.6-luna",
+      "reasoning_effort": "xhigh",
+      "context_mode": "stateless_turns",
+      "fresh_thread": true,
+      "status_stored": "planned",
+      "status_rendered": "blocked",
+      "inference_reached": false,
+      "reservation_created": false
+    }
+  ],
+  "zero_execution": {
+    "research_lanes": 0,
+    "director_action_batches": 0,
+    "director_actions": 0,
+    "director_action_outcomes": 0,
+    "campaign_candidates": 0,
+    "graph_search_batches": 0,
+    "returned_action_dispatches": 0,
+    "model_tool_calls": 0,
+    "inference_reaching_retries": 0
+  },
+  "resources": {
+    "quota_failure": false,
+    "filesystem_policy_failure": false,
+    "accounting_errors": 0,
+    "cleanup_status": "sampled_after_cleanup",
+    "runtime_scratch": {
+      "peak_apparent_bytes": 5196165,
+      "peak_allocated_bytes": 5345280,
+      "limit_bytes": 536870912,
+      "status": "within_limit",
+      "largest_contributor_safe_label": "runtime-scratch/state_5.sqlite-wal",
+      "largest_contributor_apparent_bytes": 2097112
+    },
+    "preserved_artifacts": {
+      "peak_apparent_bytes": 460076,
+      "peak_allocated_bytes": 471040,
+      "limit_bytes": 67108864,
+      "status": "within_limit",
+      "file_count": 6
+    },
+    "logs": {
+      "peak_apparent_bytes": 0,
+      "peak_allocated_bytes": 0,
+      "status": "within_limit"
+    }
+  },
+  "installed_wrapper_observations": [
+    {
+      "safe_relative_label": "app-server-tmp/arg0/apply_patch",
+      "classification": "expected_runtime_wrapper",
+      "target_root_class": "codex_installation",
+      "target_trust_classification": "trusted_executable",
+      "policy_status": "allowed",
+      "no_follow_confirmed": true
+    },
+    {
+      "safe_relative_label": "app-server-tmp/arg0/applypatch",
+      "classification": "expected_runtime_wrapper",
+      "target_root_class": "codex_installation",
+      "target_trust_classification": "trusted_executable",
+      "policy_status": "allowed",
+      "no_follow_confirmed": true
+    },
+    {
+      "safe_relative_label": "app-server-tmp/arg0/codex-execve-wrapper",
+      "classification": "expected_runtime_wrapper",
+      "target_root_class": "codex_installation",
+      "target_trust_classification": "trusted_executable",
+      "policy_status": "allowed",
+      "no_follow_confirmed": true
+    },
+    {
+      "safe_relative_label": "app-server-tmp/arg0/codex-linux-sandbox",
+      "classification": "expected_runtime_wrapper",
+      "target_root_class": "codex_installation",
+      "target_trust_classification": "trusted_executable",
+      "policy_status": "allowed",
+      "no_follow_confirmed": true
+    }
+  ],
+  "process_lifecycle": {
+    "attempt_id": "comparison-attempt-411215ce54b7434e992e42a450661178",
+    "attempt_status": "failed",
+    "worker_return_code": 1,
+    "process_reap_status": "reaped",
+    "lease_id": "comparison-lease-94c70aa69bab420ca440190236219057",
+    "lease_released": true,
+    "app_server_session_state": "closed",
+    "worker_process_remaining": false,
+    "app_server_process_remaining": false,
+    "zombie_or_orphan_remaining": false,
+    "dashboard_loopback_responsive": true
+  },
+  "sqlite": {
+    "schema_version": 13,
+    "integrity_check": "ok",
+    "foreign_key_check_rows": 0
+  },
+  "safe_repository_verification": {
+    "make_doctor": "passed",
+    "make_test": "passed",
+    "test_count": 227,
+    "make_check": "passed",
+    "make_benchmark_smoke": "passed",
+    "make_dashboard_smoke": "passed"
+  },
+  "historical_preservation": {
+    "historical_suites_unchanged": true,
+    "historical_suite_ids": [
+      "comparison-4407a28f8e7c47b89a7226045b61b1b4",
+      "comparison-aaabfae5a010445e9d966ea50a0958a8"
+    ],
+    "historical_statuses": [
+      "failed",
+      "failed"
+    ],
+    "historical_consumed_inference_starts": [
+      1,
+      0
+    ],
+    "historical_plan_fingerprints": [
+      "89e09e8f82428e86f2a75ae24ff51f7187536c22c2ad023152dcb80b60512886",
+      "a44e96f67628cb9afcacbc6c76b8f0e6e65696ba075a62c587d5f02b9b41c6d7"
+    ]
+  },
+  "safe_artifact_sha256": {
+    "plan_verification": "2785dba16252c1dfb3255c963966c044356a119bd482aa885effa3128cb8d0cc",
+    "app_server_request": "7c05e9745f2488e27a2a2c814a1c987b28eb75af541caba0e567f4a2e69c10c4",
+    "app_server_response": "743f8ecdb463e6221bd135e1a54b9a11a148e06d9c1c4958281d5e97e8c455b2",
+    "bounded_wire_log": "5746e40676e7fdffe0351a474a50b4f3fc29ca7ce93cde013524f398bf1af421",
+    "bounded_worker_log": "8165e111d28b08821c2446a6c91fc1f9e95467e6e6284e27e200f79093eb2ced",
+    "terminal_suite_screenshot": "a53d7d2f4b7a09c56720c074f675f29afeb98bb5b6d4374666d7328449261e5c",
+    "blind_unavailable_screenshot": "e3234fed0fc8359078e33d987f68c6635e0b256dec414c7dbc2aaf833344a91c",
+    "terminal_detail_api_response": "350a316343cb627db10b4fa96190588d6196fdbe0cdac3bc928fe428d8723af4",
+    "terminal_progress_api_response": "cee0d8f779be77bbc466848e8055c7f86d0209fc159c3676dbcdf5686ed25788"
+  },
+  "rendered_ui": {
+    "verified_with_playwright_cdp": true,
+    "terminal_suite_screenshot": "m7-third-real-comparison/terminal-suite.png",
+    "blind_page_screenshot": "m7-third-real-comparison/blind-unavailable.png",
+    "blind_pair_available": false,
+    "rating_submitted": false
+  },
+  "credential_handling": {
+    "authorized_private_copy_count": 1,
+    "credential_contents_in_report": false,
+    "credential_hash_in_report": false,
+    "private_runtime_paths_in_report": false
+  },
+  "final_status": {
+    "installed_app_server_wrapper_smoke_passed": true,
+    "expected_app_server_wrappers_allowed": true,
+    "symlink_targets_not_followed": true,
+    "resource_limits_respected": true,
+    "worker_child_reaped": true,
+    "lease_released": true,
+    "graceful_app_server_shutdown": true,
+    "inference_starts_consumed": 1,
+    "second_arm_started": false,
+    "zero_inference_reaching_retries": true,
+    "zero_graph_search_batches": true,
+    "zero_action_dispatches": true,
+    "zero_model_tool_calls": true,
+    "safe_repository_gates_passed": true,
+    "ready_for_user_blind_rating": false,
+    "bounded_authenticated_worker_smoke": "failed"
+  },
+  "uncertainties": [
+    "No high-versus-xhigh scientific comparison can be made because only the high arm reached inference and its response failed semantic validation.",
+    "The App Server may add platform sandbox or environment wrappers outside the scientific request contract; this report therefore does not claim a bare host process environment."
+  ]
+}
