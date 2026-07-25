@@ -2,6 +2,29 @@
 
 Last implementation audit: **2026-07-25**.
 
+## M7 first real comparison runtime failed closed
+
+Fresh explicit authorization bound the prepared Luna high-versus-xhigh suite
+to its unchanged fingerprint, two stateless contracts, and at most two
+inference starts. The randomized high arm ran first and completed with a final
+answer, matching effective model/effort/context, schema and semantic validity,
+9,755 authoritative tokens, and 73.64 seconds total latency. Its returned
+actions remained measurement-only and unexecuted.
+
+The worker then failed closed on the 64 MiB comparison artifact-directory
+limit before starting xhigh. Exactly one inference start was consumed; there
+was no retry, replacement, second/third inference, search batch, lane, action
+dispatch, candidate evaluation, compaction, or model tool call. The App Server
+closed gracefully, the lease was released, and no worker/App Server orphan
+remains. Because only one valid response exists, blind pairwise rating is not
+available and no user rating was recorded.
+
+The terminal UI exposed and then received a focused fix for rendering a
+structured action-space object; the corrected page renders the completed turn
+and disables all terminal controls. The complete 194-test suite, doctor,
+compile checks, benchmark/dashboard smoke, SQLite integrity, and foreign-key
+checks pass. See `docs/reports/M7_FIRST_REAL_COMPARISON_RUNTIME.md`.
+
 ## M7 first real comparison deterministic preparation complete
 
 The dedicated non-synthetic `model_comparison_live` workspace now contains a

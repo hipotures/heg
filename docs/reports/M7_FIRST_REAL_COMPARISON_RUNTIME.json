@@ -1,0 +1,201 @@
+{
+  "schema_version": "1.0",
+  "report_kind": "m7_first_real_comparison_runtime",
+  "generated_at": "2026-07-25T16:28:00Z",
+  "tested_commit": "124d581ede6f31ab74392699af42e03cc0eea419",
+  "suite": {
+    "suite_id": "comparison-4407a28f8e7c47b89a7226045b61b1b4",
+    "name": "Luna high vs xhigh — A4 worker smoke",
+    "plan_fingerprint": "89e09e8f82428e86f2a75ae24ff51f7187536c22c2ad023152dcb80b60512886",
+    "fixture_id": "m6-executable-preserved-a4",
+    "fixture_sha256": "2abb54b631942cd721dfd4bbaa6481135c73d818d35b9046c8f2f15d2c03af77",
+    "status": "failed",
+    "failure_reason": "ComparisonWorkerError: comparison artifact directory limit exceeded",
+    "measurement_only": true,
+    "execute_decisions": false,
+    "fail_closed": true,
+    "maximum_inference_starts": 2,
+    "consumed_inference_starts": 1,
+    "maximum_total_server_tokens": 40000,
+    "authoritative_server_tokens": 9755,
+    "timeout_seconds_per_turn": 300
+  },
+  "authorization": {
+    "authorization_id": "authorization-4425aa0871f34d3a81bd7fe37b74b83d",
+    "plan_fingerprint_matched_before_authorization": true,
+    "maximum_inference_starts": 2,
+    "authorized_models": [
+      "gpt-5.6-luna"
+    ],
+    "authorized_efforts": [
+      "high",
+      "xhigh"
+    ],
+    "authorized_context_modes": [
+      "stateless_turns"
+    ],
+    "consumed_inference_starts": 1,
+    "retry_or_replacement_authorization_used": false
+  },
+  "worker": {
+    "attempt_id": "comparison-attempt-4e5e7a9788304a13a29e4ae24251a5d3",
+    "attempt_status": "failed",
+    "terminal_reason": "ComparisonWorkerError: comparison artifact directory limit exceeded",
+    "lease_id": "comparison-lease-2e199e574f7a4e7184fc0b47108be2cc",
+    "lease_released": true,
+    "heartbeat_stopped": true,
+    "worker_process_absent_after_control_plane_reap": true,
+    "orphan_processes": 0,
+    "plan_verification_sha256": "a1697bb980cec34cadd08b68b56c3cf014311b2aff6dc6e5b6eba3e0fae9273c"
+  },
+  "arms": [
+    {
+      "arm_id": "arm-9a0c4225502c4959973bffe2101201a5",
+      "display_name": "Luna high",
+      "effective_order": 0,
+      "actual_order": 0,
+      "requested_contract": {
+        "model": "gpt-5.6-luna",
+        "reasoning_effort": "high",
+        "context_mode": "stateless_turns"
+      },
+      "effective_contract": {
+        "model": "gpt-5.6-luna",
+        "reasoning_effort": "high",
+        "context_mode": "stateless_turns"
+      },
+      "lifecycle_state": "completed",
+      "fresh_thread": true,
+      "final_answer_present": true,
+      "usage_present": true,
+      "tokens": {
+        "input": 5826,
+        "cached_input": 0,
+        "cache_write_input": 0,
+        "output": 3929,
+        "reasoning_output": 2554,
+        "server_reported_total": 9755
+      },
+      "latency_seconds": {
+        "first_item": 1.1561922980472446,
+        "final_answer": 73.09819388855249,
+        "total_wall": 73.63951368629932
+      },
+      "schema_valid": true,
+      "semantic_valid": true,
+      "validation_issue_count": 0,
+      "returned_action_types": [
+        "start_lane",
+        "promote_candidate",
+        "schedule_verification",
+        "request_diagnostic",
+        "set_review_trigger"
+      ],
+      "selected_action": "start_lane",
+      "measurement_only": true,
+      "executed": false,
+      "tool_call_count": 0,
+      "retry_count_reaching_inference": 0,
+      "app_server_session_closed": true,
+      "app_server_terminal_status": "completed_valid"
+    },
+    {
+      "arm_id": "arm-f95c90d663ff45b9b0b6e846c609df9c",
+      "display_name": "Luna xhigh",
+      "effective_order": 1,
+      "actual_order": null,
+      "requested_contract": {
+        "model": "gpt-5.6-luna",
+        "reasoning_effort": "xhigh",
+        "context_mode": "stateless_turns"
+      },
+      "effective_contract": null,
+      "lifecycle_state": "planned",
+      "inference_started": false,
+      "runtime_home_created": false,
+      "blocked_by_fail_closed_terminal_worker_error": true
+    }
+  ],
+  "resource_limit_failure": {
+    "configured_artifact_directory_limit_bytes": 67108864,
+    "limit_triggered": true,
+    "post_shutdown_non_auth_artifact_bytes": 6083415,
+    "peak_artifact_bytes_preserved": false,
+    "uncertainty": "The exact transient peak was not persisted. The post-shutdown tree is smaller than the limit, so the worker's terminal check is authoritative but the individual transient file responsible cannot be reconstructed from final sizes."
+  },
+  "zero_execution_proof": {
+    "research_lanes": 0,
+    "director_action_batches": 0,
+    "director_actions": 0,
+    "director_action_outcomes": 0,
+    "campaign_candidates": 0,
+    "search_batches": 0,
+    "action_dispatches": 0,
+    "model_tool_calls": 0,
+    "retries_reaching_inference": 0,
+    "third_inference": false,
+    "replacement_arm": false,
+    "all_persisted_decisions_measurement_only": true,
+    "all_persisted_decisions_executed_false": true
+  },
+  "private_runtime": {
+    "private_auth_files_created": 1,
+    "only_started_arm_has_runtime_home": true,
+    "auth_content_included_in_report": false,
+    "auth_hash_included_in_report": false,
+    "text_artifacts_scanned_for_auth_filename": 15,
+    "auth_filename_mentions_outside_auth_file": 0,
+    "auth_exposed_in_ui": false,
+    "auth_included_in_manifests": false
+  },
+  "artifact_hashes": {
+    "plan_verification": "a1697bb980cec34cadd08b68b56c3cf014311b2aff6dc6e5b6eba3e0fae9273c",
+    "request": "7c05e9745f2488e27a2a2c814a1c987b28eb75af541caba0e567f4a2e69c10c4",
+    "director_state_v2": "ae72cd0e1067fd90c2027e6ae8f9437ee71586551d7d64ca97d0fb1734938d53",
+    "response": "b3b247d7778beb4b9d83c056c90165895ce4c60f569c6f11229149826c1578b4",
+    "wire_log": "94b8291924da7e888af551e7b1cfa61f71082103d8cc2ec171aa753e25064db5",
+    "evidence_registry": "2b15586edf1e512f9285af13f51d6b2897e154bba9c995404c9b92eaec88048c"
+  },
+  "sqlite": {
+    "schema_version": 11,
+    "integrity_check": "ok",
+    "foreign_key_check_rows": 0
+  },
+  "blind_review": {
+    "ordinary_pair_available": false,
+    "valid_completed_answers": 1,
+    "not_enough_valid_responses_message_visible": true,
+    "model_effort_context_usage_latency_cost_hidden_on_blind_page": true,
+    "rating_recorded": false,
+    "ready_for_user_blind_rating": false
+  },
+  "ui_runtime_fix": {
+    "commit": "124d581ede6f31ab74392699af42e03cc0eea419",
+    "issue": "The terminal detail page treated the structured action-space object as an array.",
+    "result": "The measured turn now renders, terminal controls are disabled, and no runtime data was changed."
+  },
+  "verification": {
+    "make_doctor": "passed",
+    "make_test": {
+      "passed": true,
+      "tests": 194
+    },
+    "make_check": "passed",
+    "make_benchmark_smoke": "passed",
+    "make_dashboard_smoke": "passed",
+    "rendered_playwright_terminal_view": "passed",
+    "rendered_playwright_blind_view": "passed"
+  },
+  "screenshots": [
+    {
+      "path": "docs/reports/m7-first-real-comparison-runtime/terminal-suite.png",
+      "sha256": "09960d14a00c3b8d2db6430c5a3d47c6ed31038d3af55f3a2a16342a0032e5c9"
+    },
+    {
+      "path": "docs/reports/m7-first-real-comparison-runtime/blind-unavailable.png",
+      "sha256": "e3234fed0fc8359078e33d987f68c6635e0b256dec414c7dbc2aaf833344a91c"
+    }
+  ],
+  "ready_for_user_blind_rating": false,
+  "bounded_authenticated_worker_smoke": "failed"
+}
