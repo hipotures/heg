@@ -126,7 +126,13 @@ class SemanticUiRenderingTests(unittest.TestCase):
         self.assertIn("/api/candidates?limit=24", dashboard)
         self.assertIn("Raw action record", dashboard)
         self.assertIn("Candidate metadata", dashboard)
+        self.assertIn("Math.min(limit,3)", dashboard)
+        self.assertIn("function eventLine(line)", dashboard)
         self.assertNotIn("['Parameters', r => esc(JSON.stringify", dashboard)
+        self.assertNotIn(
+            "typeof v==='object'?esc(JSON.stringify(v))",
+            dashboard,
+        )
 
     def test_global_navigation_is_consistent_and_theme_label_does_not_wrap(self) -> None:
         comparison = self.decode(comparisons_page())
@@ -143,7 +149,32 @@ class SemanticUiRenderingTests(unittest.TestCase):
         self.assertIn("white-space:nowrap", comparison)
         self.assertIn("white-space:nowrap", dashboard)
         self.assertIn('aria-label="Dashboard sections"', dashboard)
-        self.assertIn("flex-wrap:wrap", dashboard)
+        self.assertIn("grid-template-columns:repeat(2,minmax(0,1fr))", comparison)
+        self.assertIn("grid-template-columns:repeat(2,minmax(0,1fr))", dashboard)
+
+    def test_nested_action_parameters_are_semantic_and_wrapping_safe(self) -> None:
+        comparison = self.decode(comparison_detail_page("suite-demo"))
+        dashboard = (Path(__file__).parents[1] / "web" / "index.html").read_text(
+            encoding="utf-8"
+        )
+        for html in (comparison, dashboard):
+            self.assertIn('class="nested-object"', html)
+            self.assertIn("overflow-wrap:anywhere", html)
+        self.assertIn("value.some", dashboard)
+        self.assertIn("value.some", comparison)
+        self.assertIn("Degree ${degree}: ${count}", dashboard)
+
+    def test_technical_id_detection_does_not_treat_invalid_as_an_id(self) -> None:
+        comparison = self.decode(comparisons_page())
+        dashboard = (Path(__file__).parents[1] / "web" / "index.html").read_text(
+            encoding="utf-8"
+        )
+        for html in (comparison, dashboard):
+            self.assertIn(r"(^|[\s_-])(id|ids|hash", html)
+            self.assertNotIn(
+                r"/(id|hash|sha-?256|fingerprint|prompt|director state|output schema)/i",
+                html,
+            )
 
     def test_terminal_suite_controls_use_explicit_element_lookup(self) -> None:
         html = self.decode(comparison_detail_page("suite-demo"))

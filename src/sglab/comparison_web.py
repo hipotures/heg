@@ -28,7 +28,7 @@ STYLE = """
 }
 *{box-sizing:border-box}
 html{background:var(--bg);scroll-behavior:smooth}
-body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 var(--sans)}
+body{margin:0;background:var(--bg);color:var(--text);font:1rem/1.55 var(--sans)}
 a{color:var(--accent-strong);text-underline-offset:3px}
 a:hover{text-decoration-thickness:2px}
 button,input,select,textarea{font:inherit}
@@ -61,14 +61,14 @@ section,.panel{margin:0 0 1rem;padding:1.1rem;background:var(--surface);border:1
 .metric strong{display:block;font-size:1.05rem;overflow-wrap:anywhere}
 .metric.emphasis{background:var(--accent-soft);border-color:color-mix(in srgb,var(--accent) 38%,var(--line))}
 .metric.danger{background:var(--bad-soft)}
-.badge,.chip{display:inline-flex;align-items:center;gap:.3rem;border:1px solid var(--line);border-radius:999px;padding:.18rem .48rem;font-size:.74rem;font-weight:750;line-height:1.3;white-space:nowrap}
+.badge,.chip{display:inline-flex;align-items:center;gap:.3rem;border:1px solid var(--line);border-radius:999px;padding:.18rem .48rem;font-size:.74rem;font-weight:750;line-height:1.3}.badge{white-space:nowrap}.chip{max-width:100%;white-space:normal;overflow-wrap:anywhere}
 .badge.good{background:var(--good-soft);color:var(--good);border-color:transparent}.badge.bad{background:var(--bad-soft);color:var(--bad);border-color:transparent}
 .badge.warn{background:var(--warn-soft);color:var(--warn);border-color:transparent}.badge.info{background:var(--info-soft);color:var(--info);border-color:transparent}
-.badge.neutral{background:var(--surface-2);color:var(--muted)}.chips{display:flex;flex-wrap:wrap;gap:.3rem}
+.badge.neutral{background:var(--surface-2);color:var(--muted)}.chips{display:flex;flex-wrap:wrap;gap:.3rem}.nested-object{min-width:0;padding:.45rem;border:1px solid var(--line);border-radius:7px;background:var(--surface)}
 .notice{min-height:1.2rem;color:var(--warn);font-weight:650}.error-state{padding:1rem;background:var(--bad-soft);color:var(--bad);border-radius:8px}
 .empty-state{padding:2rem;text-align:center;color:var(--muted);border:1px dashed var(--line-strong);border-radius:9px}
 .mono,.id{font-family:var(--mono);font-size:.86em}.id{overflow-wrap:anywhere}.id-value{display:inline-flex;align-items:center;gap:.3rem;max-width:100%}
-.copy-id{padding:.12rem .3rem;font-size:.68rem;font-weight:700;color:var(--muted);background:transparent}
+.copy-id{min-height:2rem;padding:.2rem .42rem;font-size:.68rem;font-weight:700;color:var(--muted);background:transparent}
 .truncate{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
 .table-wrap{max-width:100%;overflow:auto;border:1px solid var(--line);border-radius:10px}
 table{width:100%;border-collapse:collapse;font-size:.86rem}th,td{text-align:left;padding:.68rem .72rem;border-bottom:1px solid var(--line);vertical-align:top}
@@ -104,7 +104,7 @@ fieldset{border:1px solid var(--line);border-radius:10px;padding:1rem;margin:0 0
 @media(max-width:900px){.split,.grid.two{grid-template-columns:1fr}.plan-callout{grid-template-columns:1fr}.hide-tablet{display:none}}
 @media(max-width:700px){
   .site-header{position:static}.header-inner{padding:.8rem 1rem;display:grid;grid-template-columns:minmax(0,1fr) auto}.brand{grid-column:1}
-  nav{grid-column:1/-1;margin:0;overflow:visible;flex-wrap:wrap;padding:.45rem 0 .2rem}nav a{white-space:nowrap}.theme-toggle{grid-column:2;grid-row:1;min-width:auto;padding:.52rem .62rem;font-size:.8rem}
+  nav{grid-column:1/-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));margin:0;overflow:visible;padding:.55rem 0 .1rem;gap:.3rem}nav a{min-height:2.75rem;display:grid;place-items:center;text-align:center;white-space:nowrap;font-size:.9rem}.theme-toggle{grid-column:2;grid-row:1;min-width:auto;min-height:2.75rem;padding:.52rem .62rem;font-size:.8rem;white-space:nowrap}
   main{padding:1rem .75rem 3rem}.page-heading{align-items:start}.page-heading h1{font-size:1.75rem}
   section,.panel{padding:.85rem;border-radius:10px}.grid{grid-template-columns:1fr}.table-wrap{border-radius:8px}
   .responsive-table table,.responsive-table thead,.responsive-table tbody,.responsive-table tr,.responsive-table th,.responsive-table td{display:block}
@@ -142,7 +142,7 @@ const safeJson=v=>{if(v===null||v===undefined||v==='')return null;if(typeof v===
 const statusTone=v=>{const s=String(v??'').toLowerCase();if(/complete|valid|pass|applied|authorized|prepared/.test(s))return'good';if(/fail|invalid|reject|abort/.test(s))return'bad';if(/time|stop|block|pause|unknown/.test(s))return'warn';return'neutral'};
 const badge=v=>`<span class="badge ${statusTone(v)}">${esc(label(v??'unknown'))}</span>`;
 const idHtml=v=>v?`<span class="id-value"><span class="id" title="${esc(v)}">${esc(shortId(v))}</span><button type="button" class="copy-id" data-copy="${esc(v)}" aria-label="Copy full identifier">Copy</button></span>`:'—';
-const field=(k,v)=>{const technicalKey=/(id|hash|sha-?256|fingerprint|prompt|director state|output schema)/i.test(k);return v===null||v===undefined||v===''?'':`<div class="semantic-field"><dt>${esc(label(k))}</dt><dd>${typeof v==='string'&&technicalKey?idHtml(v):esc(v)}</dd></div>`};
+const field=(k,v)=>{const technicalKey=/(^|[\s_-])(id|ids|hash|sha-?256|fingerprint)($|[\s_-])|prompt|director state|output schema/i.test(k);return v===null||v===undefined||v===''?'':`<div class="semantic-field"><dt>${esc(label(k))}</dt><dd>${typeof v==='string'&&technicalKey?idHtml(v):esc(v)}</dd></div>`};
 const technical=(title,value)=>value===null||value===undefined||value===''?'':`<details><summary>${esc(title)}</summary><pre>${esc(typeof value==='string'?value:JSON.stringify(value,null,2))}</pre></details>`;
 async function api(path,options={}){const r=await fetch(path,{...options,headers:{...headers,...(options.headers||{})},cache:'no-store'});let b;try{b=await r.json()}catch{b={error:`HTTP ${r.status}`}}if(!r.ok)throw new Error(b.error||`HTTP ${r.status}`);return b}
 function themeLabel(){const dark=document.documentElement.dataset.theme==='dark';const b=document.getElementById('theme-toggle');if(b){b.textContent=dark?'☀ Light theme':'☾ Dark theme';b.setAttribute('aria-pressed',String(dark))}}
@@ -156,7 +156,10 @@ function semanticValue(value,key=''){
     if(/seconds|latency|elapsed|wall/.test(key))return fmtSeconds(value);
     return Number(value).toLocaleString(undefined,{maximumFractionDigits:4});
   }
-  if(Array.isArray(value))return `<div class="chips">${value.map(x=>`<span class="chip">${typeof x==='object'?esc(JSON.stringify(x)):esc(shortId(x))}</span>`).join('')}</div>`;
+  if(Array.isArray(value)){
+    if(value.some(x=>x&&typeof x==='object'))return `<div class="stack">${value.map(x=>`<div class="nested-object">${semanticValue(x,key)}</div>`).join('')}</div>`;
+    return `<div class="chips">${value.map(x=>`<span class="chip" title="${esc(x)}">${esc(shortId(x))}</span>`).join('')}</div>`;
+  }
   if(typeof value==='object')return semanticFields(value);
   return esc(value);
 }
