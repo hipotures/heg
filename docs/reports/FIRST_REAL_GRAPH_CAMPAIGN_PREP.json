@@ -1,0 +1,113 @@
+{
+  "schema_version": "1.0",
+  "prepared_at": "2026-07-25T20:27:36Z",
+  "baseline_commit": "594dabb8aea8586f02d9e54dbf55e6dae820b721",
+  "tested_implementation_commit": "61ee3771a068e341a1ecf785b67c36c863e8be2d",
+  "workspace": "workspace/first-real-graph-campaign-01",
+  "workspace_kind": "first_real_graph_campaign",
+  "synthetic_data": false,
+  "campaign_id": "campaign-b68ec445388e49b2be0b6fabf8ff6600",
+  "plan_fingerprint": "827291f2ac5f4f4c591bfb287ad4075c4ef612cf7fa797a5cdf27821bd4c125d",
+  "plan_artifact_sha256": "0473320720ddc806dd5ee5a6da7165558b39e50041f605785e92a6701509b960",
+  "target": "erdos_gyarfas",
+  "target_definition_sha256": "e1f40a0bb11ee46ff54f772a5d4117ea37ac81a3482082a4017836ea2fabd19e",
+  "campaign_state": "prepared",
+  "director": {
+    "model": "gpt-5.6-luna",
+    "reasoning_effort": "high",
+    "context_mode": "stateless_turns",
+    "maximum_cycles": 12,
+    "maximum_turns_including_replans": 24,
+    "turn_timeout_seconds": 300,
+    "maximum_replans_per_state": 1,
+    "replan_context": "fresh_stateless_thread",
+    "automatic_compaction": false,
+    "model_tools": false,
+    "shell_or_code_requests": false,
+    "provider_recovery_attempts": 0
+  },
+  "decision_policy": {
+    "valid_actions": "execute",
+    "invalid_actions": "never_execute",
+    "first_invalid_response": "persist_then_one_fresh_stateless_replan",
+    "second_invalid_response": "clean_stop",
+    "infrastructure_protocol_resource_auth_verifier": "fail_closed"
+  },
+  "stop_contract": {
+    "campaign_wall_seconds": 3600,
+    "certified_counterexample": "stop_immediately_after_exact_M4_certificate"
+  },
+  "search_limits": {
+    "maximum_active_lanes": 8,
+    "maximum_resource_share_per_lane": 1.0,
+    "maximum_aggregate_resource_share": 8.0,
+    "lane_memory_limit_bytes": 536870912,
+    "event_queue_capacity": 512,
+    "command_queue_capacity_per_lane": 32,
+    "telemetry_windows_per_lane": 120,
+    "checkpoints_per_lane": 8,
+    "pinned_checkpoints": 128
+  },
+  "verification_limits": {
+    "maximum_queue_depth": 32,
+    "maximum_concurrent_jobs": 1,
+    "timeout_seconds_per_exact_path": 60,
+    "verifier_memory_limit_bytes": 536870912,
+    "broker_memory_limit_bytes": 1073741824,
+    "success_authority": "M4_independent_verifier"
+  },
+  "runtime_limits": {
+    "resource_accounting_version": 2,
+    "max_runtime_scratch_bytes": 536870912,
+    "max_single_runtime_file_bytes": 268435456,
+    "max_wire_log_bytes": 8388608,
+    "max_stderr_bytes": 262144,
+    "max_stdout_bytes": 2097152,
+    "symlink_policy": "expected_app_server_wrappers_v1"
+  },
+  "scientific_contract": {
+    "heuristic_score_is_certification": false,
+    "capped_witness_counts": "approximate_or_truncated",
+    "verifier_disagreement": "stop_affected_path_and_review",
+    "announce_success_without_certificate": false,
+    "fixed_experiment_sequence": false
+  },
+  "dashboard": {
+    "bind": "127.0.0.1",
+    "port": 8788,
+    "campaign_api_http_status": 200
+  },
+  "verification": {
+    "focused_campaign_protocol_tests": {
+      "passed": 26,
+      "failed": 0
+    },
+    "full_safe_suite": {
+      "passed": 241,
+      "failed": 0
+    },
+    "make_doctor": true,
+    "make_test": true,
+    "make_check": true,
+    "make_benchmark_smoke": true,
+    "make_dashboard_smoke": true,
+    "sqlite_schema_version": 14,
+    "sqlite_integrity_check": "ok",
+    "sqlite_foreign_key_check_rows": 0,
+    "plan_fingerprint_recomputed": true,
+    "no_model_compliance_ok": true,
+    "no_model_compliance_sha256": "e3dc19714d90e148d1f8ff1e22c3f80b0d3f1b0d41f67d363ee41850edaace6c"
+  },
+  "pre_authorization_state": {
+    "auth_imported": false,
+    "auth_reads_or_copies": 0,
+    "model_inference_starts": 0,
+    "app_server_sessions": 0,
+    "app_server_turns": 0,
+    "search_lanes": 0,
+    "director_actions": 0,
+    "graph_search_batches": 0,
+    "verification_jobs": 0
+  },
+  "ready_for_exact_authorization": true
+}
