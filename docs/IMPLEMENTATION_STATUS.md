@@ -2,6 +2,42 @@
 
 Last implementation audit: **2026-07-25**.
 
+## M7 bounded comparison worker complete
+
+SQLite schema v11 now persists comparison execution attempts, exclusive worker
+leases and heartbeats, stop requests, inference reservations, explicit
+persistent-conversation dependencies, and append-only arm transitions. The
+worker consumes one immutable authorized plan, verifies its fingerprint before
+auth access, reserves each inference transactionally, and never exceeds the
+authorized cap. It supports fresh stateless arms and explicit persistent
+sequences; compacted execution remains disabled pending a future exact plan.
+
+The bearer-protected Start endpoint launches only the fixed
+`sys.executable -m sglab comparisons worker` argv in a separate process group,
+without a shell or browser-controlled executable, auth path, command, or
+environment. The detail page polls bounded progress APIs for lease, heartbeat,
+stop, lifecycle, contracts, usage, latency, and validity. Stop is a durable
+request observed by the worker, which interrupts and drains an active turn
+before bounded shutdown.
+
+The real worker state machine was tested through the hardened App Server client
+and a synthetic stdio server, including persistent resume, stateless fresh
+threads, invalid output, timeout and late abort, nullable usage, tool/retry
+rejection, protocol errors, crashes, forced shutdown, lease loss, and
+fail-closed dependency blocking. The replay HTTP demonstration planned four
+arms, reached three fake inference starts, completed two, timed out one, and
+blocked the last; it also preserved manual and blind ratings.
+
+Focused tests pass 16/16, two complete safe-suite runs and final `make test`
+pass 169/169, explicit loopback tests pass 8/8, and doctor, check,
+benchmark/dashboard smoke, SQLite
+v10→v11 Online Backup migration, integrity and foreign-key checks pass. The
+demonstration made zero real model calls or auth accesses and the comparison
+worker created zero search batches, lanes, evaluations, action dispatches,
+compactions, or tool executions. See
+`docs/reports/M7_COMPARISON_WORKER_PHASE_A.md`,
+`docs/COMPARISON_WORKER.md`, and `docs/COMPARISON_UI.md`.
+
 ## M7 controlled comparison UI and persistence complete
 
 SQLite schema v10 now provides a comparison subsystem separate from research

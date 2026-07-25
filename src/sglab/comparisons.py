@@ -8,6 +8,7 @@ from random import Random
 from typing import Any, Iterable
 import json
 import math
+import re
 import sqlite3
 import uuid
 
@@ -24,6 +25,8 @@ MAX_REPETITIONS = 8
 MAX_INFERENCE_STARTS = 64
 MAX_TIMEOUT_SECONDS = 900
 MAX_CLIENT_TOKENS = 12000
+DEFAULT_WORKER_WALL_SECONDS = 7200
+MAX_WORKER_WALL_SECONDS = 86400
 VALID_SUITE_STATES = {
     "draft",
     "prepared",
@@ -36,6 +39,10 @@ VALID_SUITE_STATES = {
 VALID_ARM_STATES = {
     "planned",
     "preflight",
+    "auth_prepared",
+    "server_started",
+    "thread_ready",
+    "inference_reserved",
     "inference_started",
     "completed",
     "schema_invalid",
@@ -43,10 +50,16 @@ VALID_ARM_STATES = {
     "timed_out",
     "aborted",
     "failed",
+    "blocked",
+    "stopped",
 }
 TERMINAL_ARM_STATES = VALID_ARM_STATES - {
     "planned",
     "preflight",
+    "auth_prepared",
+    "server_started",
+    "thread_ready",
+    "inference_reserved",
     "inference_started",
 }
 
@@ -63,6 +76,10 @@ def canonical_bytes(value: Any) -> bytes:
 
 def canonical_sha256(value: Any) -> str:
     return sha256(canonical_bytes(value)).hexdigest()
+
+
+def _optional_canonical_json(value: Any) -> str | None:
+    return canonical_bytes(value).decode("ascii") if value is not None else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,6 +211,14 @@ def _nullable_text(value: Any, field: str, maximum: int) -> str:
     return _safe_text(value, field, maximum)
 
 
+def _bounded_integer(value: Any, field: str, minimum: int, maximum: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{field} must be an integer")
+    if not minimum <= value <= maximum:
+        raise ValueError(f"{field} must be between {minimum} and {maximum}")
+    return value
+
+
 class ComparisonStore:
     def __init__(self, path: Path, *, catalog: ModelCatalog | None = None):
         self.path = path.resolve()
@@ -222,6 +247,9 @@ class ComparisonStore:
         state_bytes = canonical_bytes(director_state)
         digest = sha256(state_bytes).hexdigest()
         hashes = metadata.get("hashes", {})
+        materials = metadata.get("materials", {})
+        if not isinstance(materials, dict):
+            raise ValueError("fixture materials must be an object")
         self.connection.execute(
             """
             INSERT OR IGNORE INTO comparison_fixtures
@@ -233,9 +261,14 @@ class ComparisonStore:
              evidence_registry_sha256, advisory_registry_sha256,
              executable_registry_sha256, base_instructions_sha256,
              developer_instructions_sha256, personality,
-             campaign_budget_sha256, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?)
+             campaign_budget_sha256, created_at, prompt_text,
+             output_schema_json, applicable_action_space_json,
+             evidence_registry_json, advisory_registry_json,
+             executable_registry_json, base_instructions_text,
+             developer_instructions_text, campaign_budget_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 fixture_id,
@@ -260,6 +293,15 @@ class ComparisonStore:
                 metadata.get("personality"),
                 str(hashes.get("campaign_budget", "")),
                 utc_now(),
+                materials.get("prompt"),
+                _optional_canonical_json(materials.get("output_schema")),
+                _optional_canonical_json(materials.get("applicable_action_space")),
+                _optional_canonical_json(materials.get("evidence_registry")),
+                _optional_canonical_json(materials.get("advisory_registry")),
+                _optional_canonical_json(materials.get("executable_registry")),
+                materials.get("base_instructions"),
+                materials.get("developer_instructions", ""),
+                _optional_canonical_json(materials.get("campaign_budget")),
             ),
         )
         self.connection.commit()
@@ -279,6 +321,11 @@ class ComparisonStore:
             "maximum_inference_starts",
             "maximum_total_server_tokens",
             "maximum_client_owned_tokens_per_turn",
+            "maximum_stdout_bytes",
+            "maximum_stderr_bytes",
+            "maximum_wire_log_bytes",
+            "maximum_artifact_directory_bytes",
+            "maximum_worker_wall_seconds",
             "notes",
         }
         unknown = set(payload) - allowed
@@ -333,14 +380,91 @@ class ComparisonStore:
             raise ValueError("maximum client-owned token limit is out of bounds")
         if int(fixture["estimated_client_owned_tokens"]) > max_client:
             raise ValueError("fixture exceeds the client-owned token limit")
+        resource_limits = {
+            "maximum_stdout_bytes": _bounded_integer(
+                payload.get("maximum_stdout_bytes", 1024 * 1024),
+                "maximum_stdout_bytes",
+                4096,
+                64 * 1024 * 1024,
+            ),
+            "maximum_stderr_bytes": _bounded_integer(
+                payload.get("maximum_stderr_bytes", 256 * 1024),
+                "maximum_stderr_bytes",
+                4096,
+                16 * 1024 * 1024,
+            ),
+            "maximum_wire_log_bytes": _bounded_integer(
+                payload.get("maximum_wire_log_bytes", 8 * 1024 * 1024),
+                "maximum_wire_log_bytes",
+                4096,
+                128 * 1024 * 1024,
+            ),
+            "maximum_artifact_directory_bytes": _bounded_integer(
+                payload.get("maximum_artifact_directory_bytes", 64 * 1024 * 1024),
+                "maximum_artifact_directory_bytes",
+                1024 * 1024,
+                1024 * 1024 * 1024,
+            ),
+            "maximum_worker_wall_seconds": _bounded_integer(
+                payload.get(
+                    "maximum_worker_wall_seconds", DEFAULT_WORKER_WALL_SECONDS
+                ),
+                "maximum_worker_wall_seconds",
+                1,
+                MAX_WORKER_WALL_SECONDS,
+            ),
+        }
 
         suite_id = _id("comparison")
         randomized = ordering == "randomized"
-        order = list(range(len(arms)))
+        grouped_order: dict[str, list[int]] = {}
+        group_sequence: list[str] = []
+        for index, arm in enumerate(arms):
+            key = str(arm["conversation_group_id"] or f"independent-{index}")
+            if key not in grouped_order:
+                grouped_order[key] = []
+                group_sequence.append(key)
+            grouped_order[key].append(index)
         if randomized:
-            Random(seed).shuffle(order)
+            Random(seed).shuffle(group_sequence)
+        order = [
+            index
+            for key in group_sequence
+            for index in grouped_order[key]
+        ]
         effective_by_planned = {planned: effective for effective, planned in enumerate(order)}
         now = utc_now()
+        arm_ids = [_id("arm") for _ in arms]
+        group_previous: dict[str, str] = {}
+        arm_execution: list[dict[str, Any]] = []
+        for index, arm in enumerate(arms):
+            arm_id = arm_ids[index]
+            group = arm["conversation_group_id"] or arm_id
+            previous = group_previous.get(group)
+            resume = bool(arm["resume_prior_thread"])
+            if resume and arm["context_mode"] != "persistent_thread":
+                raise ValueError("only persistent_thread arms may resume a thread")
+            if resume and previous is None:
+                raise ValueError("a resumed conversation requires an earlier group arm")
+            if not resume and previous is not None:
+                raise ValueError(
+                    "later arms in a conversation group must explicitly resume"
+                )
+            arm_execution.append(
+                {
+                    "arm_id": arm_id,
+                    "conversation_group_id": group,
+                    "sequence_index": sum(
+                        value["conversation_group_id"] == group
+                        for value in arm_execution
+                    ),
+                    "depends_on_arm_id": previous if resume else None,
+                    "requires_prior_success": int(resume),
+                    "fresh_thread": int(not resume),
+                    "resume_prior_thread": int(resume),
+                }
+            )
+            group_previous[group] = arm_id
         with self.connection:
             self.connection.execute(
                 """
@@ -351,9 +475,12 @@ class ComparisonStore:
                  ordering_seed, planned_inference_count,
                  maximum_inference_starts, maximum_total_server_tokens,
                  maximum_client_owned_tokens_per_turn, timeout_seconds,
-                 fail_closed, notes)
+                 fail_closed, notes, maximum_stdout_bytes,
+                 maximum_stderr_bytes, maximum_wire_log_bytes,
+                 maximum_artifact_directory_bytes,
+                 maximum_worker_wall_seconds)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', 1, 0, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?)
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     suite_id,
@@ -373,9 +500,15 @@ class ComparisonStore:
                     timeout,
                     int(fail_closed),
                     notes,
+                    resource_limits["maximum_stdout_bytes"],
+                    resource_limits["maximum_stderr_bytes"],
+                    resource_limits["maximum_wire_log_bytes"],
+                    resource_limits["maximum_artifact_directory_bytes"],
+                    resource_limits["maximum_worker_wall_seconds"],
                 ),
             )
             for planned_order, arm in enumerate(arms):
+                execution = arm_execution[planned_order]
                 profile = self._active_cost_profile(arm["model"], arm["reasoning_effort"])
                 profile_values = self._profile_snapshot(profile)
                 self.connection.execute(
@@ -395,12 +528,16 @@ class ComparisonStore:
                      relative_cost_multiplier_snapshot,
                      api_input_per_million_snapshot,
                      api_cached_input_per_million_snapshot,
-                     api_output_per_million_snapshot, currency_snapshot)
+                     api_output_per_million_snapshot, currency_snapshot,
+                     conversation_group_id, sequence_index,
+                     depends_on_arm_id, requires_prior_success,
+                     fresh_thread, resume_prior_thread)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                            ?, ?, ?, ?, 'planned', ?, ?, ?, ?, ?, ?)
+                            ?, ?, ?, ?, 'planned', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                            ?, ?)
                     """,
                     (
-                        _id("arm"),
+                        execution["arm_id"],
                         suite_id,
                         arm["display_name"],
                         arm["model"],
@@ -422,7 +559,22 @@ class ComparisonStore:
                         fixture["developer_instructions_sha256"],
                         fixture["campaign_budget_sha256"],
                         *profile_values,
+                        execution["conversation_group_id"],
+                        execution["sequence_index"],
+                        execution["depends_on_arm_id"],
+                        execution["requires_prior_success"],
+                        execution["fresh_thread"],
+                        execution["resume_prior_thread"],
                     ),
+                )
+                self.connection.execute(
+                    """
+                    INSERT INTO comparison_arm_transitions
+                    (transition_id, suite_id, arm_id, lifecycle_state,
+                     recorded_at, sequence_number)
+                    VALUES (?, ?, ?, 'planned', ?, 0)
+                    """,
+                    (_id("transition"), suite_id, execution["arm_id"], now),
                 )
         return suite_id
 
@@ -439,6 +591,8 @@ class ComparisonStore:
                 "reasoning_effort",
                 "context_mode",
                 "repetitions",
+                "conversation_group_id",
+                "resume_prior_thread",
             }
             if unknown:
                 raise ValueError(f"arms[{index}] has unsupported fields")
@@ -461,6 +615,29 @@ class ComparisonStore:
                 f"arms[{index}].display_name",
                 120,
             )
+            raw_group = spec.get("conversation_group_id")
+            group = (
+                _safe_text(
+                    raw_group,
+                    f"arms[{index}].conversation_group_id",
+                    120,
+                )
+                if raw_group not in (None, "")
+                else None
+            )
+            if group is not None and re.fullmatch(
+                r"[A-Za-z0-9][A-Za-z0-9._:-]{0,119}", group
+            ) is None:
+                raise ValueError(
+                    "conversation_group_id contains unsupported characters"
+                )
+            resume = spec.get("resume_prior_thread", False)
+            if not isinstance(resume, bool):
+                raise ValueError("resume_prior_thread must be boolean")
+            if repetitions != 1 and (group is not None or resume):
+                raise ValueError(
+                    "conversation sequencing requires repetitions=1"
+                )
             for repetition in range(repetitions):
                 result.append(
                     {
@@ -469,6 +646,8 @@ class ComparisonStore:
                         "reasoning_effort": effort,
                         "context_mode": mode,
                         "repetition_index": repetition,
+                        "conversation_group_id": group,
+                        "resume_prior_thread": resume,
                     }
                 )
         if len(result) > MAX_ARMS:
@@ -504,12 +683,18 @@ class ComparisonStore:
             dict(row)
             for row in self.connection.execute(
                 """
-                SELECT display_name, model, reasoning_effort, context_mode,
+                SELECT arm_id, display_name, model, reasoning_effort, context_mode,
                        repetition_index, planned_order, effective_order,
+                       conversation_group_id, sequence_index,
+                       depends_on_arm_id, requires_prior_success,
+                       fresh_thread, resume_prior_thread,
+                       expected_model, expected_reasoning_effort,
                        prompt_sha256, director_state_sha256,
                        output_schema_sha256, evidence_registry_sha256,
                        advisory_registry_sha256, executable_registry_sha256,
-                       applicable_action_space_sha256
+                       applicable_action_space_sha256,
+                       base_instructions_sha256,
+                       developer_instructions_sha256, campaign_budget_sha256
                 FROM comparison_arms WHERE suite_id=?
                 ORDER BY effective_order, planned_order
                 """,
@@ -530,7 +715,7 @@ class ComparisonStore:
             for key in compared_hashes
         }
         return {
-            "schema_version": "1.0",
+            "schema_version": "2.0",
             "suite_id": suite_id,
             "fixture_reference": suite["fixture_reference"],
             "fixture_sha256": suite["fixture_sha256"],
@@ -542,6 +727,7 @@ class ComparisonStore:
             "planned_inference_count": suite["planned_inference_count"],
             "maximum_inference_starts": suite["maximum_inference_starts"],
             "timeout_seconds": suite["timeout_seconds"],
+            "fail_closed": bool(suite["fail_closed"]),
             "measurement_only": bool(suite["measurement_only"]),
             "execute_decisions": bool(suite["execute_decisions"]),
             "randomized_arm_order": bool(suite["randomized_arm_order"]),
@@ -550,7 +736,19 @@ class ComparisonStore:
             "maximum_client_owned_tokens_per_turn": suite[
                 "maximum_client_owned_tokens_per_turn"
             ],
+            "maximum_stdout_bytes": suite["maximum_stdout_bytes"],
+            "maximum_stderr_bytes": suite["maximum_stderr_bytes"],
+            "maximum_wire_log_bytes": suite["maximum_wire_log_bytes"],
+            "maximum_artifact_directory_bytes": suite[
+                "maximum_artifact_directory_bytes"
+            ],
+            "maximum_worker_wall_seconds": suite[
+                "maximum_worker_wall_seconds"
+            ],
         }
+
+    def plan_payload(self, suite_id: str) -> dict[str, Any]:
+        return self._plan_payload(suite_id)
 
     def prepare(self, suite_id: str) -> dict[str, Any]:
         suite = self._suite_row(suite_id)
@@ -1065,6 +1263,25 @@ class ComparisonStore:
                 (suite_id,),
             )
         ]
+        transitions = [
+            dict(row)
+            for row in self.connection.execute(
+                """
+                SELECT * FROM comparison_arm_transitions
+                WHERE suite_id=? ORDER BY recorded_at, sequence_number
+                """,
+                (suite_id,),
+            )
+        ]
+        latest_by_arm: dict[str, dict[str, Any]] = {}
+        for transition in transitions:
+            latest_by_arm[str(transition["arm_id"])] = transition
+        for arm in arms:
+            latest = latest_by_arm.get(str(arm["arm_id"]))
+            arm["lifecycle_state"] = (
+                latest["lifecycle_state"] if latest else arm["status"]
+            )
+            arm["lifecycle_reason"] = latest["reason"] if latest else None
         turns = [
             dict(row)
             for row in self.connection.execute(
@@ -1117,6 +1334,42 @@ class ComparisonStore:
                 "profile_id": turn["cost_profile_id"],
             }
         metrics = _comparison_metrics(turns, ratings, pairwise)
+        attempt = self.connection.execute(
+            """
+            SELECT * FROM comparison_execution_attempts
+            WHERE suite_id=? ORDER BY started_at DESC LIMIT 1
+            """,
+            (suite_id,),
+        ).fetchone()
+        lease = self.connection.execute(
+            """
+            SELECT * FROM comparison_worker_leases
+            WHERE suite_id=? ORDER BY acquired_at DESC LIMIT 1
+            """,
+            (suite_id,),
+        ).fetchone()
+        stop_request = self.connection.execute(
+            """
+            SELECT * FROM comparison_stop_requests
+            WHERE suite_id=? ORDER BY requested_at DESC LIMIT 1
+            """,
+            (suite_id,),
+        ).fetchone()
+        worker = {
+            "attempt": dict(attempt) if attempt is not None else None,
+            "lease": dict(lease) if lease is not None else None,
+            "stop_request": (
+                dict(stop_request) if stop_request is not None else None
+            ),
+            "completed_arms": sum(
+                arm["lifecycle_state"] == "completed" for arm in arms
+            ),
+            "planned_arms": len(arms),
+            "total_server_tokens": sum(
+                int(turn["server_reported_total_tokens"] or 0)
+                for turn in turns
+            ),
+        }
         blind_order_seed = None
         if blind:
             blind_order_seed = (
@@ -1142,6 +1395,28 @@ class ComparisonStore:
                     "cost",
                 ):
                     turn.pop(key, None)
+            for arm in arms:
+                for key in (
+                    "model",
+                    "reasoning_effort",
+                    "context_mode",
+                    "expected_model",
+                    "expected_reasoning_effort",
+                    "effective_model",
+                    "effective_reasoning_effort",
+                    "effective_context_mode",
+                    "cost_profile_id",
+                    "relative_cost_multiplier_snapshot",
+                    "api_input_per_million_snapshot",
+                    "api_cached_input_per_million_snapshot",
+                    "api_output_per_million_snapshot",
+                    "currency_snapshot",
+                ):
+                    arm.pop(key, None)
+            worker = {
+                "completed_arms": worker["completed_arms"],
+                "planned_arms": worker["planned_arms"],
+            }
             metrics = {
                 "valid_response_rate": metrics["valid_response_rate"],
                 "quality_cost_points": [],
@@ -1155,6 +1430,8 @@ class ComparisonStore:
             "pairwise_ratings": pairwise,
             "comparison_metrics": metrics,
             "blind_order_seed": blind_order_seed,
+            "worker": worker,
+            "arm_transitions": transitions,
         }
 
     def list_suites(self, filters: dict[str, str] | None = None) -> list[dict[str, Any]]:
@@ -1428,6 +1705,108 @@ def import_m6_context_report(database: Path, report_path: Path) -> str:
                 (now, suite_id),
             )
         return suite_id
+
+
+def import_comparison_fixture_bundle(
+    database: Path, bundle_path: Path
+) -> str:
+    payload = json.loads(bundle_path.read_text(encoding="utf-8"))
+    required = {
+        "schema_version",
+        "fixture_id",
+        "display_name",
+        "fixture_type",
+        "director_state",
+        "status_timestamp",
+        "target_statement_id",
+        "materials",
+    }
+    if not isinstance(payload, dict) or set(payload) != required:
+        raise ValueError("fixture bundle has an unsupported shape")
+    if payload["schema_version"] != "1.0":
+        raise ValueError("unsupported fixture bundle schema")
+    fixture_id = _safe_text(payload["fixture_id"], "fixture_id", 120)
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,119}", fixture_id) is None:
+        raise ValueError("fixture_id contains unsupported characters")
+    fixture_type = str(payload["fixture_type"])
+    if fixture_type not in {
+        "preserved_director_state",
+        "campaign_snapshot",
+        "custom_director_state_json",
+    }:
+        raise ValueError("unsupported fixture_type")
+    state = payload["director_state"]
+    materials = payload["materials"]
+    if not isinstance(state, dict) or not isinstance(materials, dict):
+        raise ValueError("fixture state and materials must be objects")
+    material_keys = {
+        "prompt",
+        "output_schema",
+        "applicable_action_space",
+        "evidence_registry",
+        "advisory_registry",
+        "executable_registry",
+        "base_instructions",
+        "developer_instructions",
+        "campaign_budget",
+    }
+    if set(materials) != material_keys:
+        raise ValueError("fixture materials are incomplete")
+    if not isinstance(materials["prompt"], str):
+        raise ValueError("fixture prompt must be a string")
+    if not isinstance(materials["base_instructions"], str):
+        raise ValueError("fixture base instructions must be a string")
+    if materials["developer_instructions"] != "":
+        raise ValueError("comparison fixtures require empty developer instructions")
+    hashes = {
+        "prompt": sha256(materials["prompt"].encode("utf-8")).hexdigest(),
+        "output_schema": canonical_sha256(materials["output_schema"]),
+        "applicable_action_space": canonical_sha256(
+            materials["applicable_action_space"]
+        ),
+        "evidence_registry": canonical_sha256(materials["evidence_registry"]),
+        "advisory_registry": canonical_sha256(materials["advisory_registry"]),
+        "executable_registry": canonical_sha256(
+            materials["executable_registry"]
+        ),
+        "base_instructions": sha256(
+            materials["base_instructions"].encode("utf-8")
+        ).hexdigest(),
+        "developer_instructions": sha256(b"").hexdigest(),
+        "campaign_budget": canonical_sha256(materials["campaign_budget"]),
+    }
+    with ComparisonStore(database) as store:
+        store.seed_fixture(
+            fixture_id=fixture_id,
+            display_name=_safe_text(
+                payload["display_name"], "display_name", 120
+            ),
+            fixture_type=fixture_type,
+            source_artifact_reference=bundle_path.name,
+            director_state=state,
+            metadata={
+                "target_statement_id": _safe_text(
+                    payload["target_statement_id"],
+                    "target_statement_id",
+                    120,
+                ),
+                "status_timestamp": _safe_text(
+                    payload["status_timestamp"], "status_timestamp", 80
+                ),
+                "estimated_client_owned_tokens": math.ceil(
+                    (
+                        len(canonical_bytes(state))
+                        + len(materials["prompt"].encode("utf-8"))
+                        + len(canonical_bytes(materials["output_schema"]))
+                        + len(materials["base_instructions"].encode("utf-8"))
+                    )
+                    / 4
+                ),
+                "hashes": hashes,
+                "materials": materials,
+            },
+        )
+    return fixture_id
 
 
 def run_replay_dry_run(database: Path) -> dict[str, Any]:

@@ -1,8 +1,9 @@
 # Controlled comparison UI
 
-The comparison subsystem is an auditable, measurement-only control plane for
-future model, reasoning-effort, and Director context-mode comparisons. It is
-separate from research campaigns and never dispatches a Director decision.
+The comparison subsystem is an auditable, measurement-only control plane and
+bounded worker for future model, reasoning-effort, and Director context-mode
+comparisons. It is separate from research campaigns and never dispatches a
+Director decision.
 
 ## Local use
 
@@ -41,6 +42,23 @@ It creates simulated completed and failed turns, ratings, a blind preference,
 and an immutable cost-profile snapshot. It makes zero model calls, reads no
 auth, and creates no lane, batch, evaluation, or action dispatch.
 
+Install a trusted, complete executable fixture outside the browser and launch
+an already prepared and authorized suite with the fixed worker entry point:
+
+```bash
+sglab comparisons install-fixture \
+  --workspace ./workspace \
+  --fixture ./director-fixture.json
+
+sglab comparisons worker \
+  --workspace ./workspace \
+  --suite-id comparison-...
+```
+
+The browser Start button invokes the same worker. See
+`docs/COMPARISON_WORKER.md` for the exact plan, lease, inference reservation,
+private runtime, stop, and recovery contracts.
+
 ## Workflow
 
 Suite states are:
@@ -49,12 +67,13 @@ Suite states are:
 draft → prepared → authorized → running → completed | failed | stopped
 ```
 
-Arm states are:
+Audited arm states are:
 
 ```text
-planned → preflight → inference_started
+planned → preflight → auth_prepared → server_started → thread_ready
+        → inference_reserved → inference_started
         → completed | schema_invalid | semantic_invalid
-        | timed_out | aborted | failed
+        | timed_out | aborted | failed | blocked | stopped
 ```
 
 Creation and authorization are separate. Preparation serializes the exact
@@ -70,10 +89,10 @@ SGLAB_CODEX_AUTH_SOURCE=/absolute/server/controlled/auth.json
 ```
 
 The UI reports only whether that setting is configured and available. It
-never returns the path or credential contents. An authenticated comparison
-worker must still enforce private homes, strict configuration, zero skills,
-zero tools, and the authorized inference cap. This milestone implements the
-web control plane and durable state machine; it does not perform a paid run.
+never returns the path or credential contents. The worker enforces private
+homes, strict configuration, zero skills, zero tools, and the authorized
+inference cap. This milestone implements and deterministically verifies that
+runtime path with a fake App Server; it does not perform a paid run.
 
 Before inference, each arm persists:
 
@@ -88,9 +107,9 @@ model_contract_matched
 
 A mismatch marks preflight failed and must abort before inference.
 
-## Schema v10
+## Schema v11
 
-The v10 migration adds:
+The v10 comparison schema contains:
 
 - `comparison_fixtures`
 - `comparison_suites`
@@ -106,6 +125,21 @@ App Server lifecycle row. Final answer and usage remain owned by
 `app_server_turns`; comparison rows retain only the comparison fields needed
 for reporting. Existing campaign/session/turn rows receive nullable context
 provenance columns. The migration does not rewrite historical rows.
+
+The v11 migration adds only worker execution state:
+
+- `comparison_execution_attempts`
+- `comparison_runtime_campaigns`
+- `comparison_worker_leases`
+- `comparison_stop_requests`
+- `comparison_inference_reservations`
+- `comparison_arm_transitions`
+
+It also adds explicit conversation grouping, sequencing, dependencies,
+fresh/resumed-thread provenance, runtime-relative references, terminal
+reasons, resource limits, and immutable fixture material. Historical
+comparison suites and imported M6 rows are neither rewritten nor made
+executable.
 
 Cost profiles are append-only inputs to a snapshot. Each arm and rendered turn
 retains the exact profile ID, multiplier, API-equivalent rates, and currency
@@ -176,7 +210,8 @@ These are labelled “API-equivalent estimate,” not subscription charges.
 - `/comparisons` lists and filters suites.
 - `/comparisons/new` creates arm matrices from presets or custom rows.
 - `/comparisons/<id>` shows preflight, usage, cost, latency, hard validity,
-  decisions, ratings, pairwise summaries, and quality-cost points.
+  decisions, ratings, pairwise summaries, quality-cost points, worker lease,
+  stop state, current arm, and live progress.
 - `/comparisons/<id>/blind` hides model, effort, context, usage, latency, and
   cost until a rating is submitted.
 - `/model-cost-profiles` appends relative and optional API-equivalent profiles.
@@ -184,6 +219,17 @@ These are labelled “API-equivalent estimate,” not subscription charges.
 The main dashboard links to comparisons and shows the measured default,
 `stateless_turns`, with recommendation basis
 `single controlled S2/P2 pair`.
+
+Bounded polling uses:
+
+```text
+GET /api/comparisons/<id>/progress
+GET /api/comparisons/<id>/turns
+```
+
+Protected Start launches a fixed `sys.executable -m sglab comparisons worker`
+argv without a shell. Protected Stop records a durable request; it never
+accepts a PID from the browser.
 
 ## Quality layers
 
@@ -211,11 +257,13 @@ Missing human quality never receives a fabricated coordinate.
   recommendation, not a statistical-superiority claim.
 - `compacted_thread` remains an explicit experiment and is never selected
   automatically.
-- The web control plane persists and authorizes exact plans but this milestone
-  intentionally performs no authenticated comparison. A future explicitly
-  authorized worker must consume the `running` plan and write correlated
-  `app_server_turns` rows.
+- The web control plane and bounded worker persist and consume exact plans,
+  but this milestone intentionally performs no authenticated comparison. The
+  real path still requires separate authorization.
 - The preserved fixture import stores a safe public descriptor and hashes, not
-  private runtime payloads.
+  private runtime payloads, so historical fixtures are not executable.
+- `compacted_thread` remains visible as an experimental catalog mode but the
+  worker rejects it before auth access in this milestone.
+- Host-restart recovery never silently resumes paid work.
 - Visual redesign is deferred; the pages intentionally reuse the plain
   standard-library dashboard style.
