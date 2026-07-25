@@ -15,7 +15,7 @@ from ..certification import certify
 from ..model import BitGraph
 from ..resources import set_address_space_limit
 from .lanes import LaneManager
-from .store import ResearchStore
+from .store import ResearchStore, StaleCandidateTargetError
 
 
 @dataclass(slots=True)
@@ -70,6 +70,7 @@ class M4VerificationBroker:
         campaign_dir: Path,
         binary: Path | None = None,
         max_queue: int = 32,
+        max_concurrent: int = 1,
         timeout_seconds: float = 60,
         verifier_memory_bytes: int = 512 * 1024 * 1024,
         broker_memory_bytes: int = 1024 * 1024 * 1024,
@@ -78,17 +79,20 @@ class M4VerificationBroker:
             raise ValueError("verification queue limit must be positive")
         if timeout_seconds <= 0:
             raise ValueError("verification timeout must be positive")
+        if not 1 <= max_concurrent <= max_queue:
+            raise ValueError("verification concurrency limit is invalid")
         self.store = store
         self.manager = manager
         self.campaign_id = campaign_id
         self.campaign_dir = campaign_dir.resolve()
         self.binary = binary.resolve() if binary is not None else None
         self.max_queue = max_queue
+        self.max_concurrent = max_concurrent
         self.timeout_seconds = timeout_seconds
         self.verifier_memory_bytes = verifier_memory_bytes
         self.broker_memory_bytes = broker_memory_bytes
         self.context = get_context("spawn")
-        self.running: _RunningVerification | None = None
+        self.running: dict[str, _RunningVerification] = {}
         self.events: list[dict[str, Any]] = []
 
     def dispatch_pending_actions(self) -> list[str]:
@@ -133,24 +137,47 @@ class M4VerificationBroker:
                 _job_id(self.campaign_id, candidate_id)
                 for candidate_id in candidate_ids
             ]
-            self.store.queue_verification_action(
-                action_id=action_id,
-                candidate_ids=candidate_ids,
-                priority=priority,
-                job_ids=job_ids,
-            )
+            try:
+                self.store.queue_verification_action(
+                    action_id=action_id,
+                    candidate_ids=candidate_ids,
+                    priority=priority,
+                    job_ids=job_ids,
+                )
+            except StaleCandidateTargetError as error:
+                detail = {
+                    "stale_candidate_ids": list(error.stale_candidate_ids),
+                    "current_executable_candidate_ids": list(
+                        error.valid_candidate_ids
+                    ),
+                    "fresh_stateless_replan_required": True,
+                }
+                self.store.record_action_outcome(
+                    action_id=action_id,
+                    status="stale_target",
+                    failure_kind="stale_candidate_target",
+                    failure_detail=json.dumps(detail, sort_keys=True),
+                    observed_effect=detail,
+                )
+                self.events.append(
+                    {
+                        "reason": "stale_candidate_target",
+                        **detail,
+                    }
+                )
+                continue
             applied.append(action_id)
         return applied
 
     def start_ready(self) -> str | None:
-        if self.running is not None:
+        if len(self.running) >= self.max_concurrent:
             return None
         jobs = self.store.queued_verification_jobs(self.campaign_id, 1)
         if not jobs:
             return None
         job = jobs[0]
-        candidate = self.store.campaign_candidate(str(job["candidate_id"]))
         job_id = str(job["verification_job_id"])
+        candidate = self.store.candidate_snapshot_for_job(job_id)
         relative = str(Path("verifications") / job_id)
         output = self.campaign_dir / relative
         output.mkdir(parents=True, exist_ok=True)
@@ -172,7 +199,7 @@ class M4VerificationBroker:
         if not self.store.mark_verification_started(job_id):
             return None
         process.start()
-        self.running = _RunningVerification(
+        self.running[job_id] = _RunningVerification(
             job_id=job_id,
             process=process,
             results=results,
@@ -182,9 +209,9 @@ class M4VerificationBroker:
         return job_id
 
     def poll(self) -> dict[str, Any] | None:
-        running = self.running
-        if running is None:
+        if not self.running:
             return None
+        running = next(iter(self.running.values()))
         try:
             result = running.results.get_nowait()
         except Empty:
@@ -204,6 +231,8 @@ class M4VerificationBroker:
                 "error": f"verification process exited {running.process.exitcode}",
             }
         if result is None:
+            self.running.pop(running.job_id, None)
+            self.running[running.job_id] = running
             return None
         running.process.join(timeout=1)
         if result["ok"]:
@@ -260,23 +289,28 @@ class M4VerificationBroker:
             running.process.kill()
             running.process.join(timeout=1)
         running.results.close()
-        self.running = None
+        self.running.pop(running.job_id, None)
         return event
 
     def pump(self) -> list[dict[str, Any]]:
         self.dispatch_pending_actions()
-        self.start_ready()
-        event = self.poll()
-        return [event] if event is not None else []
+        while len(self.running) < self.max_concurrent:
+            if self.start_ready() is None:
+                break
+        events = []
+        for _ in range(len(self.running)):
+            event = self.poll()
+            if event is not None:
+                events.append(event)
+        return events
 
     def shutdown(self) -> None:
-        if self.running is None:
-            return
-        if self.running.process.is_alive():
-            self.running.process.kill()
-        self.running.process.join(timeout=1)
-        self.running.results.close()
-        self.running = None
+        for running in list(self.running.values()):
+            if running.process.is_alive():
+                running.process.kill()
+            running.process.join(timeout=1)
+            running.results.close()
+        self.running.clear()
 
 
 def _job_id(campaign_id: str, candidate_id: str) -> str:

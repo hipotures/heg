@@ -1,0 +1,154 @@
+{
+  "schema_version": "1.0",
+  "date": "2026-07-26",
+  "tested_worktree_base": "f1c21c0ac906cdaf732ad1ef0f280ad55a8fbe2c",
+  "branch": "m7-ui-review-phase-a",
+  "sqlite_schema_version": 15,
+  "campaign_execution_attempts_created": true,
+  "same_campaign_resume_supported": true,
+  "resume_after_pause_supported": true,
+  "resume_after_budget_exhaustion_supported": true,
+  "resume_after_repaired_fault_supported": true,
+  "resource_change_on_resume_supported": true,
+  "cpu_worker_limit_effective": true,
+  "cpu_worker_enforcement": "application_worker_slots",
+  "os_cpu_isolation_claimed": false,
+  "cumulative_state_preserved": true,
+  "checkpoint_restore_supported": true,
+  "candidate_reference_lifetime_fixed": true,
+  "candidate_pinning_proven": true,
+  "stale_target_replan_supported": true,
+  "historical_stale_action_not_reexecuted": true,
+  "automatic_compaction_created": true,
+  "compaction_soft_threshold_bytes": 24576,
+  "compaction_hard_limit_bytes": 32768,
+  "compaction_interval_cycles": 5,
+  "deterministic_memory_snapshots": true,
+  "full_raw_history_preserved": true,
+  "director_state_bounded": true,
+  "short_two_attempt_demo_passed": true,
+  "resource_change_demo_passed": true,
+  "playwright_resume_ui_passed": true,
+  "real_campaign_resume_preview_created": true,
+  "source_real_campaign_unchanged": true,
+  "zero_real_model_inferences": true,
+  "zero_real_auth_access": true,
+  "sqlite_integrity_check": "ok",
+  "sqlite_foreign_key_violations": 0,
+  "ready_to_resume_real_campaign": true,
+  "demo": {
+    "campaign_id": "campaign-aff6dd6bc0ab47868528c9dce87ce9c4",
+    "attempts": [
+      {
+        "attempt_id": "execution-attempt-51a857fac4f246deb1ab9253fe9d2a3d",
+        "attempt_index": 1,
+        "wall_seconds": 65,
+        "cpu_workers": 2,
+        "maximum_active_lanes": 2,
+        "attempt_evaluations": 69995
+      },
+      {
+        "attempt_id": "execution-attempt-5023265dfd2a4b232a2f0c13",
+        "attempt_index": 2,
+        "wall_seconds": 65,
+        "cpu_workers": 16,
+        "maximum_active_lanes": 8,
+        "attempt_evaluations": 70923,
+        "starting_memory_snapshot_id": "scientific-memory-538ef9cc56b44941985990f3bfa7ae74",
+        "starting_memory_sha256": "4cd961109ac899883755fbb67cc70f430518aabd6c9f280c2a42810a024d4a0c",
+        "reused_checkpoint_count": 2
+      }
+    ],
+    "evaluations_before_resume": 69995,
+    "evaluations_after_resume": 140918,
+    "hypotheses_preserved": true,
+    "verifier_outcomes_before": 4,
+    "verifier_outcomes_after": 6,
+    "unique_idempotency_keys": 14,
+    "terminal_memory": {
+      "memory_snapshot_id": "scientific-memory-5fdedd03db574c4f90d692291ed0f55e",
+      "version": 16,
+      "byte_size": 19962,
+      "estimated_token_count": 4991,
+      "sha256": "6fc193204f611967f8fc9eb0ee4a106bfaa66855eff9861bf1c5315d754c8c91"
+    },
+    "integrity_check": "ok",
+    "foreign_key_violations": 0,
+    "model_inferences": 0,
+    "auth_accesses": 0
+  },
+  "real_campaign_preview": {
+    "campaign_id": "campaign-b68ec445388e49b2be0b6fabf8ff6600",
+    "state": "paused_fault",
+    "state_version": 25,
+    "proposed_attempt_id": "execution-attempt-bc7969056a83960392937a78",
+    "proposed_attempt_index": 2,
+    "attempt_reason": "infrastructure_recovery",
+    "director_turns": 6,
+    "actions": 21,
+    "terminal_actions": 17,
+    "lanes": 6,
+    "evaluations": 109937,
+    "retained_candidates": 2,
+    "terminal_verifications": 2,
+    "server_tokens": 51340,
+    "reusable_checkpoint_count": 6,
+    "current_executable_candidate_ids": [],
+    "historical_stale_action": {
+      "action_id": "verify-retained-candidate-01",
+      "candidate_id": "candidate-30ae9bb55d05af683d594171",
+      "will_not_be_reexecuted": true,
+      "terminal_status_on_actual_resume": "stale_target"
+    },
+    "scientific_memory": {
+      "memory_snapshot_id": "legacy:snapshot-a2a273b939f34d5f83640ee7712f75bc",
+      "version": 0,
+      "sha256": "8e5a6acb73c137cb455c4e3674a7a7951274192c52b619aa5a5ad8e9abaf3699",
+      "byte_size": 6619,
+      "estimated_token_count": 1655,
+      "legacy_reconstruction_required": true
+    },
+    "side_effects": {
+      "database_writes": 0,
+      "model_inferences": 0,
+      "auth_accesses": 0,
+      "search_batches": 0
+    }
+  },
+  "migration": {
+    "source_schema": 14,
+    "destination_schema": 15,
+    "method": "sqlite_online_backup",
+    "integrity_check": "ok",
+    "foreign_key_violations": 0
+  },
+  "playwright": {
+    "desktop": {
+      "viewport": "1440x1000",
+      "sha256": "f545929bfb5ccd7998436ab24c2d1857ee257f74e5c5bf5afb181518d691bca1",
+      "path": "docs/reports/assets/resume-ui-desktop-1440x1000.png"
+    },
+    "mobile": {
+      "viewport": "390x844",
+      "sha256": "822d11620f6dc8a036eb0b49e7d1953397a8af0cbe6eefdf8abbef43c636719d",
+      "path": "docs/reports/assets/resume-ui-mobile-390x844.png"
+    },
+    "console_errors": 0,
+    "start_clicked": false
+  },
+  "verification": {
+    "full_safe_suite_runs": 2,
+    "tests_per_run": 255,
+    "doctor": "pass",
+    "make_test": "pass",
+    "make_check": "pass",
+    "benchmark_smoke": "pass",
+    "dashboard_smoke": "pass",
+    "loopback_http_tests": "8/8 pass",
+    "test_campaign_or_app_server_orphans": 0
+  },
+  "uncertainties": [
+    "The physical source SQLite main-file hash changed while a pre-existing dashboard was attached to the WAL database; logical scientific rows, timestamps, plan/pointer hashes, and checkpoint hashes remained unchanged.",
+    "Unrelated chromedriver zombies owned by /home/xai/DEV/ttracker predate this task and were not modified."
+  ]
+}

@@ -75,6 +75,9 @@
     "campaign_budget": {
       "type": "object"
     },
+    "continuity": {
+      "type": "object"
+    },
     "exact_verifier": {
       "type": [
         "object",

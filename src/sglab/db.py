@@ -5,7 +5,7 @@ from typing import Any, Iterable
 import json
 import sqlite3
 
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 MAX_METRIC_ROWS = 100_000
 
 BASE_SCHEMA_SQL = """
@@ -884,6 +884,114 @@ CREATE INDEX IF NOT EXISTS idx_comparison_resource_samples_suite
 PRAGMA user_version=13;
 """
 
+CAMPAIGN_CONTINUITY_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS campaign_memory_snapshots (
+    memory_snapshot_id TEXT PRIMARY KEY,
+    campaign_id TEXT NOT NULL REFERENCES research_campaigns(campaign_id),
+    version INTEGER NOT NULL,
+    parent_snapshot_id TEXT REFERENCES campaign_memory_snapshots(
+        memory_snapshot_id
+    ),
+    director_snapshot_id TEXT REFERENCES director_snapshots(snapshot_id),
+    source_high_water_json TEXT NOT NULL,
+    canonical_json TEXT NOT NULL,
+    byte_size INTEGER NOT NULL,
+    estimated_token_count INTEGER NOT NULL,
+    source_record_counts_json TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    creation_trigger TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    CHECK(version >= 1),
+    CHECK(byte_size >= 0),
+    CHECK(estimated_token_count >= 0),
+    UNIQUE(campaign_id, version),
+    UNIQUE(campaign_id, sha256, creation_trigger)
+);
+
+CREATE INDEX IF NOT EXISTS idx_campaign_memory_snapshots_latest
+    ON campaign_memory_snapshots(campaign_id, version DESC);
+
+CREATE TABLE IF NOT EXISTS campaign_execution_attempts (
+    attempt_id TEXT PRIMARY KEY,
+    campaign_id TEXT NOT NULL REFERENCES research_campaigns(campaign_id),
+    attempt_index INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    code_commit TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    terminal_at TEXT,
+    requested_resource_json TEXT NOT NULL,
+    effective_resource_json TEXT NOT NULL,
+    additional_wall_seconds REAL NOT NULL,
+    starting_memory_snapshot_id TEXT REFERENCES campaign_memory_snapshots(
+        memory_snapshot_id
+    ),
+    starting_memory_sha256 TEXT,
+    starting_checkpoint_refs_json TEXT NOT NULL,
+    inherited_counters_json TEXT NOT NULL,
+    attempt_counters_json TEXT NOT NULL DEFAULT '{}',
+    terminal_status TEXT,
+    terminal_reason TEXT,
+    repair_acknowledgement TEXT,
+    authorization_provenance_json TEXT NOT NULL DEFAULT '{}',
+    runtime_provenance_json TEXT NOT NULL DEFAULT '{}',
+    process_id INTEGER,
+    CHECK(attempt_index >= 1),
+    CHECK(additional_wall_seconds >= 0),
+    CHECK(reason IN (
+        'initial_start', 'operator_resume', 'additional_budget',
+        'infrastructure_recovery', 'host_restart_recovery'
+    )),
+    UNIQUE(campaign_id, attempt_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_campaign_attempts_latest
+    ON campaign_execution_attempts(campaign_id, attempt_index DESC);
+
+CREATE TABLE IF NOT EXISTS campaign_candidate_snapshots (
+    candidate_snapshot_id TEXT PRIMARY KEY,
+    campaign_id TEXT NOT NULL REFERENCES research_campaigns(campaign_id),
+    candidate_id TEXT NOT NULL,
+    graph6 TEXT NOT NULL,
+    graph_sha256 TEXT NOT NULL,
+    artifact_sha256 TEXT NOT NULL,
+    score_json TEXT NOT NULL,
+    score_semantics TEXT NOT NULL,
+    lane_id TEXT NOT NULL,
+    lane_version INTEGER NOT NULL,
+    checkpoint_ref TEXT,
+    certification_status TEXT,
+    source_created_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(campaign_id, candidate_id, graph_sha256)
+);
+
+CREATE TABLE IF NOT EXISTS campaign_candidate_pins (
+    pin_id TEXT PRIMARY KEY,
+    campaign_id TEXT NOT NULL REFERENCES research_campaigns(campaign_id),
+    candidate_id TEXT REFERENCES campaign_candidates(candidate_id)
+        ON DELETE RESTRICT,
+    candidate_id_snapshot TEXT NOT NULL,
+    candidate_snapshot_id TEXT NOT NULL REFERENCES campaign_candidate_snapshots(
+        candidate_snapshot_id
+    ),
+    action_id TEXT NOT NULL REFERENCES director_actions(action_id),
+    verification_job_id TEXT REFERENCES campaign_verification_jobs(
+        verification_job_id
+    ),
+    state TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    released_at TEXT,
+    release_reason TEXT,
+    CHECK(state IN ('active', 'released')),
+    UNIQUE(action_id, candidate_id_snapshot)
+);
+
+CREATE INDEX IF NOT EXISTS idx_campaign_candidate_pins_active
+    ON campaign_candidate_pins(campaign_id, candidate_id, state);
+
+PRAGMA user_version=15;
+"""
+
 
 def connect(path: str | Path) -> sqlite3.Connection:
     target = Path(path)
@@ -923,6 +1031,7 @@ def migrate(connection: sqlite3.Connection) -> None:
     _ensure_comparison_worker_schema(connection)
     _ensure_comparison_resource_schema(connection)
     _ensure_comparison_arm_policy_schema(connection)
+    _ensure_campaign_continuity_schema(connection)
 
 
 def _ensure_m6_lane_columns(connection: sqlite3.Connection) -> None:
@@ -1293,6 +1402,63 @@ def _ensure_comparison_arm_policy_schema(
             "ALTER TABLE comparison_suites ADD COLUMN arm_failure_policy TEXT"
         )
     connection.execute("PRAGMA user_version=14")
+    connection.commit()
+
+
+def _ensure_campaign_continuity_schema(
+    connection: sqlite3.Connection,
+) -> None:
+    exists = connection.execute(
+        """
+        SELECT 1 FROM sqlite_master
+        WHERE type='table' AND name='research_campaigns'
+        """
+    ).fetchone()
+    if exists is None:
+        return
+    connection.executescript(CAMPAIGN_CONTINUITY_SCHEMA_SQL)
+    additions = {
+        "research_campaigns": {
+            "current_attempt_id": "TEXT",
+            "latest_memory_snapshot_id": "TEXT",
+            "scientific_state_soft_limit_bytes": (
+                "INTEGER NOT NULL DEFAULT 24576"
+            ),
+            "scientific_state_hard_limit_bytes": (
+                "INTEGER NOT NULL DEFAULT 32768"
+            ),
+            "scientific_snapshot_interval_cycles": (
+                "INTEGER NOT NULL DEFAULT 5"
+            ),
+            "initial_state_sha256": "TEXT",
+            "initial_resource_plan_json": "TEXT",
+        },
+        "app_server_turns": {
+            "execution_attempt_id": "TEXT",
+            "memory_snapshot_id": "TEXT",
+        },
+        "campaign_verification_jobs": {
+            "candidate_snapshot_id": "TEXT",
+            "execution_attempt_id": "TEXT",
+        },
+    }
+    for table, columns in additions.items():
+        exists = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (table,),
+        ).fetchone()
+        if exists is None:
+            continue
+        present = {
+            str(row[1])
+            for row in connection.execute(f"PRAGMA table_info({table})")
+        }
+        for name, definition in columns.items():
+            if name not in present:
+                connection.execute(
+                    f"ALTER TABLE {table} ADD COLUMN {name} {definition}"
+                )
+    connection.execute("PRAGMA user_version=15")
     connection.commit()
 
 

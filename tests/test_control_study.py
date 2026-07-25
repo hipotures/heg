@@ -123,7 +123,10 @@ class ControlStudyTests(unittest.TestCase):
             self.assertEqual(final["state"], "stopped_by_operator")
             self.assertTrue(final["lanes"])
             self.assertTrue(
-                all(lane["state"] == "stopped" for lane in final["lanes"])
+                all(lane["state"] == "paused" for lane in final["lanes"])
+            )
+            self.assertTrue(
+                all(lane["checkpoint_ref"] for lane in final["lanes"])
             )
             self.assertTrue(
                 any(

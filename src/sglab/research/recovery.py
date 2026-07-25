@@ -85,6 +85,9 @@ class CampaignRecovery:
                 ):
                     raise RuntimeError("lane changed during recovery")
                 runtime = self.manager.start_lane(spec, checkpoint=checkpoint)
+                self.manager.register_restored_checkpoint(
+                    lane_id, checkpoint
+                )
                 if row["state"] == "paused":
                     runtime.pause_event.set()
                     runtime.state = "paused"
@@ -97,6 +100,58 @@ class CampaignRecovery:
                     failed=True,
                     detail="checkpoint recovery failed",
                 )
+        archived_rows = self.store.connection.execute(
+            """
+            SELECT * FROM research_lanes
+            WHERE campaign_id=? AND checkpoint_ref IS NOT NULL
+            ORDER BY updated_at DESC, lane_id
+            """,
+            (self.campaign_id,),
+        ).fetchall()
+        for row in archived_rows:
+            try:
+                checkpoint = self._checkpoint(row)
+            except Exception:
+                continue
+            checkpoint_id = str(checkpoint["checkpoint_id"])
+            if checkpoint_id not in self.manager.checkpoints:
+                self.manager.register_archived_checkpoint(checkpoint)
+        candidate_checkpoints = self.store.connection.execute(
+            """
+            SELECT c.checkpoint_ref, c.lane_id, c.lane_version,
+                   l.checkpoint_sha256
+            FROM campaign_candidates c
+            JOIN research_lanes l ON l.lane_id=c.lane_id
+            WHERE c.campaign_id=? AND c.checkpoint_ref IS NOT NULL
+            ORDER BY c.created_at DESC, c.candidate_id
+            """,
+            (self.campaign_id,),
+        ).fetchall()
+        for row in candidate_checkpoints:
+            path = (
+                self.campaign_dir / str(row["checkpoint_ref"])
+            ).resolve()
+            try:
+                path.relative_to(self.campaign_dir)
+                checkpoint = json.loads(path.read_text(encoding="utf-8"))
+                unsigned = dict(checkpoint)
+                unsigned.pop("checkpoint_id", None)
+                unsigned.pop("sha256", None)
+                actual = hashlib.sha256(
+                    canonical_json(unsigned, max_bytes=1024 * 1024)
+                ).hexdigest()
+                if (
+                    checkpoint.get("sha256") != actual
+                    or checkpoint.get("lane_id") != row["lane_id"]
+                    or int(checkpoint.get("lane_version", -1))
+                    != int(row["lane_version"])
+                ):
+                    continue
+                checkpoint_id = str(checkpoint["checkpoint_id"])
+                if checkpoint_id not in self.manager.checkpoints:
+                    self.manager.register_archived_checkpoint(checkpoint)
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                continue
         dispatched = self.dispatcher.dispatch_pending()
         return RecoveryReport(
             integrity=integrity,

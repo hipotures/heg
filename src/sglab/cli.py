@@ -49,6 +49,8 @@ from .research.context_screen import (
     run_authenticated_context_screen,
 )
 from .research.export import export_campaign
+from .research.continuity import repository_commit
+from .research.resume import build_resume_preview
 from .research.experiment import (
     run_authenticated_experiment,
     run_phase_a_audit,
@@ -589,10 +591,46 @@ def cmd_research_campaign(args: Namespace) -> int:
         current = campaign_status(workspace, args.campaign_id)
         if current.get("state") in {"IDLE", "NOT_FOUND", "SCHEMA_UNAVAILABLE"}:
             raise SystemExit("research campaign not found")
+        additional = parse_duration(args.additional_time)
+        overrides = {
+            key: value
+            for key, value in {
+                "cpu_workers": args.cpu_workers,
+                "maximum_active_lanes": args.max_active_lanes,
+                "maximum_aggregate_resource_share": (
+                    args.aggregate_lane_resource_share
+                ),
+                "lane_memory_bytes": args.lane_memory_bytes,
+                "verifier_concurrency": args.verifier_concurrency,
+                "verifier_memory_bytes": args.verifier_memory_bytes,
+                "verification_queue_depth": args.verification_queue_depth,
+            }.items()
+            if value is not None
+        }
+        commit = repository_commit(Path(__file__).resolve().parents[2])
+        if args.preview:
+            report = build_resume_preview(
+                workspace,
+                str(current["campaign_id"]),
+                additional_wall_seconds=additional,
+                resource_overrides=overrides,
+                repair_acknowledgement=args.repair_acknowledgement,
+                code_commit=commit,
+            )
+            print(json.dumps(report, indent=2, sort_keys=True))
+            return 0
         report = ResearchCampaignRunner(
             workspace=workspace,
             stop_mode=str(current["stop_mode"]),
+            duration_seconds=additional,
             campaign_id=str(current["campaign_id"]),
+            maximum_director_turns=current.get("maximum_director_turns"),
+            context_mode=str(
+                current.get("effective_context_mode") or "stateless_turns"
+            ),
+            resume_resource_overrides=overrides,
+            repair_acknowledgement=args.repair_acknowledgement,
+            code_commit=commit,
         ).run()
         print(json.dumps(report, indent=2, sort_keys=True))
         return 0
@@ -605,7 +643,12 @@ def cmd_research_campaign(args: Namespace) -> int:
             )
         )
         return 0
-    if command in {"pause", "continue", "stop"}:
+    if command == "continue":
+        raise SystemExit(
+            "continue is replaced by research-campaign resume "
+            "--additional-time <duration>"
+        )
+    if command in {"pause", "stop"}:
         current = campaign_status(workspace)
         if not current.get("campaign_id") or current.get("state") in {
             "succeeded_certified_counterexample",
@@ -613,7 +656,7 @@ def cmd_research_campaign(args: Namespace) -> int:
             "stopped_by_operator",
         }:
             raise SystemExit("no active research campaign")
-        action = {"pause": "PAUSE", "continue": "RESUME", "stop": "STOP"}[command]
+        action = {"pause": "PAUSE", "stop": "STOP"}[command]
         report = request_campaign_control(workspace, action)
         print(json.dumps(report, sort_keys=True))
         return 0
@@ -924,6 +967,18 @@ def build_parser() -> ArgumentParser:
     campaign_resume = campaign_commands.add_parser("resume")
     campaign_resume.add_argument("--workspace", required=True)
     campaign_resume.add_argument("--campaign-id", required=True)
+    campaign_resume.add_argument("--additional-time", required=True)
+    campaign_resume.add_argument("--cpu-workers", type=int)
+    campaign_resume.add_argument("--max-active-lanes", type=int)
+    campaign_resume.add_argument(
+        "--aggregate-lane-resource-share", type=float
+    )
+    campaign_resume.add_argument("--lane-memory-bytes", type=int)
+    campaign_resume.add_argument("--verifier-concurrency", type=int)
+    campaign_resume.add_argument("--verifier-memory-bytes", type=int)
+    campaign_resume.add_argument("--verification-queue-depth", type=int)
+    campaign_resume.add_argument("--repair-acknowledgement")
+    campaign_resume.add_argument("--preview", action="store_true")
     campaign_resume.set_defaults(func=cmd_research_campaign)
     for name in ("pause", "continue", "stop"):
         campaign_control = campaign_commands.add_parser(name)

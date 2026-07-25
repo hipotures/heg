@@ -102,9 +102,12 @@
       <section class="span-4" id="campaign">
         <div class="section-heading"><div><h2>Campaign control</h2><p>Bounded target and stop contract only.</p></div></div>
         <form id="campaign-form"><label>Installed target<input name="target" value="erdos_gyarfas" readonly></label><label>Stop condition<select name="stop_mode"><option value="time_limit">Run for</option><option value="until_success">Until certified counterexample</option></select></label><label id="duration-label">Duration<input name="duration" value="1h" pattern="[0-9.]+[smhd]?"></label></form>
-        <div class="controls"><button id="start-campaign" class="primary">Start campaign</button><button id="pause-campaign" data-campaign-action="PAUSE">Pause</button><button id="resume-campaign" data-campaign-action="RESUME">Resume</button><button id="stop-campaign" data-campaign-action="STOP" class="danger-button">Stop</button></div><p id="notice" class="notice" role="status" aria-live="polite"></p>
+        <div class="controls"><button id="start-campaign" class="primary">Start campaign</button><button id="pause-campaign" data-campaign-action="PAUSE">Pause</button><button id="resume-campaign">Resume</button><button id="stop-campaign" data-campaign-action="STOP" class="danger-button">Stop</button></div><p id="notice" class="notice" role="status" aria-live="polite"></p>
+        <details id="resume-panel" data-persist-details="campaign:resume" hidden><summary>Resume with a new execution attempt</summary><form id="resume-form"><label>Additional duration<input name="additional_time" value="1h" pattern="[0-9.]+[smhd]?" required></label><label>CPU worker slots<input name="cpu_workers" type="number" min="1" max="1024" value="8" required></label><label>Maximum active lanes<input name="maximum_active_lanes" type="number" min="1" max="1024" value="8" required></label><label>Lane memory (bytes)<input name="lane_memory_bytes" type="number" min="16777216" value="536870912" required></label><label>Verifier concurrency<input name="verifier_concurrency" type="number" min="1" max="128" value="1" required></label><label>Repair acknowledgement<input name="repair_acknowledgement" placeholder="Required after a fault"></label></form><div class="controls"><button id="preview-resume">Preview continuity</button><button id="confirm-resume" class="primary">Start new attempt</button></div><div id="resume-preview" class="stack"></div></details>
       </section>
       <section class="span-8"><div class="section-heading"><div><h2>Campaign status</h2><p>Current coordinator, verifier, and resource state.</p></div></div><div id="campaign-metrics" class="metrics"></div><div id="campaign-fault" hidden></div></section>
+      <section class="wide" id="attempts-section"><div class="section-heading"><div><h2>Execution attempts</h2><p>One scientific campaign, with immutable process attempts and per-attempt resources.</p></div></div><div id="attempt-metrics" class="metrics"></div><div id="attempt-history" class="stack"></div></section>
+      <section class="wide" id="memory-section"><div class="section-heading"><div><h2>Scientific memory</h2><p>Bounded Director projection; full raw history remains in durable storage.</p></div></div><div id="memory-metrics" class="metrics"></div></section>
       <section class="wide"><div class="section-heading"><div><h2>Director assessment & hypotheses</h2><p>Current interpretation and reviewed scientific hypotheses.</p></div></div><div id="assessment"></div><div id="hypotheses" class="stack"></div></section>
       <section class="wide" id="decisions"><div class="section-heading"><div><h2>AI decisions & measured effects</h2><p>Recent actions rendered semantically; raw records remain secondary.</p></div><span class="badge neutral">Latest 20</span></div><div id="actions" class="stack"></div></section>
       <section class="wide" id="lanes"><div class="section-heading"><div><h2>Search lanes</h2><p>Bounded strategy, telemetry, and lifecycle state.</p></div></div><div id="lanes-list" class="stack"></div></section>
@@ -314,21 +317,48 @@ function boundedList(targetId,rows,renderer,limit=6){
   };
   draw();
 }
+let currentCampaign=null;
+const resourceDifference=(previous,current)=>Object.entries(current||{}).filter(([key,value])=>previous?.[key]!==value).map(([key,value])=>`${label(key)}: ${fmt(previous?.[key])} → ${fmt(value)}`).join(' · ')||'No resource changes';
+function attemptCard(attempt){
+  const resources=attempt.effective_resource||{},previous=attempt.requested_resource||{};
+  return `<article class="card"><div class="card-head"><div><div class="chips">${badge(attempt.terminal_status||'running')}<span class="chip">Attempt ${esc(attempt.attempt_index)}</span><span class="chip">${esc(label(attempt.reason))}</span></div><h3>${id(attempt.attempt_id)}</h3></div><span class="meta">${esc(attempt.started_at)}${attempt.terminal_at?` → ${esc(attempt.terminal_at)}`:''}</span></div>${semantic({'Code commit':attempt.code_commit,'CPU worker slots':resources.cpu_workers,'Active lanes':resources.maximum_active_lanes,'Lane memory':resources.lane_memory_bytes,'Verifier concurrency':resources.verifier_concurrency,'Additional wall time':`${fmt(attempt.additional_wall_seconds)} s`,'Starting memory':attempt.starting_memory_snapshot_id||'Initial state'})}<p class="meta">${esc(resourceDifference(previous,resources))}</p>${attempt.terminal_reason?`<div class="effect warn"><strong>Terminal reason</strong><p>${esc(attempt.terminal_reason)}</p></div>`:''}${attempt.repair_acknowledgement?`<div class="effect"><strong>Repair acknowledgement</strong><p>${esc(attempt.repair_acknowledgement)}</p></div>`:''}</article>`;
+}
+function resumePayload(){
+  const form=document.getElementById('resume-form'),number=name=>Number(form.elements[name].value);
+  return {campaign_id:currentCampaign?.campaign_id,additional_time:form.elements.additional_time.value,cpu_workers:number('cpu_workers'),maximum_active_lanes:number('maximum_active_lanes'),lane_memory_bytes:number('lane_memory_bytes'),verifier_concurrency:number('verifier_concurrency'),repair_acknowledgement:form.elements.repair_acknowledgement.value||null};
+}
+function resumePreviewCard(value){
+  const changes=Object.entries(value.resource_changes||{}).map(([key,item])=>`<li>${esc(label(key))}: ${esc(fmt(item.previous))} → ${esc(fmt(item.requested))}</li>`).join('')||'<li>No resource changes.</li>';
+  return `<article class="card"><div class="card-head"><div><div class="chips">${badge(value.attempt_reason)}<span class="chip">Attempt ${esc(value.proposed_attempt_index)}</span></div><h3>${id(value.proposed_attempt_id)}</h3></div></div><p><strong>Continuity:</strong> same campaign ${id(value.campaign_id)}; ${fmt(value.reusable_checkpoint_count)} checkpoint references verified; scientific memory ${value.scientific_memory?.reusable?'will be reused':'will be rebuilt'}.</p><ul>${changes}</ul>${value.previous_fault?.detail?`<div class="effect warn"><strong>Previous fault remains historical</strong><p>${esc(value.previous_fault.detail)}</p></div>`:''}<p class="meta">CPU workers are application-level worker slots, not operating-system CPU isolation. Preview causes zero model, auth, or search side effects.</p></article>`;
+}
 async function refresh(){
   try{
     const [state,campaign,logs,candidates,runs,comparison]=await Promise.all([api('/api/status'),api('/api/research-campaign'),api('/api/logs?limit=30'),api('/api/candidates?limit=24'),api('/api/runs'),api('/api/comparisons-summary')]);
     const viewAnchor=captureRefreshView();
     const last=comparison.last_suite;
+    currentCampaign=campaign;
     const campaignMode=Boolean(campaign.campaign_id);
-    const controllable=campaign.state==='running'||campaign.state==='paused_by_operator';
+    const controllable=campaign.state==='running';
     document.getElementById('start-campaign').disabled=campaignMode;
     document.getElementById('pause-campaign').disabled=campaign.state!=='running';
-    document.getElementById('resume-campaign').disabled=campaign.state!=='paused_by_operator';
+    document.getElementById('resume-campaign').disabled=!campaign.resume_supported;
     document.getElementById('stop-campaign').disabled=!controllable;
+    document.getElementById('resume-panel').hidden=!campaign.resume_supported;
+    const previousResources=campaign.execution_attempts?.[0]?.effective_resource;
+    if(previousResources){
+      const form=document.getElementById('resume-form');
+      for(const name of ['cpu_workers','maximum_active_lanes','lane_memory_bytes','verifier_concurrency'])if(previousResources[name]!==undefined&&!form.elements[name].dataset.edited)form.elements[name].value=previousResources[name];
+    }
+    document.getElementById('resume-form').elements.repair_acknowledgement.required=campaign.state==='paused_fault';
     document.getElementById('comparisons-overview').hidden=!last;
     for(const section of document.querySelectorAll('[data-legacy-run]'))section.hidden=campaignMode;
     metrics('comparison-summary',[['Default Director context',comparison.default_context_mode,'emphasis'],['Recommendation basis',comparison.recommendation_basis],['Last suite',last?`<a href="/comparisons/${esc(last.suite_id)}">${esc(last.name)}</a>`:'—'],['Completed / planned',last?`${last.completion_count} / ${last.planned_inference_count}`:'—'],['Total server tokens',last?fmt(last.total_server_tokens):'—'],['Relative cost units',last?Number(last.relative_cost_units||0).toFixed(2):'—']]);
     metrics('campaign-metrics',[['State',campaign.state||'IDLE',statusTone(campaign.state)],['Campaign',shortId(campaign.campaign_id||'—')],['Target',campaign.target||'erdos_gyarfas'],['Active lanes',campaign.active_lane_count||0],['Effective context',campaign.effective_context_mode||campaign.director_session?.context_mode||'stateless_turns','emphasis'],['Director auth',campaign.auth_imported?'Imported':'Not imported'],['Director connection',campaign.director_session?.state||'Unavailable'],['Fault',campaign.fault_kind||'None',campaign.fault_kind?'bad':''],['Verifier queued / running',`${campaign.verification?.queued||0} / ${campaign.verification?.running||0}`],['Certified',campaign.verification?.certified||0],['Coordinator RSS',`${((campaign.resources?.coordinator_rss_bytes||0)/1048576).toFixed(1)} MiB`],['Database',`${((campaign.resources?.database_bytes||0)/1048576).toFixed(2)} MiB`]]);
+    const cumulative=campaign.cumulative_counters||{},attempt=campaign.current_attempt?.live_attempt_counters||campaign.execution_attempts?.[0]?.attempt_counters||{};
+    metrics('attempt-metrics',[['Campaign ID',shortId(campaign.campaign_id||'—'),'emphasis'],['Current attempt',shortId(campaign.current_attempt?.attempt_id||'None')],['Cumulative evaluations',fmt(cumulative.evaluations||0)],['This attempt evaluations',fmt(attempt.evaluations||0)],['Cumulative server tokens',fmt(cumulative.server_tokens||0)],['This attempt server tokens',fmt(attempt.server_tokens||0)]]);
+    boundedList('attempt-history',campaign.execution_attempts||[],attemptCard,8);
+    const memory=campaign.scientific_memory;
+    metrics('memory-metrics',[['Snapshot',shortId(memory?.memory_snapshot_id||'Legacy / pending')],['Version',memory?.version??'—'],['Serialized size',memory?`${fmt(memory.byte_size)} B`:'—'],['Estimated client tokens',memory?fmt(memory.estimated_token_count):'—'],['Creation trigger',memory?label(memory.creation_trigger):'—'],['SHA-256',memory?shortId(memory.sha256):'—']]);
     const fault=document.getElementById('campaign-fault');
     fault.hidden=!campaign.fault_kind;
     fault.innerHTML=campaign.fault_kind?`<div class="effect bad"><strong>Campaign stopped fail-closed: ${esc(label(campaign.fault_kind))}</strong><p>${esc(campaign.fault_detail||'No failure detail was persisted.')}</p><div class="meta">No additional Director action or exact verification was started after this fault.</div></div>`:'';
@@ -349,6 +379,10 @@ async function refresh(){
 const campaignForm=document.getElementById('campaign-form');
 campaignForm.elements.stop_mode.addEventListener('change',()=>{document.getElementById('duration-label').hidden=campaignForm.elements.stop_mode.value==='until_success'});
 document.getElementById('start-campaign').addEventListener('click',async()=>{const stopMode=campaignForm.elements.stop_mode.value;const data={stop_mode:stopMode,duration:stopMode==='time_limit'?campaignForm.elements.duration.value:null};try{const result=await api('/api/research-campaign',{method:'POST',body:JSON.stringify(data)});notice.textContent=`Campaign started in PID ${result.pid}`}catch(error){notice.textContent=error.message}});
+document.getElementById('resume-campaign').addEventListener('click',()=>{const panel=document.getElementById('resume-panel');panel.open=true;panel.scrollIntoView({behavior:'smooth',block:'nearest'})});
+for(const input of document.querySelectorAll('#resume-form input'))input.addEventListener('input',()=>{input.dataset.edited='true'});
+document.getElementById('preview-resume').addEventListener('click',async()=>{try{const value=await api('/api/research-campaign/resume-preview',{method:'POST',body:JSON.stringify(resumePayload())});document.getElementById('resume-preview').innerHTML=resumePreviewCard(value);notice.textContent='Resume preview verified without starting a process.'}catch(error){notice.textContent=error.message}});
+document.getElementById('confirm-resume').addEventListener('click',async()=>{try{const value=await api('/api/research-campaign/resume',{method:'POST',body:JSON.stringify(resumePayload())});notice.textContent=`Execution attempt ${value.attempt_id} started in PID ${value.pid}`}catch(error){notice.textContent=error.message}});
 for(const button of document.querySelectorAll('button[data-campaign-action]'))button.addEventListener('click',async()=>{try{const result=await api('/api/research-campaign/control',{method:'POST',body:JSON.stringify({action:button.dataset.campaignAction})});notice.textContent=`${result.action} request ${result.version} accepted`}catch(error){notice.textContent=error.message}});
 document.addEventListener('click',async event=>{const button=event.target.closest('button[data-artifact]');if(!button)return;try{const response=await fetch(`/api/artifact/${encodeURIComponent(button.dataset.artifact)}`,{headers:token?{'Authorization':`Bearer ${token}`}:{}});if(!response.ok)throw new Error(`Download failed: HTTP ${response.status}`);const url=URL.createObjectURL(await response.blob());const link=document.createElement('a');link.href=url;link.download=button.dataset.artifact;link.click();URL.revokeObjectURL(url)}catch(error){notice.textContent=error.message}});
 document.addEventListener('toggle',event=>{const details=event.target.closest?.('details[data-turn-communication]');if(!details)return;const key=details.dataset.turnCommunication;if(!details.open){expandedTurnCommunication.delete(key);return}expandedTurnCommunication.add(key);loadTurnCommunication(details)},true);

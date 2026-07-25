@@ -1262,6 +1262,24 @@ class LaneManager:
             self._pinned_checkpoint_ids.discard(expired)
             self._drop_checkpoint_if_unretained(expired)
 
+    def register_restored_checkpoint(
+        self, lane_id: str, checkpoint: dict[str, Any]
+    ) -> None:
+        runtime = self.lanes.get(lane_id)
+        if runtime is None:
+            raise KeyError(f"restored lane is unavailable: {lane_id}")
+        self._remember_checkpoint(runtime, dict(checkpoint))
+
+    def register_archived_checkpoint(
+        self, checkpoint: dict[str, Any]
+    ) -> None:
+        checkpoint_id = str(checkpoint["checkpoint_id"])
+        lane_id = str(checkpoint["lane_id"])
+        self.checkpoints[checkpoint_id] = dict(checkpoint)
+        order = self._checkpoint_order.setdefault(lane_id, deque())
+        if checkpoint_id not in order:
+            order.append(checkpoint_id)
+
     def _drop_checkpoint_if_unretained(self, checkpoint_id: str) -> None:
         if checkpoint_id in self._pinned_checkpoint_ids:
             return

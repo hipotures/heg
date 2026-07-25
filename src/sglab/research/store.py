@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterator
+import hashlib
 import json
 import sqlite3
 import threading
@@ -15,6 +16,24 @@ from ..state import utc_now
 
 def new_id(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex}"
+
+
+class StaleCandidateTargetError(RuntimeError):
+    def __init__(
+        self, stale_candidate_ids: list[str], valid_candidate_ids: list[str]
+    ):
+        self.stale_candidate_ids = tuple(sorted(stale_candidate_ids))
+        self.valid_candidate_ids = tuple(valid_candidate_ids)
+        super().__init__(
+            "stale_candidate_target: "
+            + json.dumps(
+                {
+                    "stale_candidate_ids": self.stale_candidate_ids,
+                    "current_executable_candidate_ids": self.valid_candidate_ids,
+                },
+                sort_keys=True,
+            )
+        )
 
 
 class ResearchStore:
@@ -89,6 +108,316 @@ class ResearchStore:
             raise KeyError(campaign_id)
         return dict(row)
 
+    def cumulative_campaign_counters(
+        self, campaign_id: str
+    ) -> dict[str, int | float]:
+        row = self.connection.execute(
+            """
+            SELECT
+              (SELECT count(*) FROM app_server_turns
+               WHERE campaign_id=?) AS director_turns,
+              (SELECT coalesce(sum(total_tokens), 0) FROM app_server_turns
+               WHERE campaign_id=?) AS server_tokens,
+              (SELECT coalesce(sum(wall_seconds), 0) FROM app_server_turns
+               WHERE campaign_id=?) AS director_wall_seconds,
+              (SELECT count(*) FROM director_actions
+               WHERE campaign_id=?) AS actions,
+              (SELECT count(*) FROM director_action_outcomes
+               WHERE campaign_id=?) AS terminal_actions,
+              (SELECT count(*) FROM research_lanes
+               WHERE campaign_id=?) AS lanes,
+              (SELECT coalesce(sum(telemetry_high_water), 0)
+               FROM research_lanes WHERE campaign_id=?) AS evaluations,
+              (SELECT count(*) FROM campaign_candidates
+               WHERE campaign_id=?) AS retained_candidates,
+              (SELECT count(*) FROM campaign_verification_jobs
+               WHERE campaign_id=? AND state IN ('completed','unknown','failed'))
+                AS terminal_verifications
+            """,
+            (campaign_id,) * 9,
+        ).fetchone()
+        return {
+            "director_turns": int(row["director_turns"] or 0),
+            "server_tokens": int(row["server_tokens"] or 0),
+            "director_wall_seconds": float(
+                row["director_wall_seconds"] or 0
+            ),
+            "actions": int(row["actions"] or 0),
+            "terminal_actions": int(row["terminal_actions"] or 0),
+            "lanes": int(row["lanes"] or 0),
+            "evaluations": int(row["evaluations"] or 0),
+            "retained_candidates": int(row["retained_candidates"] or 0),
+            "terminal_verifications": int(
+                row["terminal_verifications"] or 0
+            ),
+        }
+
+    def latest_execution_attempt(
+        self, campaign_id: str
+    ) -> dict[str, Any] | None:
+        row = self.connection.execute(
+            """
+            SELECT * FROM campaign_execution_attempts
+            WHERE campaign_id=?
+            ORDER BY attempt_index DESC LIMIT 1
+            """,
+            (campaign_id,),
+        ).fetchone()
+        return dict(row) if row is not None else None
+
+    def execution_attempts(self, campaign_id: str) -> list[dict[str, Any]]:
+        return [
+            dict(row)
+            for row in self.connection.execute(
+                """
+                SELECT * FROM campaign_execution_attempts
+                WHERE campaign_id=? ORDER BY attempt_index
+                """,
+                (campaign_id,),
+            )
+        ]
+
+    def create_execution_attempt(
+        self,
+        *,
+        attempt_id: str,
+        campaign_id: str,
+        reason: str,
+        code_commit: str,
+        requested_resources: dict[str, Any],
+        effective_resources: dict[str, Any],
+        additional_wall_seconds: float,
+        starting_memory_snapshot_id: str | None,
+        starting_memory_sha256: str | None,
+        starting_checkpoint_refs: list[dict[str, Any]],
+        repair_acknowledgement: str | None = None,
+        authorization_provenance: dict[str, Any] | None = None,
+        runtime_provenance: dict[str, Any] | None = None,
+        process_id: int | None = None,
+    ) -> int:
+        inherited = self.cumulative_campaign_counters(campaign_id)
+        with self.transaction() as database:
+            campaign = database.execute(
+                "SELECT state FROM research_campaigns WHERE campaign_id=?",
+                (campaign_id,),
+            ).fetchone()
+            if campaign is None:
+                raise KeyError(campaign_id)
+            current = database.execute(
+                """
+                SELECT coalesce(max(attempt_index), 0)
+                FROM campaign_execution_attempts WHERE campaign_id=?
+                """,
+                (campaign_id,),
+            ).fetchone()[0]
+            attempt_index = int(current) + 1
+            database.execute(
+                """
+                INSERT INTO campaign_execution_attempts
+                (attempt_id, campaign_id, attempt_index, reason, code_commit,
+                 started_at, requested_resource_json,
+                 effective_resource_json, additional_wall_seconds,
+                 starting_memory_snapshot_id, starting_memory_sha256,
+                 starting_checkpoint_refs_json, inherited_counters_json,
+                 attempt_counters_json, repair_acknowledgement,
+                 authorization_provenance_json, runtime_provenance_json,
+                 process_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?,
+                        ?, ?, ?)
+                """,
+                (
+                    attempt_id,
+                    campaign_id,
+                    attempt_index,
+                    reason,
+                    code_commit,
+                    utc_now(),
+                    json.dumps(requested_resources, sort_keys=True),
+                    json.dumps(effective_resources, sort_keys=True),
+                    float(additional_wall_seconds),
+                    starting_memory_snapshot_id,
+                    starting_memory_sha256,
+                    json.dumps(starting_checkpoint_refs, sort_keys=True),
+                    json.dumps(inherited, sort_keys=True),
+                    repair_acknowledgement,
+                    json.dumps(
+                        authorization_provenance or {}, sort_keys=True
+                    ),
+                    json.dumps(runtime_provenance or {}, sort_keys=True),
+                    process_id,
+                ),
+            )
+            database.execute(
+                """
+                UPDATE research_campaigns
+                SET current_attempt_id=?, updated_at=?
+                WHERE campaign_id=?
+                """,
+                (attempt_id, utc_now(), campaign_id),
+            )
+        return attempt_index
+
+    def backfill_legacy_execution_attempt(
+        self,
+        campaign_id: str,
+        *,
+        code_commit: str,
+        resource_contract: dict[str, Any],
+    ) -> str | None:
+        if self.latest_execution_attempt(campaign_id) is not None:
+            return None
+        campaign = self.campaign(campaign_id)
+        counters = self.cumulative_campaign_counters(campaign_id)
+        if not any(
+            counters[key]
+            for key in ("director_turns", "actions", "lanes", "evaluations")
+        ):
+            return None
+        digest = hashlib.sha256(
+            f"legacy:{campaign_id}".encode("ascii")
+        ).hexdigest()[:24]
+        attempt_id = f"execution-attempt-{digest}"
+        with self.transaction() as database:
+            database.execute(
+                """
+                INSERT INTO campaign_execution_attempts
+                (attempt_id, campaign_id, attempt_index, reason, code_commit,
+                 started_at, terminal_at, requested_resource_json,
+                 effective_resource_json, additional_wall_seconds,
+                 starting_checkpoint_refs_json, inherited_counters_json,
+                 attempt_counters_json, terminal_status, terminal_reason,
+                 authorization_provenance_json, runtime_provenance_json)
+                VALUES (?, ?, 1, 'initial_start', ?, ?, ?, ?, ?, 0, '[]',
+                        '{}', ?, ?, ?, '{}', ?)
+                """,
+                (
+                    attempt_id,
+                    campaign_id,
+                    code_commit,
+                    campaign["created_at"],
+                    campaign["updated_at"],
+                    json.dumps(resource_contract, sort_keys=True),
+                    json.dumps(resource_contract, sort_keys=True),
+                    json.dumps(counters, sort_keys=True),
+                    campaign["state"],
+                    campaign["fault_detail"],
+                    json.dumps(
+                        {
+                            "legacy_schema": True,
+                            "historical_record_backfill": True,
+                        },
+                        sort_keys=True,
+                    ),
+                ),
+            )
+        return attempt_id
+
+    def finish_execution_attempt(
+        self,
+        attempt_id: str,
+        *,
+        terminal_status: str,
+        terminal_reason: str | None,
+    ) -> None:
+        row = self.connection.execute(
+            """
+            SELECT campaign_id, inherited_counters_json
+            FROM campaign_execution_attempts WHERE attempt_id=?
+            """,
+            (attempt_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(attempt_id)
+        current = self.cumulative_campaign_counters(str(row["campaign_id"]))
+        inherited = json.loads(str(row["inherited_counters_json"]))
+        local = {
+            key: current.get(key, 0) - inherited.get(key, 0)
+            for key in current
+        }
+        with self.transaction() as database:
+            cursor = database.execute(
+                """
+                UPDATE campaign_execution_attempts
+                SET terminal_at=?, terminal_status=?, terminal_reason=?,
+                    attempt_counters_json=?
+                WHERE attempt_id=? AND terminal_at IS NULL
+                """,
+                (
+                    utc_now(),
+                    terminal_status,
+                    terminal_reason[:2000] if terminal_reason else None,
+                    json.dumps(local, sort_keys=True),
+                    attempt_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("execution attempt is already terminal")
+            database.execute(
+                """
+                UPDATE research_campaigns SET current_attempt_id=NULL
+                WHERE campaign_id=? AND current_attempt_id=?
+                """,
+                (row["campaign_id"], attempt_id),
+            )
+
+    def latest_memory_snapshot(
+        self, campaign_id: str
+    ) -> dict[str, Any] | None:
+        row = self.connection.execute(
+            """
+            SELECT * FROM campaign_memory_snapshots
+            WHERE campaign_id=? ORDER BY version DESC LIMIT 1
+            """,
+            (campaign_id,),
+        ).fetchone()
+        return dict(row) if row is not None else None
+
+    def record_memory_snapshot(
+        self,
+        record: dict[str, Any],
+    ) -> None:
+        with self.transaction() as database:
+            database.execute(
+                """
+                INSERT INTO campaign_memory_snapshots
+                (memory_snapshot_id, campaign_id, version,
+                 parent_snapshot_id, director_snapshot_id,
+                 source_high_water_json, canonical_json, byte_size,
+                 estimated_token_count, source_record_counts_json, sha256,
+                 creation_trigger, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record["memory_snapshot_id"],
+                    record["campaign_id"],
+                    record["version"],
+                    record["parent_snapshot_id"],
+                    record["director_snapshot_id"],
+                    json.dumps(record["source_high_water"], sort_keys=True),
+                    record["canonical_json"],
+                    record["byte_size"],
+                    record["estimated_token_count"],
+                    json.dumps(
+                        record["source_record_counts"], sort_keys=True
+                    ),
+                    record["sha256"],
+                    record["creation_trigger"],
+                    utc_now(),
+                ),
+            )
+            database.execute(
+                """
+                UPDATE research_campaigns
+                SET latest_memory_snapshot_id=?, updated_at=?
+                WHERE campaign_id=?
+                """,
+                (
+                    record["memory_snapshot_id"],
+                    utc_now(),
+                    record["campaign_id"],
+                ),
+            )
+
     def start_prepared_campaign(
         self,
         campaign_id: str,
@@ -111,6 +440,97 @@ class ResearchStore:
                 raise RuntimeError(
                     "prepared campaign cannot be started in its current state"
                 )
+
+    def resume_campaign(
+        self,
+        campaign_id: str,
+        *,
+        deadline_at: str | None,
+        repair_acknowledgement: str | None,
+        host_restart_recovery: bool = False,
+    ) -> str:
+        resumable = {
+            "paused_by_operator",
+            "stopped_by_operator",
+            "completed_deadline_reached",
+            "deadline_reached",
+            "budget_exhausted",
+            "paused_fault",
+            "interrupted",
+            "infrastructure_failure",
+        }
+        with self.transaction() as database:
+            campaign = database.execute(
+                """
+                SELECT state, state_version, fault_detail
+                FROM research_campaigns WHERE campaign_id=?
+                """,
+                (campaign_id,),
+            ).fetchone()
+            if campaign is None:
+                raise KeyError(campaign_id)
+            state = str(campaign["state"])
+            if state == "running" and host_restart_recovery:
+                pass
+            elif state not in resumable:
+                raise RuntimeError(
+                    f"campaign state is not resumable: {state}"
+                )
+            if state == "paused_fault" and not (
+                repair_acknowledgement
+                and repair_acknowledgement.strip()
+            ):
+                raise RuntimeError(
+                    "paused_fault resume requires a repair acknowledgement"
+                )
+            database.execute(
+                """
+                UPDATE research_campaigns
+                SET state='running', state_version=state_version+1,
+                    deadline_at=?, updated_at=?
+                WHERE campaign_id=? AND state_version=?
+                """,
+                (
+                    deadline_at,
+                    utc_now(),
+                    campaign_id,
+                    int(campaign["state_version"]),
+                ),
+            )
+            database.execute(
+                """
+                UPDATE research_lanes
+                SET state='paused', lease_expires_at=NULL, updated_at=?
+                WHERE campaign_id=? AND state IN ('starting','running','stopping')
+                """,
+                (utc_now(), campaign_id),
+            )
+            return state
+
+    def checkpoint_references(
+        self, campaign_id: str
+    ) -> list[dict[str, Any]]:
+        return [
+            {
+                "lane_id": str(row["lane_id"]),
+                "lane_state": str(row["state"]),
+                "checkpoint_ref": row["checkpoint_ref"],
+                "checkpoint_sha256": row["checkpoint_sha256"],
+                "telemetry_high_water": int(
+                    row["telemetry_high_water"] or 0
+                ),
+            }
+            for row in self.connection.execute(
+                """
+                SELECT lane_id, state, checkpoint_ref, checkpoint_sha256,
+                       telemetry_high_water
+                FROM research_lanes
+                WHERE campaign_id=? AND checkpoint_ref IS NOT NULL
+                ORDER BY created_at, lane_id
+                """,
+                (campaign_id,),
+            )
+        ]
 
     def transition_campaign(
         self,
@@ -154,6 +574,7 @@ class ResearchStore:
         if terminal_kind not in {
             "completed_deadline_reached",
             "stopped_by_operator",
+            "director_replan_exhausted",
         }:
             raise ValueError("unsupported operational terminal state")
         now = utc_now()
@@ -171,6 +592,7 @@ class ResearchStore:
                 "succeeded_certified_counterexample",
                 "completed_deadline_reached",
                 "stopped_by_operator",
+                "director_replan_exhausted",
             }:
                 return False
             if (
@@ -259,6 +681,7 @@ class ResearchStore:
         artifact_ref: str,
         artifact_sha256: str,
         payload_bytes: int,
+        memory_snapshot_id: str | None = None,
     ) -> None:
         with self.transaction() as database:
             current = database.execute(
@@ -269,7 +692,11 @@ class ResearchStore:
                 raise RuntimeError("cannot commit snapshot from stale campaign state")
             database.execute(
                 """
-                INSERT INTO director_snapshots VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO director_snapshots
+                (snapshot_id, campaign_id, campaign_state_version,
+                 high_water_json, artifact_ref, artifact_sha256,
+                 payload_bytes, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     snapshot_id,
@@ -405,8 +832,27 @@ class ResearchStore:
         evidence_registry_artifact_ref: str | None = None,
         evidence_registry_sha256: str | None = None,
         thread_lifecycle: str | None = None,
+        execution_attempt_id: str | None = None,
+        memory_snapshot_id: str | None = None,
     ) -> None:
         with self.transaction() as database:
+            if execution_attempt_id is None:
+                execution_attempt_id = database.execute(
+                    """
+                    SELECT current_attempt_id FROM research_campaigns
+                    WHERE campaign_id=?
+                    """,
+                    (campaign_id,),
+                ).fetchone()[0]
+            if memory_snapshot_id is None:
+                row = database.execute(
+                    """
+                    SELECT memory_snapshot_id FROM campaign_memory_snapshots
+                    WHERE director_snapshot_id=?
+                    """,
+                    (snapshot_id,),
+                ).fetchone()
+                memory_snapshot_id = row[0] if row is not None else None
             database.execute(
                 """
                 INSERT INTO app_server_turns
@@ -415,9 +861,9 @@ class ResearchStore:
                  request_sha256, wire_log_artifact_ref,
                  evidence_registry_artifact_ref,
                  evidence_registry_sha256, lifecycle_status, started_at,
-                 thread_lifecycle)
+                 thread_lifecycle, execution_attempt_id, memory_snapshot_id)
                 VALUES (?, ?, ?, ?, ?, ?, 'in_progress', ?, ?, ?, ?, ?,
-                        'requested', ?, ?)
+                        'requested', ?, ?, ?, ?)
                 """,
                 (
                     turn_record_id,
@@ -433,6 +879,8 @@ class ResearchStore:
                     evidence_registry_sha256,
                     utc_now(),
                     thread_lifecycle,
+                    execution_attempt_id,
+                    memory_snapshot_id,
                 ),
             )
 
@@ -865,6 +1313,52 @@ class ResearchStore:
                         "expected_lane_version",
                     }
                 }
+                candidate_ids = _action_candidate_targets(action)
+                if status == "accepted" and candidate_ids:
+                    placeholders = ",".join("?" for _ in candidate_ids)
+                    rows = database.execute(
+                        f"""
+                        SELECT candidate_id, state
+                        FROM campaign_candidates
+                        WHERE campaign_id=?
+                          AND candidate_id IN ({placeholders})
+                        """,
+                        (campaign_id, *candidate_ids),
+                    ).fetchall()
+                    current = {
+                        str(row["candidate_id"]): str(row["state"])
+                        for row in rows
+                    }
+                    stale = [
+                        candidate_id
+                        for candidate_id in candidate_ids
+                        if current.get(candidate_id)
+                        not in {"retained", "promoted"}
+                    ]
+                    if stale:
+                        valid = [
+                            str(row[0])
+                            for row in database.execute(
+                                """
+                                SELECT candidate_id FROM campaign_candidates
+                                WHERE campaign_id=?
+                                  AND state IN ('retained','promoted')
+                                ORDER BY created_at DESC, candidate_id
+                                LIMIT 64
+                                """,
+                                (campaign_id,),
+                            )
+                        ]
+                        status = "stale_target"
+                        stale_detail = json.dumps(
+                            {
+                                "error": "stale_candidate_target",
+                                "stale_candidate_ids": sorted(stale),
+                                "current_executable_candidate_ids": valid,
+                                "replan_allowed": True,
+                            },
+                            sort_keys=True,
+                        )
                 database.execute(
                     """
                     INSERT INTO director_actions
@@ -899,6 +1393,15 @@ class ResearchStore:
                         now,
                     ),
                 )
+                if status == "accepted":
+                    for candidate_id in candidate_ids:
+                        self._pin_candidate_in_transaction(
+                            database,
+                            campaign_id=campaign_id,
+                            candidate_id=candidate_id,
+                            action_id=action_id,
+                            now=now,
+                        )
                 statuses[action_id] = status
             for update in decision["hypothesis_updates"]:
                 previous = database.execute(
@@ -1334,6 +1837,16 @@ class ResearchStore:
                     now if applied else None,
                 ),
             )
+            database.execute(
+                """
+                UPDATE campaign_candidate_pins
+                SET state='released', candidate_id=NULL, released_at=?,
+                    release_reason=?
+                WHERE action_id=? AND state='active'
+                  AND verification_job_id IS NULL
+                """,
+                (now, f"action_terminal:{status}", action_id),
+            )
             if applied:
                 database.execute(
                     """
@@ -1697,6 +2210,91 @@ class ResearchStore:
             )
             return cursor.rowcount == 1
 
+    def _pin_candidate_in_transaction(
+        self,
+        database: sqlite3.Connection,
+        *,
+        campaign_id: str,
+        candidate_id: str,
+        action_id: str,
+        now: str,
+    ) -> str:
+        candidate = database.execute(
+            """
+            SELECT * FROM campaign_candidates
+            WHERE campaign_id=? AND candidate_id=?
+              AND state IN ('retained','promoted')
+            """,
+            (campaign_id, candidate_id),
+        ).fetchone()
+        if candidate is None:
+            valid = [
+                str(row[0])
+                for row in database.execute(
+                    """
+                    SELECT candidate_id FROM campaign_candidates
+                    WHERE campaign_id=? AND state IN ('retained','promoted')
+                    ORDER BY created_at DESC, candidate_id LIMIT 64
+                    """,
+                    (campaign_id,),
+                )
+            ]
+            raise StaleCandidateTargetError([candidate_id], valid)
+        identity = hashlib.sha256(
+            (
+                f"{campaign_id}:{candidate_id}:"
+                f"{candidate['graph_sha256']}"
+            ).encode("ascii")
+        ).hexdigest()
+        snapshot_id = f"candidate-snapshot-{identity[:24]}"
+        database.execute(
+            """
+            INSERT OR IGNORE INTO campaign_candidate_snapshots
+            (candidate_snapshot_id, campaign_id, candidate_id, graph6,
+             graph_sha256, artifact_sha256, score_json, score_semantics,
+             lane_id, lane_version, checkpoint_ref, certification_status,
+             source_created_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                snapshot_id,
+                campaign_id,
+                candidate_id,
+                candidate["graph6"],
+                candidate["graph_sha256"],
+                candidate["artifact_sha256"],
+                candidate["score_json"],
+                "heuristic_ordering_key_v1_not_certification",
+                candidate["lane_id"],
+                candidate["lane_version"],
+                candidate["checkpoint_ref"],
+                candidate["certification_status"],
+                candidate["created_at"],
+                now,
+            ),
+        )
+        pin_identity = hashlib.sha256(
+            f"{action_id}:{candidate_id}".encode("utf-8")
+        ).hexdigest()
+        database.execute(
+            """
+            INSERT OR IGNORE INTO campaign_candidate_pins
+            (pin_id, campaign_id, candidate_id, candidate_id_snapshot,
+             candidate_snapshot_id, action_id, state, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'active', ?)
+            """,
+            (
+                f"candidate-pin-{pin_identity[:24]}",
+                campaign_id,
+                candidate_id,
+                candidate_id,
+                snapshot_id,
+                action_id,
+                now,
+            ),
+        )
+        return snapshot_id
+
     def prune_campaign_candidates(
         self, campaign_id: str, maximum: int
     ) -> list[str]:
@@ -1709,12 +2307,17 @@ class ResearchStore:
                 WHERE campaign_id=? AND state='retained'
                   AND candidate_id NOT IN (
                     SELECT candidate_id FROM campaign_verification_jobs
-                    WHERE campaign_id=?
+                    WHERE campaign_id=? AND state IN ('queued','running')
+                  )
+                  AND candidate_id NOT IN (
+                    SELECT candidate_id FROM campaign_candidate_pins
+                    WHERE campaign_id=? AND state='active'
+                      AND candidate_id IS NOT NULL
                   )
                 ORDER BY created_at DESC, rowid DESC
                 LIMIT -1 OFFSET ?
                 """,
-                (campaign_id, campaign_id, maximum),
+                (campaign_id, campaign_id, campaign_id, maximum),
             ).fetchall()
             if rows:
                 database.executemany(
@@ -1766,7 +2369,27 @@ class ResearchStore:
                 (action["campaign_id"], *candidate_ids),
             ).fetchall()
             if len(candidates) != len(candidate_ids):
-                raise RuntimeError("verification action references missing candidate")
+                present = {str(row["candidate_id"]) for row in candidates}
+                valid = [
+                    str(row[0])
+                    for row in database.execute(
+                        """
+                        SELECT candidate_id FROM campaign_candidates
+                        WHERE campaign_id=?
+                          AND state IN ('retained','promoted')
+                        ORDER BY created_at DESC, candidate_id LIMIT 64
+                        """,
+                        (action["campaign_id"],),
+                    )
+                ]
+                raise StaleCandidateTargetError(
+                    [
+                        candidate_id
+                        for candidate_id in candidate_ids
+                        if candidate_id not in present
+                    ],
+                    valid,
+                )
             forbidden = {
                 str(row["candidate_id"])
                 for row in candidates
@@ -1780,6 +2403,33 @@ class ResearchStore:
             for candidate_id, job_id in zip(
                 candidate_ids, job_ids, strict=True
             ):
+                pin = database.execute(
+                    """
+                    SELECT pin_id, candidate_snapshot_id
+                    FROM campaign_candidate_pins
+                    WHERE action_id=? AND candidate_id_snapshot=?
+                      AND state='active'
+                    """,
+                    (action_id, candidate_id),
+                ).fetchone()
+                if pin is None:
+                    snapshot_id = self._pin_candidate_in_transaction(
+                        database,
+                        campaign_id=str(action["campaign_id"]),
+                        candidate_id=candidate_id,
+                        action_id=action_id,
+                        now=now,
+                    )
+                    pin = database.execute(
+                        """
+                        SELECT pin_id, candidate_snapshot_id
+                        FROM campaign_candidate_pins
+                        WHERE action_id=? AND candidate_id_snapshot=?
+                        """,
+                        (action_id, candidate_id),
+                    ).fetchone()
+                else:
+                    snapshot_id = str(pin["candidate_snapshot_id"])
                 existing = database.execute(
                     """
                     SELECT state, certification_status
@@ -1793,8 +2443,12 @@ class ResearchStore:
                         """
                         INSERT INTO campaign_verification_jobs
                         (verification_job_id, campaign_id, candidate_id,
-                         requested_by_action_id, priority, state, created_at)
-                        VALUES (?, ?, ?, ?, ?, 'queued', ?)
+                         requested_by_action_id, priority, state, created_at,
+                         candidate_snapshot_id, execution_attempt_id)
+                        VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, (
+                            SELECT current_attempt_id FROM research_campaigns
+                            WHERE campaign_id=?
+                        ))
                         """,
                         (
                             job_id,
@@ -1803,6 +2457,8 @@ class ResearchStore:
                             action_id,
                             priority,
                             now,
+                            snapshot_id,
+                            action["campaign_id"],
                         ),
                     )
                 elif existing["state"] in {"unknown", "failed"}:
@@ -1821,6 +2477,25 @@ class ResearchStore:
                             action["campaign_id"],
                             candidate_id,
                         ),
+                    )
+                database.execute(
+                    """
+                    UPDATE campaign_candidate_pins
+                    SET verification_job_id=?
+                    WHERE pin_id=?
+                    """,
+                    (job_id, pin["pin_id"]),
+                )
+                if existing is not None and existing["state"] == "completed":
+                    database.execute(
+                        """
+                        UPDATE campaign_candidate_pins
+                        SET state='released', candidate_id=NULL,
+                            released_at=?,
+                            release_reason='verification_already_terminal'
+                        WHERE pin_id=? AND state='active'
+                        """,
+                        (now, pin["pin_id"]),
                     )
                 database.execute(
                     """
@@ -1860,6 +2535,82 @@ class ResearchStore:
                 (now, action["campaign_id"]),
             )
             return True
+
+    def candidate_snapshot_for_job(
+        self, job_id: str
+    ) -> dict[str, Any]:
+        row = self.connection.execute(
+            """
+            SELECT s.* FROM campaign_verification_jobs j
+            JOIN campaign_candidate_snapshots s
+              ON s.candidate_snapshot_id=j.candidate_snapshot_id
+            WHERE j.verification_job_id=?
+            """,
+            (job_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(job_id)
+        return dict(row)
+
+    def terminalize_stale_candidate_actions(
+        self, campaign_id: str
+    ) -> list[dict[str, Any]]:
+        terminalized: list[dict[str, Any]] = []
+        for action in self.pending_candidate_actions(campaign_id):
+            parameters = json.loads(str(action["parameters_json"]))
+            candidate_ids = (
+                [str(parameters["candidate_id"])]
+                if action["action_type"] == "promote_candidate"
+                else [str(value) for value in parameters["candidate_ids"]]
+            )
+            placeholders = ",".join("?" for _ in candidate_ids)
+            present = {
+                str(row[0])
+                for row in self.connection.execute(
+                    f"""
+                    SELECT candidate_id FROM campaign_candidates
+                    WHERE campaign_id=?
+                      AND candidate_id IN ({placeholders})
+                      AND state IN ('retained','promoted')
+                    """,
+                    (campaign_id, *candidate_ids),
+                )
+            }
+            stale = [
+                candidate_id
+                for candidate_id in candidate_ids
+                if candidate_id not in present
+            ]
+            if not stale:
+                continue
+            valid = [
+                str(row[0])
+                for row in self.connection.execute(
+                    """
+                    SELECT candidate_id FROM campaign_candidates
+                    WHERE campaign_id=? AND state IN ('retained','promoted')
+                    ORDER BY created_at DESC, candidate_id LIMIT 64
+                    """,
+                    (campaign_id,),
+                )
+            ]
+            detail = {
+                "stale_candidate_ids": stale,
+                "current_executable_candidate_ids": valid,
+                "historical_action_not_reexecuted": True,
+                "fresh_stateless_replan_required": True,
+            }
+            self.record_action_outcome(
+                action_id=str(action["action_id"]),
+                status="stale_target",
+                failure_kind="stale_candidate_target",
+                failure_detail=json.dumps(detail, sort_keys=True),
+                observed_effect=detail,
+            )
+            terminalized.append(
+                {"action_id": str(action["action_id"]), **detail}
+            )
+        return terminalized
 
     def pending_candidate_actions(
         self, campaign_id: str
@@ -1934,6 +2685,35 @@ class ResearchStore:
                 (utc_now(), lane_id, expected_version),
             )
             return cursor.rowcount == 1
+
+    def activate_recovered_lanes(self, lane_ids: list[str]) -> None:
+        if not lane_ids:
+            return
+        placeholders = ",".join("?" for _ in lane_ids)
+        with self.transaction() as database:
+            database.execute(
+                f"""
+                UPDATE research_lanes SET state='running', updated_at=?
+                WHERE lane_id IN ({placeholders}) AND state='paused'
+                """,
+                (utc_now(), *lane_ids),
+            )
+
+    def preserve_lanes_for_resume(self, lane_ids: list[str]) -> None:
+        if not lane_ids:
+            return
+        placeholders = ",".join("?" for _ in lane_ids)
+        with self.transaction() as database:
+            database.execute(
+                f"""
+                UPDATE research_lanes
+                SET state='paused', stopped_at=NULL, lease_expires_at=NULL,
+                    updated_at=?
+                WHERE lane_id IN ({placeholders}) AND checkpoint_ref IS NOT NULL
+                  AND state!='failed'
+                """,
+                (utc_now(), *lane_ids),
+            )
 
     def recover_interrupted_records(self, campaign_id: str) -> dict[str, int]:
         with self.transaction() as database:
@@ -2046,6 +2826,15 @@ class ResearchStore:
                     job["candidate_id"],
                 ),
             )
+            database.execute(
+                """
+                UPDATE campaign_candidate_pins
+                SET state='released', candidate_id=NULL, released_at=?,
+                    release_reason=?
+                WHERE verification_job_id=? AND state='active'
+                """,
+                (now, f"verification_terminal:{status}", job_id),
+            )
             terminal = False
             if status == "COUNTEREXAMPLE_VERIFIED":
                 campaign = database.execute(
@@ -2127,4 +2916,15 @@ def _action_lane_targets(action: dict[str, Any]) -> list[tuple[str, int]]:
         ]
     if "lane_id" in action:
         return [(str(action["lane_id"]), int(action["expected_lane_version"]))]
+    return []
+
+
+def _action_candidate_targets(action: dict[str, Any]) -> list[str]:
+    if action.get("type") == "promote_candidate":
+        value = action.get("candidate_id")
+        return [str(value)] if value is not None else []
+    if action.get("type") == "schedule_verification":
+        values = action.get("candidate_ids")
+        if isinstance(values, list):
+            return [str(value) for value in values]
     return []

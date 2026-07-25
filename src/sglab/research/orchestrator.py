@@ -14,6 +14,7 @@ from .snapshot import SnapshotBuilder
 from .store import ResearchStore, new_id
 from .triggers import TriggerBatch, TriggerEngine
 from .verification_broker import M4VerificationBroker
+from ..state import utc_now
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +24,8 @@ class DirectorCycleResult:
     reasons: tuple[str, ...]
     action_statuses: dict[str, str]
     candidates_during_inference: int
+    replan_count: int = 0
+    replan_exhausted: bool = False
 
 
 class ActiveResearchOrchestrator:
@@ -113,13 +116,48 @@ class ActiveResearchOrchestrator:
             batch = self.triggers.consume(
                 total_candidates=self.manager.total_candidates()
             )
-            return await self._run_cycle(batch)
+            first = await self._run_cycle(batch)
+            if "stale_target" not in first.action_statuses.values():
+                return first
+            second = await self._run_cycle(
+                TriggerBatch(
+                    reasons=("stale_action_replan",),
+                    first_event_at=utc_now(),
+                )
+            )
+            statuses = {**first.action_statuses, **second.action_statuses}
+            exhausted = "stale_target" in second.action_statuses.values()
+            if exhausted:
+                self.store.finish_campaign(
+                    self.campaign_id,
+                    terminal_kind="director_replan_exhausted",
+                    detail=(
+                        "one fresh stateless replan also referenced a stale "
+                        "candidate; no invalid action was executed"
+                    ),
+                )
+            return DirectorCycleResult(
+                trigger_id=second.trigger_id,
+                snapshot_id=second.snapshot_id,
+                reasons=tuple(
+                    dict.fromkeys((*first.reasons, *second.reasons))
+                ),
+                action_statuses=statuses,
+                candidates_during_inference=(
+                    first.candidates_during_inference
+                    + second.candidates_during_inference
+                ),
+                replan_count=1,
+                replan_exhausted=exhausted,
+            )
 
     async def _run_cycle(
         self, batch: TriggerBatch
     ) -> DirectorCycleResult:
         snapshot, context = self.snapshots.publish()
-        for checkpoint_id in context.checkpoint_ids:
+        for checkpoint_id in (
+            context.checkpoint_ids & context.executable_target_ids
+        ):
             self.manager.pin_checkpoint(checkpoint_id)
         trigger_id = new_id("trigger")
         campaign_version = int(
@@ -163,7 +201,10 @@ class ActiveResearchOrchestrator:
         )
         self.triggers.configure(evidence.decision["next_review"])
         if any(
-            status in {"rejected_stale_campaign", "rejected_stale_state"}
+            status in {
+                "rejected_stale_campaign",
+                "rejected_stale_state",
+            }
             for status in statuses.values()
         ):
             self.triggers.offer("stale_action_replan")

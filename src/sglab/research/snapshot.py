@@ -14,6 +14,11 @@ from ..targets import target_summary
 from .lanes import LaneManager
 from .catalog import action_catalog
 from .context import evidence_registry_ids, prepare_director_state_v2
+from .continuity import (
+    ScientificMemoryCompactor,
+    ScientificMemoryPolicy,
+    memory_snapshot_record,
+)
 from .protocol import MAX_SNAPSHOT_BYTES, canonical_json
 from .store import ResearchStore, new_id
 from .validation import DecisionContext
@@ -32,6 +37,7 @@ class SnapshotBuilder:
         maximum_lanes: int = 32,
         maximum_actions: int = 64,
         maximum_hypotheses: int = 64,
+        memory_policy: ScientificMemoryPolicy | None = None,
     ):
         self.store = store
         self.manager = manager
@@ -40,10 +46,14 @@ class SnapshotBuilder:
         self.maximum_lanes = maximum_lanes
         self.maximum_actions = maximum_actions
         self.maximum_hypotheses = maximum_hypotheses
+        self.memory_policy = memory_policy or ScientificMemoryPolicy()
+        self.memory = ScientificMemoryCompactor(self.memory_policy)
         self.snapshot_dir = self.campaign_dir / "snapshots"
         self.snapshot_dir.mkdir(parents=True, exist_ok=True)
 
-    def publish(self) -> tuple[dict[str, Any], DecisionContext]:
+    def publish(
+        self, *, memory_trigger: str = "pre_inference"
+    ) -> tuple[dict[str, Any], DecisionContext]:
         campaign = self.store.campaign(self.campaign_id)
         snapshot_id = new_id("snapshot")
         evidence: set[str] = set()
@@ -92,6 +102,95 @@ class SnapshotBuilder:
             "hypotheses": hypotheses,
             "implemented_director_controls": action_catalog(),
             "available_evidence_ids": sorted(evidence)[:512],
+            "continuity": self._continuity(campaign),
+        }
+        high_water = {
+            lane["lane_id"]: lane["metrics"].get("end_high_water", 0)
+            for lane in lanes
+        }
+        previous = self.store.latest_memory_snapshot(self.campaign_id)
+        previous_projection = (
+            json.loads(str(previous["canonical_json"]))
+            if previous is not None
+            else None
+        )
+        prepared_current = prepare_director_state_v2(
+            snapshot,
+            hard_limit_bytes=self.memory_policy.hard_limit_bytes,
+        )
+        projection = self.memory.project(
+            prepared_current.state,
+            previous=previous_projection,
+        )
+        projection_bytes = self.memory.encode(projection)
+        completed_cycles = int(
+            self.store.connection.execute(
+                """
+                SELECT count(*) FROM director_action_batches
+                WHERE campaign_id=? AND validation_status IN (
+                    'accepted','partial_rejected'
+                )
+                """,
+                (self.campaign_id,),
+            ).fetchone()[0]
+        )
+        if memory_trigger == "pre_inference":
+            if len(projection_bytes) >= self.memory_policy.soft_limit_bytes:
+                creation_trigger = "soft_limit_before_inference"
+            elif (
+                completed_cycles > 0
+                and completed_cycles
+                % self.memory_policy.snapshot_interval_cycles
+                == 0
+            ):
+                creation_trigger = "periodic_completed_cycles"
+            else:
+                creation_trigger = "pre_inference"
+        else:
+            creation_trigger = memory_trigger
+        memory_snapshot_id = new_id("scientific-memory")
+        memory_version = int(previous["version"]) + 1 if previous else 1
+        source_counts = {
+            table: int(
+                self.store.connection.execute(
+                    f"SELECT count(*) FROM {table} WHERE campaign_id=?",
+                    (self.campaign_id,),
+                ).fetchone()[0]
+            )
+            for table in (
+                "director_action_batches",
+                "director_actions",
+                "research_hypotheses_v2",
+                "research_lanes",
+                "lane_metric_windows",
+                "campaign_candidates",
+                "campaign_verification_jobs",
+            )
+        }
+        memory_record = memory_snapshot_record(
+            memory_snapshot_id=memory_snapshot_id,
+            campaign_id=self.campaign_id,
+            version=memory_version,
+            parent_snapshot_id=(
+                str(previous["memory_snapshot_id"]) if previous else None
+            ),
+            director_snapshot_id=snapshot_id,
+            projection=projection,
+            source_high_water=high_water,
+            source_record_counts=source_counts,
+            creation_trigger=creation_trigger,
+            hard_limit_bytes=self.memory_policy.hard_limit_bytes,
+        )
+        snapshot["scientific_memory_snapshot_id"] = memory_snapshot_id
+        snapshot["scientific_memory_projection"] = projection
+        snapshot["scientific_memory"] = {
+            "version": memory_version,
+            "sha256": memory_record["sha256"],
+            "byte_size": memory_record["byte_size"],
+            "estimated_token_count": memory_record[
+                "estimated_token_count"
+            ],
+            "creation_trigger": creation_trigger,
         }
         canonical_json(snapshot, max_bytes=MAX_SNAPSHOT_BYTES)
         relative = Path("snapshots") / f"{snapshot_id}.json"
@@ -102,20 +201,22 @@ class SnapshotBuilder:
             snapshot_id=snapshot_id,
             campaign_id=self.campaign_id,
             campaign_state_version=int(campaign["state_version"]),
-            high_water={
-                lane["lane_id"]: lane["metrics"].get("end_high_water", 0)
-                for lane in lanes
-            },
+            high_water=high_water,
             artifact_ref=str(relative),
             artifact_sha256=hashlib.sha256(payload).hexdigest(),
             payload_bytes=len(payload),
+            memory_snapshot_id=memory_snapshot_id,
         )
+        self.store.record_memory_snapshot(memory_record)
         active = [
             lane
             for lane in lanes
             if lane["state"] in {"starting", "running", "paused", "stopping"}
         ]
-        prepared = prepare_director_state_v2(snapshot)
+        prepared = prepare_director_state_v2(
+            snapshot,
+            hard_limit_bytes=self.memory_policy.hard_limit_bytes,
+        )
         registry = prepared.evidence_registry
         context = DecisionContext(
             snapshot_id=str(prepared.state["source_snapshot_id"]),
@@ -175,10 +276,20 @@ class SnapshotBuilder:
                 f"{int(metrics.get('end_high_water', 0))}"
             )
             evidence.add(metric_evidence)
+            active_state = row["state"] in {
+                "starting",
+                "running",
+                "paused",
+                "stopping",
+            }
             checkpoint_id = (
                 runtime.latest_checkpoint_id
-                if runtime is not None
-                else _checkpoint_id_from_ref(row["checkpoint_ref"])
+                if runtime is not None and active_state
+                else (
+                    _checkpoint_id_from_ref(row["checkpoint_ref"])
+                    if active_state
+                    else None
+                )
             )
             if checkpoint_id is not None:
                 evidence.add(f"checkpoint:{checkpoint_id}")
@@ -219,6 +330,7 @@ class SnapshotBuilder:
                    a.expected_lane_version, a.expected_effect,
                    a.parameters_json, a.hypothesis_ids_json,
                    a.evaluation_window_json, a.validation_status,
+                   a.validation_detail,
                    o.application_status, o.resulting_lane_id,
                    o.resulting_lane_version, o.observed_effect_json,
                    o.expectation_met, o.failure_kind, o.failure_detail,
@@ -271,6 +383,7 @@ class SnapshotBuilder:
                         row["evaluation_window_json"]
                     ),
                     "validation_status": row["validation_status"],
+                    "validation_detail": row["validation_detail"],
                     "application_status": row["application_status"],
                     "resulting_lane_id": row["resulting_lane_id"],
                     "resulting_lane_version": row["resulting_lane_version"],
@@ -312,6 +425,174 @@ class SnapshotBuilder:
                 }
             )
         return values
+
+    def _continuity(self, campaign: dict[str, Any]) -> dict[str, Any]:
+        """Bounded current ledger plus recent deltas for stateless continuity."""
+
+        hypotheses = [
+            {
+                "hypothesis_id": row["hypothesis_id"],
+                "statement": row["statement"],
+                "confidence": float(row["confidence"]),
+                "status": row["status"],
+            }
+            for row in self.store.connection.execute(
+                """
+                SELECT h.* FROM research_hypotheses_v2 h
+                JOIN (
+                    SELECT hypothesis_id, max(rowid) AS latest
+                    FROM research_hypotheses_v2 WHERE campaign_id=?
+                    GROUP BY hypothesis_id
+                ) current ON current.latest=h.rowid
+                ORDER BY h.created_at DESC, h.rowid DESC LIMIT 64
+                """,
+                (self.campaign_id,),
+            )
+        ]
+        assessments = self.store.connection.execute(
+            """
+            SELECT campaign_assessment, created_at, decision_batch_id
+            FROM director_action_batches
+            WHERE campaign_id=? AND validation_status IN (
+                'accepted','partial_rejected'
+            )
+            ORDER BY created_at DESC, rowid DESC LIMIT 1
+            """,
+            (self.campaign_id,),
+        ).fetchone()
+        verifier = [
+            {
+                "candidate_id": row["candidate_id"],
+                "state": row["state"],
+                "certification_status": row["certification_status"],
+                "certification_artifact_ref": row[
+                    "certification_artifact_ref"
+                ],
+            }
+            for row in self.store.connection.execute(
+                """
+                SELECT candidate_id, state, certification_status,
+                       certification_artifact_ref
+                FROM campaign_verification_jobs WHERE campaign_id=?
+                  AND state IN ('completed','unknown','failed')
+                ORDER BY completed_at DESC, rowid DESC LIMIT 32
+                """,
+                (self.campaign_id,),
+            )
+        ]
+        candidates = [
+            {
+                "candidate_id": row["candidate_id"],
+                "state": row["state"],
+                "score": json.loads(row["score_json"]),
+                "lane_id": row["lane_id"],
+                "checkpoint_ref": row["checkpoint_ref"],
+                "certification_status": row["certification_status"],
+            }
+            for row in self.store.connection.execute(
+                """
+                SELECT candidate_id, state, score_json, lane_id,
+                       checkpoint_ref, certification_status
+                FROM campaign_candidates WHERE campaign_id=?
+                ORDER BY created_at DESC, rowid DESC LIMIT 64
+                """,
+                (self.campaign_id,),
+            )
+        ]
+        lanes = [
+            {
+                "lane_id": row["lane_id"],
+                "state": row["state"],
+                "algorithm": row["algorithm"],
+                "graph_family": row["graph_family"],
+                "parameters": json.loads(row["current_parameters_json"]),
+                "checkpoint_ref": row["checkpoint_ref"],
+                "checkpoint_sha256": row["checkpoint_sha256"],
+                "telemetry_high_water": int(
+                    row["telemetry_high_water"] or 0
+                ),
+            }
+            for row in self.store.connection.execute(
+                """
+                SELECT lane_id, state, algorithm, graph_family,
+                       current_parameters_json, checkpoint_ref,
+                       checkpoint_sha256, telemetry_high_water
+                FROM research_lanes WHERE campaign_id=?
+                ORDER BY updated_at DESC, rowid DESC LIMIT 64
+                """,
+                (self.campaign_id,),
+            )
+        ]
+        validation_feedback = []
+        for row in self.store.connection.execute(
+            """
+            SELECT action_id, validation_detail FROM director_actions
+            WHERE campaign_id=? AND validation_status='stale_target'
+            ORDER BY created_at DESC, rowid DESC LIMIT 4
+            """,
+            (self.campaign_id,),
+        ):
+            try:
+                detail = json.loads(str(row["validation_detail"]))
+            except (TypeError, json.JSONDecodeError):
+                detail = {"error": "stale_candidate_target"}
+            validation_feedback.append(
+                {"action_id": row["action_id"], **detail}
+            )
+        attempt = self.store.latest_execution_attempt(self.campaign_id)
+        effective_resources = (
+            json.loads(str(attempt["effective_resource_json"]))
+            if attempt is not None
+            else {}
+        )
+        executable_candidates = sorted(
+            item["candidate_id"]
+            for item in candidates
+            if item["state"] in {"retained", "promoted"}
+        )
+        return {
+            "hypothesis_ledger": hypotheses,
+            "latest_valid_assessment": (
+                dict(assessments) if assessments is not None else None
+            ),
+            "exact_verifier_outcomes": verifier,
+            "candidate_ledger": candidates,
+            "current_executable_candidate_ids": executable_candidates,
+            "current_executable_checkpoint_ids": sorted(
+                str(checkpoint_id)
+                for checkpoint_id in self.manager.checkpoints
+            ),
+            "lane_and_checkpoint_ledger": lanes,
+            "explored_regions": [
+                {
+                    "graph_family": lane["graph_family"],
+                    "algorithm": lane["algorithm"],
+                    "parameters": lane["parameters"],
+                    "evaluations": lane["telemetry_high_water"],
+                    "state": lane["state"],
+                }
+                for lane in lanes
+            ],
+            "unresolved_scientific_questions": [
+                item["statement"]
+                for item in hypotheses
+                if item["status"] not in {"rejected", "resolved"}
+            ],
+            "validation_feedback": validation_feedback,
+            "infrastructure_fault": (
+                {
+                    "kind": campaign["fault_kind"],
+                    "detail": campaign["fault_detail"],
+                    "is_scientific_negative_evidence": False,
+                }
+                if campaign.get("fault_kind")
+                else None
+            ),
+            "execution_attempt": {
+                "attempt_id": attempt["attempt_id"] if attempt else None,
+                "effective_resources": effective_resources,
+            },
+        }
 
     def _hypotheses(self, evidence: set[str]) -> list[dict[str, Any]]:
         rows = self.store.connection.execute(

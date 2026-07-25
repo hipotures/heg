@@ -310,9 +310,9 @@ class CampaignOperatorContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             workspace = Path(directory)
             first = request_campaign_control(workspace, "PAUSE")
-            second = request_campaign_control(workspace, "RESUME")
             self.assertEqual(first["version"], 1)
-            self.assertEqual(second["version"], 2)
+            with self.assertRaises(ValueError):
+                request_campaign_control(workspace, "RESUME")
             with self.assertRaises(ValueError):
                 request_campaign_control(workspace, "SHELL")
 

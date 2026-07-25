@@ -168,20 +168,28 @@ def director_state_v2_schema() -> dict[str, Any]:
                     },
                 },
             },
+            "continuity": {"type": "object"},
         },
     }
 
 
 def prepare_director_state_v2(
     snapshot: dict[str, Any],
+    *,
+    hard_limit_bytes: int = DIRECTOR_STATE_MAX_BYTES,
 ) -> PreparedDirectorState:
     """Build and deterministically compact model-facing scientific state."""
 
-    pre = _unbounded_state(snapshot)
-    state = json.loads(json.dumps(pre))
-    outcomes = list(state.pop("_all_outcomes", []))
-    state["latest_batch_outcome"] = outcomes[0] if outcomes else None
-    state["previous_outcomes"] = outcomes[1:MAX_OUTCOMES]
+    projected = snapshot.get("scientific_memory_projection")
+    if isinstance(projected, dict):
+        pre = json.loads(json.dumps(projected))
+        state = json.loads(json.dumps(projected))
+    else:
+        pre = _unbounded_state(snapshot)
+        state = json.loads(json.dumps(pre))
+        outcomes = list(state.pop("_all_outcomes", []))
+        state["latest_batch_outcome"] = outcomes[0] if outcomes else None
+        state["previous_outcomes"] = outcomes[1:MAX_OUTCOMES]
     ancestry = state["ancestry"]
     ancestry["global_record_summaries"] = ancestry[
         "global_record_summaries"
@@ -205,7 +213,7 @@ def prepare_director_state_v2(
     state["allowed_action_space"] = _applicable_action_space(
         snapshot, state, action_catalog()
     )
-    while _json_size(state) > DIRECTOR_STATE_MAX_BYTES:
+    while _json_size(state) > hard_limit_bytes:
         if ancestry["final_best_accepted_ancestors"]:
             ancestry["final_best_accepted_ancestors"].pop(0)
         elif ancestry["global_record_summaries"]:
@@ -215,7 +223,7 @@ def prepare_director_state_v2(
         else:
             break
     within_state_limits = (
-        _json_size(state) <= DIRECTOR_STATE_MAX_BYTES
+        _json_size(state) <= hard_limit_bytes
         and _json_size(ancestry) <= ANCESTRY_MAX_BYTES
         and _json_size(state["previous_outcomes"])
         <= HISTORICAL_OUTCOMES_MAX_BYTES
@@ -224,7 +232,7 @@ def prepare_director_state_v2(
         report = {
             "schema_version": "1.0",
             "limits": {
-                "director_state_bytes": DIRECTOR_STATE_MAX_BYTES,
+                "director_state_bytes": hard_limit_bytes,
                 "ancestry_bytes": ANCESTRY_MAX_BYTES,
                 "historical_outcomes_bytes": HISTORICAL_OUTCOMES_MAX_BYTES,
                 "client_owned_estimated_tokens": (
@@ -240,11 +248,11 @@ def prepare_director_state_v2(
             "DirectorStateV2 remains oversized after deterministic compaction",
             size_report=report,
         )
-    payload = canonical_json(state, max_bytes=DIRECTOR_STATE_MAX_BYTES)
+    payload = canonical_json(state, max_bytes=hard_limit_bytes)
     report = {
         "schema_version": "1.0",
         "limits": {
-            "director_state_bytes": DIRECTOR_STATE_MAX_BYTES,
+            "director_state_bytes": hard_limit_bytes,
             "ancestry_bytes": ANCESTRY_MAX_BYTES,
             "historical_outcomes_bytes": HISTORICAL_OUTCOMES_MAX_BYTES,
             "client_owned_estimated_tokens": CLIENT_ESTIMATED_TOKENS_MAX,
@@ -642,6 +650,7 @@ def _unbounded_state(snapshot: dict[str, Any]) -> dict[str, Any]:
         "artifact_references": _artifact_references(
             snapshot, batch_actions[:MAX_OUTCOMES]
         ),
+        "continuity": dict(snapshot.get("continuity") or {}),
     }
     state["allowed_action_space"] = _applicable_action_space(
         snapshot, state, catalog
@@ -674,15 +683,45 @@ def _applicable_action_space(
         if isinstance(best_result, dict)
         else None
     )
-    candidate_ids = (
-        [str(retained_candidate)]
-        if isinstance(retained_candidate, str) and retained_candidate
+    continuity = state.get("continuity")
+    current_candidates = (
+        continuity.get("current_executable_candidate_ids", [])
+        if isinstance(continuity, dict)
         else []
+    )
+    candidate_ids = sorted(
+        {
+            str(value)
+            for value in current_candidates
+            if isinstance(value, str) and value
+        }
+        | (
+            {str(retained_candidate)}
+            if (
+                not isinstance(continuity, dict)
+                or "current_executable_candidate_ids" not in continuity
+            )
+            and isinstance(retained_candidate, str)
+            and retained_candidate
+            else set()
+        )
     )
     checkpoint_ids = sorted(
         {
+            str(lane["checkpoint_id"])
+            for lane in active_lanes
+            if isinstance(lane.get("checkpoint_id"), str)
+            and lane["checkpoint_id"]
+        }
+        | {
             str(value)
-            for value in _values_for_keys(state, {"checkpoint_id"})
+            for value in (
+                continuity.get(
+                    "current_executable_checkpoint_ids", []
+                )
+                if isinstance(continuity, dict)
+                else []
+            )
             if isinstance(value, str) and value
         }
     )

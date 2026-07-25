@@ -102,7 +102,7 @@ class SyntheticControlProvider:
         mode: str,
         seed: int,
     ):
-        if mode not in {"static", "random"}:
+        if mode not in {"static", "random", "continuity_demo"}:
             raise ValueError("synthetic control mode must be static or random")
         self.store = store
         self.campaign_id = campaign_id
@@ -135,6 +135,15 @@ class SyntheticControlProvider:
             protocol_schema_sha256="director-decision-v1",
             resumed=resume_thread_id is not None,
         )
+        prior = self.store.connection.execute(
+            """
+            SELECT count(*) FROM app_server_turns
+            WHERE campaign_id=? AND session_record_id=?
+              AND status='completed_valid'
+            """,
+            (self.campaign_id, self.session_record_id),
+        ).fetchone()
+        self._turn_index = int(prior[0]) if prior is not None else 0
         self._started = True
 
     async def close(self) -> None:
@@ -232,7 +241,7 @@ class SyntheticControlProvider:
                 )
             ]
             assessment = "Apply the fixed finalist-verification rule."
-        elif self.mode == "static":
+        elif self.mode in {"static", "continuity_demo"}:
             actions = [self._review_action()]
             assessment = (
                 "Preserve the deterministic static portfolio without scientific "
@@ -241,11 +250,28 @@ class SyntheticControlProvider:
         else:
             actions = [self._random_action(active, context)]
             assessment = "Apply one seeded random admissible intervention."
+        hypothesis_updates = (
+            [
+                {
+                    "hypothesis_id": "continuity-demo-search-hypothesis",
+                    "operation": "create",
+                    "statement": (
+                        "A bounded connected-cubic search should preserve "
+                        "measured progress across execution attempts."
+                    ),
+                    "confidence": 0.5,
+                    "evidence_for": [],
+                    "evidence_against": [],
+                }
+            ]
+            if self.mode == "continuity_demo" and self._turn_index == 0
+            else []
+        )
         return {
             "schema_version": "1.0",
             "snapshot_id": snapshot["snapshot_id"],
             "campaign_assessment": assessment,
-            "hypothesis_updates": [],
+            "hypothesis_updates": hypothesis_updates,
             "actions": actions,
             "next_review": {
                 "min_wall_seconds": 10,
@@ -269,7 +295,10 @@ class SyntheticControlProvider:
         if not isinstance(best, dict):
             return None
         candidate_id = best.get("candidate_id")
-        if candidate_id not in context.candidate_ids:
+        if (
+            candidate_id not in context.candidate_ids
+            or candidate_id not in context.executable_target_ids
+        ):
             return None
         jobs = snapshot.get("verification", {}).get("jobs", [])
         if any(

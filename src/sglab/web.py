@@ -39,10 +39,13 @@ from .resources import recommended_workers
 from .locations import asset_path
 from .research.auth import auth_is_imported
 from .research.campaign import (
+    campaign_application_data,
     campaign_status,
     parse_duration,
     request_campaign_control,
 )
+from .research.continuity import repository_commit
+from .research.resume import build_resume_preview
 from .search import ALGORITHMS, MODES
 from .state import atomic_write_json, next_control, read_json, utc_now
 
@@ -100,10 +103,20 @@ class DashboardServer(ThreadingHTTPServer):
         super().service_actions()
         with self.launch_lock:
             self._reap_comparison_workers_locked()
+            if (
+                self.campaign_runner is not None
+                and self.campaign_runner.poll() is not None
+            ):
+                self.campaign_runner = None
 
     def server_close(self) -> None:
         with self.launch_lock:
             self._reap_comparison_workers_locked()
+            if (
+                self.campaign_runner is not None
+                and self.campaign_runner.poll() is not None
+            ):
+                self.campaign_runner = None
         super().server_close()
 
     def _reap_comparison_workers_locked(self) -> None:
@@ -417,6 +430,129 @@ class DashboardServer(ThreadingHTTPServer):
                 "pid": self.campaign_runner.pid,
                 "target": "erdos_gyarfas",
                 "stop_mode": stop_mode,
+            }
+
+    def resume_campaign(
+        self, payload: dict[str, Any], *, preview_only: bool = False
+    ) -> tuple[int, dict[str, Any]]:
+        allowed = {
+            "campaign_id",
+            "additional_time",
+            "cpu_workers",
+            "maximum_active_lanes",
+            "maximum_aggregate_resource_share",
+            "lane_memory_bytes",
+            "verifier_concurrency",
+            "verifier_memory_bytes",
+            "verification_queue_depth",
+            "repair_acknowledgement",
+        }
+        if set(payload) - allowed:
+            return 400, {"error": "unsupported campaign resume input"}
+        campaign_id = payload.get("campaign_id")
+        additional_time = payload.get("additional_time")
+        if not isinstance(campaign_id, str) or not campaign_id:
+            return 400, {"error": "campaign_id is required"}
+        if not isinstance(additional_time, str):
+            return 400, {"error": "additional_time must be a string"}
+        try:
+            additional_seconds = parse_duration(additional_time)
+        except ValueError as error:
+            return 400, {"error": str(error)}
+        overrides = {
+            key: payload[key]
+            for key in (
+                "cpu_workers",
+                "maximum_active_lanes",
+                "maximum_aggregate_resource_share",
+                "lane_memory_bytes",
+                "verifier_concurrency",
+                "verifier_memory_bytes",
+                "verification_queue_depth",
+            )
+            if payload.get(key) is not None
+        }
+        try:
+            preview = build_resume_preview(
+                self.workspace,
+                campaign_id,
+                additional_wall_seconds=additional_seconds,
+                resource_overrides=overrides,
+                repair_acknowledgement=payload.get(
+                    "repair_acknowledgement"
+                ),
+                code_commit=repository_commit(
+                    Path(__file__).resolve().parents[2]
+                ),
+            )
+        except (RuntimeError, ValueError) as error:
+            return 409, {"error": str(error)}
+        if preview_only:
+            return 200, preview
+        with self.launch_lock:
+            if (
+                self.campaign_runner is not None
+                and self.campaign_runner.poll() is None
+            ) or _research_campaign_is_live(self):
+                return 409, {"error": "a research campaign is already active"}
+            if not auth_is_imported(
+                campaign_application_data(self.workspace, campaign_id)
+            ):
+                return 409, {
+                    "error": (
+                        "Director authentication has not been explicitly "
+                        "imported for this campaign"
+                    )
+                }
+            command = [
+                sys.executable,
+                "-m",
+                "sglab",
+                "research-campaign",
+                "resume",
+                "--workspace",
+                str(self.workspace),
+                "--campaign-id",
+                campaign_id,
+                "--additional-time",
+                additional_time,
+            ]
+            flags = {
+                "cpu_workers": "--cpu-workers",
+                "maximum_active_lanes": "--max-active-lanes",
+                "maximum_aggregate_resource_share": (
+                    "--aggregate-lane-resource-share"
+                ),
+                "lane_memory_bytes": "--lane-memory-bytes",
+                "verifier_concurrency": "--verifier-concurrency",
+                "verifier_memory_bytes": "--verifier-memory-bytes",
+                "verification_queue_depth": "--verification-queue-depth",
+            }
+            for key, flag in flags.items():
+                if key in overrides:
+                    command.extend((flag, str(overrides[key])))
+            acknowledgement = payload.get("repair_acknowledgement")
+            if isinstance(acknowledgement, str) and acknowledgement:
+                command.extend(
+                    ("--repair-acknowledgement", acknowledgement)
+                )
+            logs = self.workspace / "logs"
+            logs.mkdir(parents=True, exist_ok=True)
+            runner_log = logs / "research-campaign-runner.log"
+            with runner_log.open("ab") as log:
+                self.campaign_runner = Popen(
+                    command,
+                    stdin=DEVNULL,
+                    stdout=log,
+                    stderr=log,
+                    start_new_session=True,
+                    env=os.environ.copy(),
+                )
+            return 202, {
+                "accepted": True,
+                "pid": self.campaign_runner.pid,
+                "campaign_id": campaign_id,
+                "attempt_id": preview["proposed_attempt_id"],
             }
 
 
@@ -937,9 +1073,19 @@ class DashboardHandler(BaseHTTPRequestHandler):
             status, response = self.server.start_campaign(payload)
             self._json(status, response)
             return
+        if parsed.path == "/api/research-campaign/resume-preview":
+            status, response = self.server.resume_campaign(
+                payload, preview_only=True
+            )
+            self._json(status, response)
+            return
+        if parsed.path == "/api/research-campaign/resume":
+            status, response = self.server.resume_campaign(payload)
+            self._json(status, response)
+            return
         if parsed.path == "/api/research-campaign/control":
             action = payload.get("action")
-            if action not in {"PAUSE", "RESUME", "STOP"}:
+            if action not in {"PAUSE", "STOP"}:
                 self._json(400, {"error": "unsupported action"})
                 return
             if not _research_campaign_is_live(self.server):
@@ -1008,9 +1154,6 @@ def _research_campaign_is_live(server: DashboardServer) -> bool:
         "IDLE",
         "NOT_FOUND",
         "SCHEMA_UNAVAILABLE",
-        "succeeded_certified_counterexample",
-        "completed_deadline_reached",
-        "stopped_by_operator",
     }:
         return False
     try:

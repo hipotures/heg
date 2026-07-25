@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import tempfile
 import time
 import unittest
@@ -14,6 +16,7 @@ from sglab.research.snapshot import SnapshotBuilder
 from sglab.research.store import ResearchStore
 from sglab.research.triggers import TriggerEngine
 from sglab.research.validation import DecisionContext, validate_decision
+from sglab.model import BitGraph
 
 
 def action_common(action_id: str, kind: str) -> dict:
@@ -220,7 +223,247 @@ class DurableScenarioProvider:
         )
 
 
+class StaleCandidateReplanProvider:
+    def __init__(self, store: ResearchStore):
+        self.store = store
+        self.turn = 0
+        self.saw_feedback = False
+
+    async def decide(
+        self,
+        *,
+        snapshot: dict,
+        trigger_id: str,
+        context: DecisionContext,
+    ) -> DirectorEvidence:
+        self.turn += 1
+        if self.turn == 1:
+            action = {
+                **action_common("verify-now-stale", "schedule_verification"),
+                "candidate_ids": ["candidate-stale"],
+                "verification_priority": 80,
+            }
+        else:
+            feedback = (
+                snapshot.get("scientific_memory_projection", {})
+                .get("continuity", {})
+                .get("validation_feedback", [])
+            )
+            self.saw_feedback = bool(
+                feedback
+                and feedback[0].get("stale_candidate_ids")
+                == ["candidate-stale"]
+                and feedback[0].get(
+                    "current_executable_candidate_ids"
+                )
+                == []
+            )
+            action = {
+                **action_common("review-after-stale", "set_review_trigger"),
+                "review_trigger": {
+                    "min_wall_seconds": 10,
+                    "max_wall_seconds": 60,
+                    "candidate_delta": 100_000,
+                    "events": [
+                        "new_global_best",
+                        "verification_result",
+                        "lane_failure",
+                        "resource_pressure",
+                    ],
+                },
+            }
+        decision = {
+            "schema_version": "1.0",
+            "snapshot_id": snapshot["snapshot_id"],
+            "campaign_assessment": "Recover stale candidate target.",
+            "hypothesis_updates": [],
+            "actions": [action],
+            "next_review": {
+                "min_wall_seconds": 10,
+                "max_wall_seconds": 60,
+                "candidate_delta": 100_000,
+                "events": [
+                    "new_global_best",
+                    "verification_result",
+                    "lane_failure",
+                    "resource_pressure",
+                ],
+            },
+        }
+        validation = validate_decision(decision, context)
+        if not validation.accepted:
+            raise AssertionError(validation.issues)
+        if self.turn == 1:
+            self.store.record_session(
+                record_id="stale-session",
+                campaign_id="campaign-stale",
+                thread_id="stale-thread",
+                session_id=None,
+                thread_path=None,
+                parent_thread_id=None,
+                model="deterministic-replay",
+                effort="none",
+                codex_version="test",
+                executable_sha256="a" * 64,
+                protocol_schema_sha256="b" * 64,
+                context_mode="stateless_turns",
+            )
+            with self.store.transaction() as database:
+                database.execute(
+                    """
+                    DELETE FROM campaign_candidates
+                    WHERE candidate_id='candidate-stale'
+                    """
+                )
+        turn_record = f"stale-turn-{self.turn}"
+        self.store.begin_turn(
+            turn_record_id=turn_record,
+            session_record_id="stale-session",
+            campaign_id="campaign-stale",
+            thread_id=f"fresh-stateless-thread-{self.turn}",
+            snapshot_id=snapshot["snapshot_id"],
+            trigger_id=trigger_id,
+            request_artifact_ref=f"test/{turn_record}-request.json",
+            request_sha256="c" * 64,
+            wire_artifact_ref=f"test/{turn_record}-wire.jsonl",
+        )
+        self.store.complete_turn(
+            turn_record,
+            turn_id=turn_record,
+            status="completed_valid",
+            response_artifact_ref=f"test/{turn_record}-response.json",
+            response_sha256="d" * 64,
+            wire_sha256="e" * 64,
+        )
+        return DirectorEvidence(
+            decision=decision,
+            validation=validation,
+            session_record_id="stale-session",
+            turn_record_ids=(turn_record,),
+            thread_id=f"fresh-stateless-thread-{self.turn}",
+            turn_id=turn_record,
+        )
+
+
 class ActiveResearchOrchestratorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_stale_candidate_gets_one_fresh_replan_and_continues(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = ResearchStore(root / "campaign.sqlite3")
+            manager = LaneManager(
+                root,
+                max_active_lanes=2,
+                telemetry_windows=8,
+            )
+            store.create_campaign(
+                campaign_id="campaign-stale",
+                target="erdos_gyarfas",
+                target_definition_sha256="a" * 64,
+                stop_mode="until_success",
+                deadline_at=None,
+            )
+            store.create_lane(
+                lane_id="lane-stale",
+                campaign_id="campaign-stale",
+                target="erdos_gyarfas",
+                parent_lane_id=None,
+                parent_checkpoint_ref=None,
+                action_id="bootstrap",
+                algorithm="simulated_annealing",
+                graph_family="connected_cubic",
+                parameters=lane_parameters("simulated_annealing"),
+                seed_lineage=[1],
+                resource_share=1.0,
+                lease_expires_at=None,
+            )
+            store.mark_lane_running("lane-stale")
+            graph6 = BitGraph.from_edges(
+                4,
+                (
+                    (0, 1),
+                    (0, 2),
+                    (0, 3),
+                    (1, 2),
+                    (1, 3),
+                    (2, 3),
+                ),
+            ).to_graph6()
+            store.retain_campaign_candidate(
+                candidate_id="candidate-stale",
+                campaign_id="campaign-stale",
+                lane_id="lane-stale",
+                lane_version=0,
+                checkpoint_ref=None,
+                graph6=graph6,
+                graph_sha256=hashlib.sha256(
+                    graph6.encode("ascii")
+                ).hexdigest(),
+                score={"ordering_key": [0, 0, 0, 0, 0]},
+                artifact_ref="candidates/candidate-stale.graph6",
+                artifact_sha256="f" * 64,
+            )
+            dispatcher = LaneActionDispatcher(
+                store=store,
+                manager=manager,
+                campaign_id="campaign-stale",
+            )
+            provider = StaleCandidateReplanProvider(store)
+            orchestrator = ActiveResearchOrchestrator(
+                store=store,
+                manager=manager,
+                dispatcher=dispatcher,
+                snapshots=SnapshotBuilder(
+                    store=store,
+                    manager=manager,
+                    campaign_id="campaign-stale",
+                    campaign_dir=root,
+                ),
+                provider=provider,
+                triggers=TriggerEngine(debounce_seconds=0),
+                campaign_id="campaign-stale",
+                inference_poll_seconds=0.005,
+            )
+            try:
+                orchestrator.bootstrap()
+                result = await orchestrator.run_due_cycle()
+                self.assertEqual(result.replan_count, 1)
+                self.assertFalse(result.replan_exhausted)
+                self.assertEqual(
+                    result.action_statuses["verify-now-stale"],
+                    "stale_target",
+                )
+                self.assertEqual(
+                    result.action_statuses["review-after-stale"],
+                    "accepted",
+                )
+                self.assertTrue(provider.saw_feedback)
+                self.assertEqual(
+                    store.campaign("campaign-stale")["state"], "running"
+                )
+                stale = store.connection.execute(
+                    """
+                    SELECT validation_detail FROM director_actions
+                    WHERE action_id='verify-now-stale'
+                    """
+                ).fetchone()
+                detail = json.loads(stale["validation_detail"])
+                self.assertEqual(
+                    detail["current_executable_candidate_ids"], []
+                )
+                self.assertIsNone(
+                    store.connection.execute(
+                        """
+                        SELECT 1 FROM director_action_outcomes
+                        WHERE action_id='verify-now-stale'
+                        """
+                    ).fetchone()
+                )
+            finally:
+                manager.shutdown()
+                store.close()
+
     async def test_search_continues_and_next_turn_receives_effect(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

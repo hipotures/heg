@@ -2,6 +2,46 @@
 
 Last implementation audit: **2026-07-25**.
 
+## Campaign execution attempts, candidate lifetime, and scientific memory
+
+SQLite schema v15 separates a durable scientific campaign from immutable
+execution attempts. Start and Resume record attempt reason, code commit,
+requested/effective application resources, incremental wall time, starting
+memory/checkpoints, inherited and local counters, provenance, and terminal
+outcome. The campaign ID and scientific contract remain stable while CPU
+worker slots, active lanes, lane/verifier memory, verifier concurrency, and
+queue bounds may change per attempt. Resume supports operator, budget,
+repaired-infrastructure, interrupted-process, and host-restart continuity and
+rejects live, certified, or scientifically invalidated campaigns.
+
+Candidate-target actions now validate against the current executable registry,
+transactionally create an immutable graph snapshot and durable pin, and make
+M4 consume that snapshot. Pinned candidates cannot be pruned or deleted.
+Pins release only after all references are terminal. A stale target is
+persisted specifically, never executed, and permits one fresh stateless replan
+with the current valid registry. Historical stale actions are excluded from
+Resume execution.
+
+Deterministic scientific-memory snapshots bound the canonical Director state
+at 32,768 bytes, compact at a 24,576-byte soft threshold, and snapshot every
+five valid cycles plus every terminal/Resume boundary. Exact-verifier facts
+and current executable IDs are non-droppable; full raw history remains in
+SQLite/artifacts. Every Director turn and execution attempt records the
+snapshot it used.
+
+The production state machine completed a model-free 65+65 second continuation:
+the same campaign advanced from 69,995 to 140,918 cumulative evaluations,
+reused two verified checkpoints and its terminal memory snapshot, preserved
+four prior M4 outcomes and its hypothesis, and changed application worker
+slots from 2 to 16 without duplicate actions. Protected HTTP controls and
+Playwright CDP verify attempt history, cumulative/local metrics, repair
+acknowledgement, resource differences, and desktop/mobile Resume preview.
+The real paused campaign produces a read-only Resume preview with six valid
+checkpoints and its historical missing-candidate action excluded. No real
+model or auth access occurred. See `docs/CAMPAIGN_RESUME.md`,
+`docs/CAMPAIGN_SCIENTIFIC_MEMORY.md`, and
+`docs/reports/CAMPAIGN_RESUME_AND_MEMORY_PHASE_A.md`.
+
 ## First real graph campaign authorization gate
 
 The production campaign CLI now has a deterministic `prepare` boundary for a

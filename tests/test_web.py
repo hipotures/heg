@@ -284,6 +284,145 @@ class WebAssetsTests(unittest.TestCase):
             server.server_close()
             thread.join(timeout=2)
 
+    def test_campaign_resume_preview_is_protected_continuity_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            campaign_id = "campaign-resume-ui"
+            campaign_dir = workspace / "research-campaigns" / campaign_id
+            atomic_write_json(
+                campaign_dir / "campaign-plan.json",
+                {
+                    "campaign_id": campaign_id,
+                    "director": {
+                        "model": "gpt-5.6-luna",
+                        "reasoning_effort": "high",
+                        "context_mode": "stateless_turns",
+                    },
+                    "search_limits": {
+                        "cpu_workers": 2,
+                        "maximum_active_lanes": 2,
+                        "lane_memory_limit_bytes": 268_435_456,
+                    },
+                    "verification_limits": {
+                        "maximum_concurrent_jobs": 1,
+                        "verifier_memory_limit_bytes": 268_435_456,
+                        "maximum_queue_depth": 16,
+                    },
+                    "scientific_memory": {
+                        "scientific_state_soft_limit_bytes": 24_576,
+                        "scientific_state_hard_limit_bytes": 32_768,
+                        "scientific_snapshot_interval_cycles": 5,
+                    },
+                },
+            )
+            with ResearchStore(workspace / "results.sqlite3") as store:
+                store.create_campaign(
+                    campaign_id=campaign_id,
+                    target="erdos_gyarfas",
+                    target_definition_sha256="a" * 64,
+                    stop_mode="time_limit",
+                    deadline_at="2026-07-25T00:01:00Z",
+                )
+                store.set_campaign_coordination_state(
+                    campaign_id,
+                    expected_version=0,
+                    state="paused_fault",
+                    fault_kind="InfrastructureFault",
+                    fault_detail="preserved fault",
+                )
+            atomic_write_json(
+                workspace / "active-research-campaign.json",
+                {"campaign_id": campaign_id, "pid": 0},
+            )
+            server = create_server(
+                workspace, "127.0.0.1", 0, token="resume-secret"
+            )
+            thread = Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            connection = HTTPConnection(*server.server_address, timeout=2)
+            body = json.dumps(
+                {
+                    "campaign_id": campaign_id,
+                    "additional_time": "2h",
+                    "cpu_workers": 16,
+                    "maximum_active_lanes": 8,
+                    "lane_memory_bytes": 536_870_912,
+                    "verifier_concurrency": 2,
+                    "repair_acknowledgement": "repaired in offline commit",
+                }
+            )
+            connection.request(
+                "POST",
+                "/api/research-campaign/resume-preview",
+                body=body,
+                headers={"Content-Type": "application/json"},
+            )
+            response = connection.getresponse()
+            self.assertEqual(response.status, 401)
+            response.read()
+            connection.request(
+                "POST",
+                "/api/research-campaign/resume-preview",
+                body=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": "Bearer resume-secret",
+                },
+            )
+            response = connection.getresponse()
+            self.assertEqual(response.status, 200)
+            preview = json.loads(response.read())
+            self.assertEqual(preview["campaign_id"], campaign_id)
+            self.assertEqual(preview["proposed_attempt_index"], 1)
+            self.assertEqual(
+                preview["requested_resources"]["maximum_active_lanes"], 8
+            )
+            self.assertEqual(
+                preview["effective_resources"]["maximum_active_lanes"], 8
+            )
+            self.assertEqual(
+                preview["effective_resources"]["cpu_workers"], 16
+            )
+            self.assertEqual(preview["side_effects"]["model_inferences"], 0)
+            self.assertEqual(preview["side_effects"]["auth_accesses"], 0)
+            with ResearchStore(workspace / "results.sqlite3") as store:
+                self.assertEqual(
+                    store.campaign(campaign_id)["state"], "paused_fault"
+                )
+                self.assertEqual(store.execution_attempts(campaign_id), [])
+            auth = (
+                workspace
+                / ".sglab"
+                / "research-campaigns"
+                / campaign_id
+                / "runtime-groups"
+                / "director"
+                / "director"
+                / "codex-home"
+                / "auth.json"
+            )
+            auth.parent.mkdir(parents=True)
+            auth.write_text("{}\n", encoding="utf-8")
+            with patch("sglab.web.Popen") as launch:
+                launch.return_value.pid = 4312
+                launch.return_value.poll.return_value = None
+                status, started = server.resume_campaign(
+                    json.loads(body)
+                )
+                self.assertEqual(status, 202)
+                self.assertEqual(started["campaign_id"], campaign_id)
+                command = launch.call_args.args[0]
+                self.assertIn("resume", command)
+                self.assertIn("--additional-time", command)
+                self.assertIn("2h", command)
+                self.assertIn("--cpu-workers", command)
+                self.assertIn("16", command)
+                self.assertIn("--max-active-lanes", command)
+                self.assertIn("8", command)
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
 
 if __name__ == "__main__":
     unittest.main()

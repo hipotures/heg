@@ -32,12 +32,24 @@ from ..targets import TARGETS
 from .actions import LaneActionDispatcher
 from .app_server_client import AppServerClient, AppServerConfig
 from .app_server_protocol import generate_protocol_preflight
-from .auth import auth_is_imported
+from .auth import (
+    auth_is_imported,
+    director_home,
+    import_authorized_auth,
+)
 from .candidates import CandidateArchive
 from .context import (
     CONTEXT_RECOMMENDATION_BASIS,
     DEFAULT_DIRECTOR_CONTEXT_MODE,
     DirectorContextMode,
+)
+from .continuity import (
+    CampaignResources,
+    ScientificMemoryPolicy,
+    DEFAULT_SCIENTIFIC_SNAPSHOT_INTERVAL,
+    DEFAULT_SCIENTIFIC_STATE_HARD_BYTES,
+    DEFAULT_SCIENTIFIC_STATE_SOFT_BYTES,
+    repository_commit,
 )
 from .diagnostics import ScientificActionDispatcher
 from .director import ActiveDirector
@@ -49,7 +61,13 @@ from .providers import (
     SerialAppServerDecisionProvider,
     SyntheticControlProvider,
 )
+from .protocol import canonical_json
 from .recovery import CampaignRecovery
+from .resume import (
+    active_campaign_process,
+    campaign_plan,
+    proposed_attempt_id,
+)
 from .snapshot import SnapshotBuilder
 from .store import ResearchStore, new_id
 from .telemetry import TelemetrySeries
@@ -61,10 +79,20 @@ TERMINAL_STATES = {
     "succeeded_certified_counterexample",
     "completed_deadline_reached",
     "stopped_by_operator",
+    "budget_exhausted",
+    "director_replan_exhausted",
+    "scientifically_invalidated",
 }
-CONTROL_ACTIONS = {"PAUSE", "RESUME", "STOP"}
-CONTROLLER_MODES = {"active_ai", "serial_ai", "static", "random"}
-CAMPAIGN_PLAN_SCHEMA_VERSION = "1.0"
+ATTEMPT_STOP_STATES = TERMINAL_STATES | {"paused_by_operator", "paused_fault"}
+CONTROL_ACTIONS = {"PAUSE", "STOP"}
+CONTROLLER_MODES = {
+    "active_ai",
+    "serial_ai",
+    "static",
+    "random",
+    "continuity_demo",
+}
+CAMPAIGN_PLAN_SCHEMA_VERSION = "1.1"
 PRODUCTION_DIRECTOR_MODEL = "gpt-5.6-luna"
 PRODUCTION_DIRECTOR_EFFORT = "high"
 PRODUCTION_CONTEXT_MODE = DirectorContextMode.STATELESS_TURNS
@@ -155,6 +183,17 @@ def campaign_application_data(
     return _campaign_private_root(workspace, campaign_id) / "runtime-groups" / "director"
 
 
+def campaign_attempt_application_data(
+    workspace: Path, campaign_id: str, attempt_id: str
+) -> Path:
+    return (
+        _campaign_private_root(workspace, campaign_id)
+        / "attempts"
+        / attempt_id
+        / "application-data"
+    )
+
+
 def _prepared_plan_path(workspace: Path, campaign_id: str) -> Path:
     return (
         workspace.resolve()
@@ -225,7 +264,7 @@ def prepare_campaign_plan(
                 "turn_timeout_seconds": PRODUCTION_TURN_TIMEOUT_SECONDS,
                 "maximum_replans_per_state": 1,
                 "replan_context": "fresh_stateless_thread",
-                "automatic_compaction": False,
+                "automatic_compaction": True,
                 "model_tools": False,
                 "shell_or_code_requests": False,
                 "provider_recovery_attempts": 0,
@@ -241,6 +280,7 @@ def prepare_campaign_plan(
                 "infrastructure_protocol_resource_auth": "fail_closed",
             },
             "search_limits": {
+                "cpu_workers": maximum_lanes,
                 "maximum_active_lanes": maximum_lanes,
                 "maximum_resource_share_per_lane": 1.0,
                 "maximum_aggregate_resource_share": float(maximum_lanes),
@@ -250,6 +290,18 @@ def prepare_campaign_plan(
                 "telemetry_windows_per_lane": 120,
                 "checkpoints_per_lane": 8,
                 "pinned_checkpoints": 128,
+            },
+            "scientific_memory": {
+                "scientific_state_soft_limit_bytes": (
+                    DEFAULT_SCIENTIFIC_STATE_SOFT_BYTES
+                ),
+                "scientific_state_hard_limit_bytes": (
+                    DEFAULT_SCIENTIFIC_STATE_HARD_BYTES
+                ),
+                "scientific_snapshot_interval_cycles": (
+                    DEFAULT_SCIENTIFIC_SNAPSHOT_INTERVAL
+                ),
+                "compactor": "deterministic_projection_v1",
             },
             "verification_limits": {
                 "maximum_queue_depth": PRODUCTION_VERIFICATION_QUEUE,
@@ -301,9 +353,10 @@ def prepare_campaign_plan(
                 (campaign_id, created_at, updated_at, target,
                  target_definition_sha256, state, state_version, stop_mode,
                  deadline_at, effective_context_mode,
-                 context_recommendation_basis)
+                 context_recommendation_basis, initial_state_sha256,
+                 initial_resource_plan_json)
                 VALUES (?, ?, ?, 'erdos_gyarfas', ?, 'prepared', 0,
-                        'time_limit', NULL, ?, ?)
+                        'time_limit', NULL, ?, ?, ?, ?)
                 """,
                 (
                     campaign_id,
@@ -312,6 +365,18 @@ def prepare_campaign_plan(
                     plan["target_definition_sha256"],
                     PRODUCTION_CONTEXT_MODE.value,
                     CONTEXT_RECOMMENDATION_BASIS,
+                    hashlib.sha256(
+                        canonical_json(
+                            {
+                                "target": "erdos_gyarfas",
+                                "hypotheses": [],
+                                "lanes": [],
+                                "candidates": [],
+                            },
+                            max_bytes=4096,
+                        )
+                    ).hexdigest(),
+                    json.dumps(plan["search_limits"], sort_keys=True),
                 ),
             )
         atomic_write_json(
@@ -470,16 +535,27 @@ def campaign_status(workspace: Path, campaign_id: str | None = None) -> dict[str
             """,
             (selected,),
         ).fetchone()
+        turn_columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(app_server_turns)")
+        }
+        attempt_turn_fields = (
+            ", execution_attempt_id, memory_snapshot_id"
+            if {"execution_attempt_id", "memory_snapshot_id"}.issubset(
+                turn_columns
+            )
+            else ""
+        )
         turns = [
             dict(row)
             for row in connection.execute(
-                """
+                f"""
                 SELECT turn_record_id, thread_id, turn_id, status, wall_seconds,
                        input_tokens, cached_input_tokens,
                        cache_write_input_tokens, output_tokens,
                        reasoning_output_tokens, total_tokens, started_at,
                        completed_at, error_kind, final_agent_item_id,
-                       thread_lifecycle
+                       thread_lifecycle {attempt_turn_fields}
                 FROM app_server_turns WHERE campaign_id=?
                 ORDER BY started_at DESC, rowid DESC LIMIT 10
                 """,
@@ -603,10 +679,118 @@ def campaign_status(workspace: Path, campaign_id: str | None = None) -> dict[str
             """,
             (selected,),
         ).fetchone()
+        tables = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        attempts = []
+        if "campaign_execution_attempts" in tables:
+            for row in connection.execute(
+                """
+                SELECT * FROM campaign_execution_attempts
+                WHERE campaign_id=? ORDER BY attempt_index DESC LIMIT 32
+                """,
+                (selected,),
+            ):
+                value = dict(row)
+                for key in (
+                    "requested_resource_json",
+                    "effective_resource_json",
+                    "starting_checkpoint_refs_json",
+                    "inherited_counters_json",
+                    "attempt_counters_json",
+                    "authorization_provenance_json",
+                    "runtime_provenance_json",
+                ):
+                    value[key.removesuffix("_json")] = json.loads(
+                        str(value.pop(key))
+                    )
+                attempts.append(value)
+        memory = None
+        if "campaign_memory_snapshots" in tables:
+            row = connection.execute(
+                """
+                SELECT memory_snapshot_id, version, parent_snapshot_id,
+                       byte_size, estimated_token_count, sha256,
+                       creation_trigger, source_high_water_json,
+                       source_record_counts_json, created_at
+                FROM campaign_memory_snapshots
+                WHERE campaign_id=? ORDER BY version DESC LIMIT 1
+                """,
+                (selected,),
+            ).fetchone()
+            if row is not None:
+                memory = {
+                    **dict(row),
+                    "source_high_water": json.loads(
+                        str(row["source_high_water_json"])
+                    ),
+                    "source_record_counts": json.loads(
+                        str(row["source_record_counts_json"])
+                    ),
+                }
+                memory.pop("source_high_water_json")
+                memory.pop("source_record_counts_json")
+        cumulative = {
+            "director_turns": int(
+                connection.execute(
+                    """
+                    SELECT count(*) FROM app_server_turns
+                    WHERE campaign_id=?
+                    """,
+                    (selected,),
+                ).fetchone()[0]
+            ),
+            "server_tokens": int(
+                connection.execute(
+                    """
+                    SELECT coalesce(sum(total_tokens),0)
+                    FROM app_server_turns WHERE campaign_id=?
+                    """,
+                    (selected,),
+                ).fetchone()[0]
+            ),
+            "actions": int(
+                connection.execute(
+                    """
+                    SELECT count(*) FROM director_actions
+                    WHERE campaign_id=?
+                    """,
+                    (selected,),
+                ).fetchone()[0]
+            ),
+            "evaluations": sum(
+                int(lane["telemetry_high_water"] or 0) for lane in lanes
+            ),
+        }
+        active_attempt = next(
+            (
+                attempt
+                for attempt in attempts
+                if attempt["terminal_at"] is None
+            ),
+            None,
+        )
+        if active_attempt is not None:
+            inherited = active_attempt["inherited_counters"]
+            active_attempt["live_attempt_counters"] = {
+                key: cumulative.get(key, 0) - inherited.get(key, 0)
+                for key in cumulative
+            }
+        plan_summary = read_json(
+            _prepared_plan_path(root, str(selected)), default={}
+        )
         try:
             pid = int(process.get("pid", 0))
         except (TypeError, ValueError):
             pid = 0
+        campaign_state = str(campaign["state"])
+        host_restart_resume = (
+            campaign_state == "running"
+            and not active_campaign_process(root, str(selected))
+        )
         return {
             **dict(campaign),
             "auth_imported": auth_is_imported(auth_data),
@@ -626,6 +810,33 @@ def campaign_status(workspace: Path, campaign_id: str | None = None) -> dict[str
             "verification": {
                 key: int(value or 0) for key, value in verification.items()
             },
+            "execution_attempts": attempts,
+            "current_attempt": (
+                active_attempt
+            ),
+            "cumulative_counters": cumulative,
+            "scientific_memory": memory,
+            "maximum_director_turns": (
+                plan_summary.get("director", {}).get("maximum_cycles")
+                or plan_summary.get("director", {}).get(
+                    "maximum_turns_including_replans"
+                )
+            ),
+            "resume_supported": (
+                campaign_state
+                in {
+                    "paused_by_operator",
+                    "stopped_by_operator",
+                    "completed_deadline_reached",
+                    "deadline_reached",
+                    "budget_exhausted",
+                    "paused_fault",
+                    "interrupted",
+                    "infrastructure_failure",
+                }
+                or host_restart_resume
+            ),
+            "host_restart_resume": host_restart_resume,
             "resources": {
                 "coordinator_rss_bytes": current_rss_bytes(pid) if pid > 0 else 0,
                 "database_bytes": sqlite_size_bytes(database_path),
@@ -672,6 +883,10 @@ class ResearchCampaignRunner:
         maximum_director_turns: int | None = None,
         context_mode: DirectorContextMode | str = DEFAULT_DIRECTOR_CONTEXT_MODE,
         prepared_plan: dict[str, Any] | None = None,
+        resume_resource_overrides: dict[str, Any] | None = None,
+        repair_acknowledgement: str | None = None,
+        attempt_reason: str | None = None,
+        code_commit: str | None = None,
     ):
         if stop_mode not in {"time_limit", "until_success"}:
             raise ValueError("invalid stop mode")
@@ -700,6 +915,13 @@ class ResearchCampaignRunner:
         self.maximum_director_turns = maximum_director_turns
         self.context_mode = DirectorContextMode(context_mode)
         self.prepared_plan = prepared_plan
+        self.resume_resource_overrides = resume_resource_overrides or {}
+        self.repair_acknowledgement = repair_acknowledgement
+        self.attempt_reason = attempt_reason
+        self.code_commit = code_commit or repository_commit(
+            Path(__file__).resolve().parents[3]
+        )
+        self._effective_campaign_plan = prepared_plan
         self._last_resource_sample = 0.0
         self._resource_peaks: dict[str, int] = {
             RUNTIME_SCRATCH: 0,
@@ -729,16 +951,46 @@ class ResearchCampaignRunner:
             return asyncio.run(self._run())
 
     async def _run(self) -> dict[str, Any]:
-        application_data = (
+        is_resume = self.campaign_id is not None and self.prepared_plan is None
+        durable_plan = self.prepared_plan
+        if is_resume:
+            durable_plan = campaign_plan(
+                self.workspace, str(self.campaign_id)
+            )
+            director_contract = durable_plan.get("director") or {}
+            expected_context = str(
+                director_contract.get(
+                    "context_mode", DirectorContextMode.STATELESS_TURNS.value
+                )
+            )
+            if self.context_mode.value != expected_context:
+                raise ValueError(
+                    "Resume cannot change the Director context mode"
+                )
+            model_contract = str(director_contract.get("model") or "")
+            if model_contract.endswith("-control"):
+                expected_control = model_contract.removesuffix("-control")
+                if self.controller_mode != expected_control:
+                    raise ValueError(
+                        "Resume cannot change the fake Director contract"
+                    )
+            elif self.controller_mode not in {"active_ai", "serial_ai"}:
+                raise ValueError(
+                    "Resume cannot replace the authenticated Director"
+                )
+        self._effective_campaign_plan = durable_plan
+        credential_application_data = (
             campaign_application_data(
                 self.workspace,
-                str(self.prepared_plan["campaign_id"]),
+                str((durable_plan or {})["campaign_id"]),
             )
-            if self.prepared_plan is not None
+            if durable_plan is not None
             else self.workspace / ".sglab"
         )
         uses_app_server = self.controller_mode in {"active_ai", "serial_ai"}
-        if uses_app_server and not auth_is_imported(application_data):
+        if uses_app_server and not auth_is_imported(
+            credential_application_data
+        ):
             raise RuntimeError(
                 "Director authentication is not imported into the exact "
                 "campaign runtime"
@@ -754,10 +1006,6 @@ class ResearchCampaignRunner:
                 },
             }
         )
-        if uses_app_server:
-            atomic_write_json(
-                application_data / "director" / "preflight.json", preflight
-            )
         store = ResearchStore(self.workspace / "results.sqlite3")
         campaign_id = self.campaign_id or new_id("campaign")
         campaign_dir = self.workspace / "research-campaigns" / campaign_id
@@ -773,19 +1021,41 @@ class ResearchCampaignRunner:
                     self.prepared_plan["plan_fingerprint"]
                 ),
             )
-        search_plan = (
-            self.prepared_plan["search_limits"]
-            if self.prepared_plan is not None
-            else {}
+        search_plan = (durable_plan or {}).get("search_limits", {})
+        resources = CampaignResources.from_plan(
+            durable_plan,
+            overrides=self.resume_resource_overrides,
+        )
+        effective_resources = resources.as_dict()
+        requested_resources = dict(effective_resources)
+        if "maximum_active_lanes" in self.resume_resource_overrides:
+            requested_resources["maximum_active_lanes"] = int(
+                self.resume_resource_overrides["maximum_active_lanes"]
+            )
+        memory_plan = (durable_plan or {}).get("scientific_memory", {})
+        memory_policy = ScientificMemoryPolicy(
+            soft_limit_bytes=int(
+                memory_plan.get(
+                    "scientific_state_soft_limit_bytes",
+                    DEFAULT_SCIENTIFIC_STATE_SOFT_BYTES,
+                )
+            ),
+            hard_limit_bytes=int(
+                memory_plan.get(
+                    "scientific_state_hard_limit_bytes",
+                    DEFAULT_SCIENTIFIC_STATE_HARD_BYTES,
+                )
+            ),
+            snapshot_interval_cycles=int(
+                memory_plan.get(
+                    "scientific_snapshot_interval_cycles",
+                    DEFAULT_SCIENTIFIC_SNAPSHOT_INTERVAL,
+                )
+            ),
         )
         manager = LaneManager(
             campaign_dir,
-            max_active_lanes=int(
-                search_plan.get(
-                    "maximum_active_lanes",
-                    max(2, min(8, recommended_workers(512))),
-                )
-            ),
+            max_active_lanes=resources.maximum_active_lanes,
             event_capacity=int(
                 search_plan.get("event_queue_capacity", 512)
             ),
@@ -802,16 +1072,14 @@ class ResearchCampaignRunner:
                 search_plan.get("pinned_checkpoints", 128)
             ),
             memory_limit_bytes=int(
-                search_plan.get(
-                    "lane_memory_limit_bytes",
-                    PRODUCTION_LANE_MEMORY_BYTES,
-                )
+                resources.lane_memory_bytes
             ),
         )
         dispatcher = LaneActionDispatcher(
             store=store, manager=manager, campaign_id=campaign_id
         )
         resume_thread_id: str | None = None
+        attempt_id: str | None = None
         if self.prepared_plan is not None:
             deadline = datetime.now(UTC) + timedelta(
                 seconds=float(self.duration_seconds)
@@ -859,11 +1127,186 @@ class ResearchCampaignRunner:
                     CONTEXT_RECOMMENDATION_BASIS if uses_app_server else None
                 ),
             )
+            generated_plan = {
+                "schema_version": CAMPAIGN_PLAN_SCHEMA_VERSION,
+                "campaign_id": campaign_id,
+                "target": self.target,
+                "target_definition_sha256": target_definition_sha256(
+                    self.target
+                ),
+                "director": {
+                    "model": (
+                        PRODUCTION_DIRECTOR_MODEL
+                        if uses_app_server
+                        else f"{self.controller_mode}-control"
+                    ),
+                    "reasoning_effort": (
+                        PRODUCTION_DIRECTOR_EFFORT
+                        if uses_app_server
+                        else "none"
+                    ),
+                    "context_mode": self.context_mode.value,
+                    "maximum_turns_including_replans": (
+                        self.maximum_director_turns
+                    ),
+                },
+                "search_limits": {
+                    **search_plan,
+                    "cpu_workers": resources.cpu_workers,
+                    "maximum_active_lanes": (
+                        resources.maximum_active_lanes
+                    ),
+                    "maximum_aggregate_resource_share": (
+                        resources.maximum_aggregate_resource_share
+                    ),
+                    "lane_memory_limit_bytes": (
+                        resources.lane_memory_bytes
+                    ),
+                },
+                "verification_limits": {
+                    "maximum_queue_depth": (
+                        resources.verification_queue_depth
+                    ),
+                    "maximum_concurrent_jobs": (
+                        resources.verifier_concurrency
+                    ),
+                    "verifier_memory_limit_bytes": (
+                        resources.verifier_memory_bytes
+                    ),
+                },
+                "scientific_memory": {
+                    "scientific_state_soft_limit_bytes": (
+                        memory_policy.soft_limit_bytes
+                    ),
+                    "scientific_state_hard_limit_bytes": (
+                        memory_policy.hard_limit_bytes
+                    ),
+                    "scientific_snapshot_interval_cycles": (
+                        memory_policy.snapshot_interval_cycles
+                    ),
+                },
+                "runtime_limits": {},
+            }
+            atomic_write_json(
+                campaign_dir / "campaign-plan.json", generated_plan
+            )
         else:
             campaign = store.campaign(campaign_id)
+            resume_state_version = int(campaign["state_version"])
+            if self.target != str(campaign["target"]):
+                raise ValueError("Resume cannot change the scientific target")
+            if durable_plan.get("target") != campaign["target"]:
+                raise ValueError("durable campaign target contract mismatch")
+            if (
+                durable_plan.get("target_definition_sha256")
+                != campaign["target_definition_sha256"]
+            ):
+                raise ValueError(
+                    "durable campaign definition hash mismatch"
+                )
             self.target = str(campaign["target"])
-            if campaign["state"] in TERMINAL_STATES:
-                raise RuntimeError("terminal campaigns cannot be resumed")
+            store.backfill_legacy_execution_attempt(
+                campaign_id,
+                code_commit=str(
+                    (durable_plan or {}).get(
+                        "prepared_with_commit", "legacy-unknown"
+                    )
+                ),
+                resource_contract=CampaignResources.from_plan(
+                    durable_plan
+                ).as_dict(),
+            )
+            stale_actions = store.terminalize_stale_candidate_actions(
+                campaign_id
+            )
+            pre_resume_builder = SnapshotBuilder(
+                store=store,
+                manager=manager,
+                campaign_id=campaign_id,
+                campaign_dir=campaign_dir,
+                memory_policy=memory_policy,
+            )
+            starting_memory = store.latest_memory_snapshot(campaign_id)
+            pre_resume_builder.publish(memory_trigger="resume")
+            additional = float(self.duration_seconds or 3600)
+            deadline = (
+                datetime.now(UTC) + timedelta(seconds=additional)
+                if campaign["stop_mode"] == "time_limit"
+                else None
+            )
+            previous_state = store.resume_campaign(
+                campaign_id,
+                deadline_at=(
+                    deadline.isoformat(timespec="seconds").replace(
+                        "+00:00", "Z"
+                    )
+                    if deadline is not None
+                    else None
+                ),
+                repair_acknowledgement=self.repair_acknowledgement,
+                host_restart_recovery=campaign["state"] == "running",
+            )
+            reason = self.attempt_reason or (
+                "host_restart_recovery"
+                if previous_state == "running"
+                else (
+                    "additional_budget"
+                    if previous_state
+                    in {
+                        "completed_deadline_reached",
+                        "deadline_reached",
+                        "budget_exhausted",
+                    }
+                    else (
+                        "infrastructure_recovery"
+                        if previous_state
+                        in {"paused_fault", "infrastructure_failure"}
+                        else "operator_resume"
+                    )
+                )
+            )
+            latest_attempt = store.latest_execution_attempt(campaign_id)
+            next_index = (
+                int(latest_attempt["attempt_index"]) + 1
+                if latest_attempt is not None
+                else 1
+            )
+            attempt_id = proposed_attempt_id(
+                campaign_id=campaign_id,
+                attempt_index=next_index,
+                state_version=resume_state_version,
+                code_commit=self.code_commit,
+                additional_wall_seconds=additional,
+                resources=effective_resources,
+            )
+            store.create_execution_attempt(
+                attempt_id=attempt_id,
+                campaign_id=campaign_id,
+                reason=reason,
+                code_commit=self.code_commit,
+                requested_resources=requested_resources,
+                effective_resources=effective_resources,
+                additional_wall_seconds=additional,
+                starting_memory_snapshot_id=(
+                    str(starting_memory["memory_snapshot_id"])
+                    if starting_memory is not None
+                    else None
+                ),
+                starting_memory_sha256=(
+                    str(starting_memory["sha256"])
+                    if starting_memory is not None
+                    else None
+                ),
+                starting_checkpoint_refs=store.checkpoint_references(
+                    campaign_id
+                ),
+                repair_acknowledgement=self.repair_acknowledgement,
+                runtime_provenance={
+                    "fresh_process": True,
+                    "historical_stale_actions_terminalized": stale_actions,
+                },
+                process_id=os.getpid(),
+            )
             recovery = CampaignRecovery(
                 store=store,
                 manager=manager,
@@ -872,12 +1315,40 @@ class ResearchCampaignRunner:
                 campaign_dir=campaign_dir,
             ).recover()
             resume_thread_id = recovery.resume_thread_id
-            if campaign["state"] != "running":
-                store.set_campaign_coordination_state(
-                    campaign_id,
-                    expected_version=int(store.campaign(campaign_id)["state_version"]),
-                    state="running",
-                )
+            manager.resume_all()
+            store.activate_recovered_lanes(
+                list(recovery.restored_lane_ids)
+            )
+        if attempt_id is None:
+            attempt_id = new_id("execution-attempt")
+            store.create_execution_attempt(
+                attempt_id=attempt_id,
+                campaign_id=campaign_id,
+                reason="initial_start",
+                code_commit=self.code_commit,
+                requested_resources=requested_resources,
+                effective_resources=effective_resources,
+                additional_wall_seconds=float(self.duration_seconds or 0),
+                starting_memory_snapshot_id=None,
+                starting_memory_sha256=None,
+                starting_checkpoint_refs=[],
+                process_id=os.getpid(),
+            )
+        application_data = campaign_attempt_application_data(
+            self.workspace, campaign_id, attempt_id
+        )
+        attempt_private_root = application_data.parent
+        attempt_private_root.mkdir(parents=True, exist_ok=False, mode=0o700)
+        attempt_private_root.chmod(0o700)
+        self._attempt_private_root = attempt_private_root
+        if uses_app_server:
+            import_authorized_auth(
+                director_home(credential_application_data),
+                application_data,
+            )
+            atomic_write_json(
+                application_data / "director" / "preflight.json", preflight
+            )
         pointer = {
             "campaign_id": campaign_id,
             "pid": os.getpid(),
@@ -893,16 +1364,8 @@ class ResearchCampaignRunner:
             ).encode("ascii")
         ).hexdigest()
         if uses_app_server:
-            director_plan = (
-                self.prepared_plan["director"]
-                if self.prepared_plan is not None
-                else {}
-            )
-            runtime_plan = (
-                self.prepared_plan["runtime_limits"]
-                if self.prepared_plan is not None
-                else {}
-            )
+            director_plan = (durable_plan or {}).get("director", {})
+            runtime_plan = (durable_plan or {}).get("runtime_limits", {})
             client_config = AppServerConfig(
                 application_data=application_data,
                 launcher=(self.codex,),
@@ -938,7 +1401,7 @@ class ResearchCampaignRunner:
                     )
                 ),
                 allow_retrying_errors=(
-                    False if self.prepared_plan is not None else True
+                    False if durable_plan is not None else True
                 ),
             )
 
@@ -953,7 +1416,7 @@ class ResearchCampaignRunner:
                     protocol_schema_sha256=protocol_hash,
                     context_mode=self.context_mode,
                     enforce_model_contract=(
-                        self.prepared_plan is not None
+                        durable_plan is not None
                     ),
                 )
 
@@ -980,33 +1443,20 @@ class ResearchCampaignRunner:
             campaign_id=campaign_id,
             campaign_dir=campaign_dir,
             max_queue=int(
-                (
-                    self.prepared_plan or {}
-                ).get("verification_limits", {}).get(
-                    "maximum_queue_depth",
-                    PRODUCTION_VERIFICATION_QUEUE,
-                )
+                resources.verification_queue_depth
             ),
+            max_concurrent=resources.verifier_concurrency,
             timeout_seconds=float(
-                (
-                    self.prepared_plan or {}
-                ).get("verification_limits", {}).get(
+                (durable_plan or {}).get("verification_limits", {}).get(
                     "timeout_seconds_per_exact_path",
                     PRODUCTION_VERIFICATION_TIMEOUT_SECONDS,
                 )
             ),
             verifier_memory_bytes=int(
-                (
-                    self.prepared_plan or {}
-                ).get("verification_limits", {}).get(
-                    "verifier_memory_limit_bytes",
-                    PRODUCTION_VERIFIER_MEMORY_BYTES,
-                )
+                resources.verifier_memory_bytes
             ),
             broker_memory_bytes=int(
-                (
-                    self.prepared_plan or {}
-                ).get("verification_limits", {}).get(
+                (durable_plan or {}).get("verification_limits", {}).get(
                     "broker_memory_limit_bytes",
                     PRODUCTION_VERIFICATION_BROKER_MEMORY_BYTES,
                 )
@@ -1024,6 +1474,7 @@ class ResearchCampaignRunner:
                 manager=manager,
                 campaign_id=campaign_id,
                 campaign_dir=campaign_dir,
+                memory_policy=memory_policy,
             ),
             provider=provider,
             triggers=TriggerEngine(),
@@ -1058,9 +1509,10 @@ class ResearchCampaignRunner:
                 store.connection.execute(
                     """
                     SELECT count(*) FROM app_server_turns
-                    WHERE campaign_id=? AND status='completed_valid'
+                    WHERE campaign_id=? AND execution_attempt_id=?
+                      AND status='completed_valid'
                     """,
-                    (campaign_id,),
+                    (campaign_id, attempt_id),
                 ).fetchone()[0]
             )
             while True:
@@ -1071,9 +1523,7 @@ class ResearchCampaignRunner:
                         if not uses_app_server:
                             raise
                         recovery_attempts = int(
-                            (
-                                self.prepared_plan or {}
-                            ).get("director", {}).get(
+                            (durable_plan or {}).get("director", {}).get(
                                 "provider_recovery_attempts",
                                 3,
                             )
@@ -1092,12 +1542,14 @@ class ResearchCampaignRunner:
                         orchestrator.triggers.offer("recovery")
                     else:
                         if cycle is not None:
-                            completed_director_turns += 1
+                            completed_director_turns += (
+                                1 + int(cycle.replan_count)
+                            )
                         if director.rollover_due():
                             await director.rollover()
                     director_task = None
                 campaign = store.campaign(campaign_id)
-                if campaign["state"] in TERMINAL_STATES:
+                if campaign["state"] in ATTEMPT_STOP_STATES:
                     break
                 self._sample_runtime_resources(
                     campaign_id,
@@ -1123,13 +1575,7 @@ class ResearchCampaignRunner:
                             expected_version=int(campaign["state_version"]),
                             state="paused_by_operator",
                         )
-                    elif action == "RESUME" and campaign["state"] == "paused_by_operator":
-                        manager.resume_all()
-                        store.set_campaign_coordination_state(
-                            campaign_id,
-                            expected_version=int(campaign["state_version"]),
-                            state="running",
-                        )
+                        break
                 campaign = store.campaign(campaign_id)
                 if _deadline_reached(campaign):
                     store.finish_campaign(
@@ -1141,6 +1587,17 @@ class ResearchCampaignRunner:
                     self.maximum_director_turns is None
                     or completed_director_turns < self.maximum_director_turns
                 )
+                if (
+                    campaign["state"] == "running"
+                    and director_task is None
+                    and not turn_budget_available
+                ):
+                    store.transition_campaign(
+                        campaign_id,
+                        expected_version=int(campaign["state_version"]),
+                        state="budget_exhausted",
+                    )
+                    break
                 if (
                     campaign["state"] == "running"
                     and director_task is None
@@ -1167,11 +1624,48 @@ class ResearchCampaignRunner:
             if isinstance(task, asyncio.Task) and not task.done():
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
+            try:
+                terminal_state = store.campaign(campaign_id)["state"]
+                trigger = {
+                    "paused_by_operator": "pause",
+                    "stopped_by_operator": "stop",
+                    "completed_deadline_reached": "budget_exhaustion",
+                    "budget_exhausted": "budget_exhaustion",
+                    "director_replan_exhausted": "invalid_replan",
+                    "paused_fault": "fault",
+                    "succeeded_certified_counterexample": "certification",
+                }.get(str(terminal_state), "attempt_terminal")
+                orchestrator.snapshots.publish(memory_trigger=trigger)
+            except Exception:
+                # A terminal memory projection failure is retained as attempt
+                # provenance; it must not overwrite the original campaign fault.
+                pass
+            resumable_lane_ids = [
+                str(row["lane_id"])
+                for row in store.connection.execute(
+                    """
+                    SELECT lane_id FROM research_lanes
+                    WHERE campaign_id=? AND state IN (
+                        'starting','running','paused','stopping'
+                    )
+                    """,
+                    (campaign_id,),
+                )
+            ]
             verification.shutdown()
             manager.shutdown()
             for _ in range(max(1, 4 * len(manager.lanes))):
                 if dispatcher.poll_once(timeout=0) is None:
                     break
+            if store.campaign(campaign_id)["state"] in {
+                "paused_by_operator",
+                "paused_fault",
+                "stopped_by_operator",
+                "completed_deadline_reached",
+                "budget_exhausted",
+                "director_replan_exhausted",
+            }:
+                store.preserve_lanes_for_resume(resumable_lane_ids)
             await director.close()
             try:
                 self._sample_runtime_resources(
@@ -1183,6 +1677,21 @@ class ResearchCampaignRunner:
             except CampaignResourceError:
                 pass
             final = store.campaign(campaign_id)
+            attempt = store.latest_execution_attempt(campaign_id)
+            if (
+                attempt is not None
+                and attempt["attempt_id"] == attempt_id
+                and attempt["terminal_at"] is None
+            ):
+                store.finish_execution_attempt(
+                    attempt_id,
+                    terminal_status=str(final["state"]),
+                    terminal_reason=(
+                        str(final["fault_detail"])
+                        if final["fault_detail"]
+                        else None
+                    ),
+                )
             if final["state"] == "succeeded_certified_counterexample":
                 export_campaign(
                     store=store,
@@ -1201,15 +1710,16 @@ class ResearchCampaignRunner:
         stage: str,
         force: bool = False,
     ) -> None:
-        if self.prepared_plan is None:
+        if self._effective_campaign_plan is None:
             return
         sampled = monotonic()
         if not force and sampled - self._last_resource_sample < 0.5:
             return
         self._last_resource_sample = sampled
-        private_root = _campaign_private_root(
-            self.workspace,
-            campaign_id,
+        private_root = getattr(
+            self,
+            "_attempt_private_root",
+            _campaign_private_root(self.workspace, campaign_id),
         )
         accounting = account_execution_root(
             private_root,
@@ -1218,7 +1728,9 @@ class ResearchCampaignRunner:
                 (self.codex,)
             ),
         )
-        limits = self.prepared_plan["runtime_limits"]
+        limits = self._effective_campaign_plan.get("runtime_limits", {})
+        if not limits:
+            return
         scratch = accounting.categories[RUNTIME_SCRATCH]
         logs = accounting.categories[LOGS]
         self._resource_peaks[RUNTIME_SCRATCH] = max(
