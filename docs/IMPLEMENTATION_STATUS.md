@@ -2,6 +2,34 @@
 
 Last implementation audit: **2026-07-25**.
 
+## M7 second real comparison failed before inference
+
+Fresh authorization bound the schema-2.1/accounting-v2 Luna high-versus-xhigh
+suite to its unchanged fingerprint and exact two-start contract. The plan
+verification passed, a private runtime was prepared, and the App Server
+process started. The worker then failed closed at
+`after_app_server_start`, before thread creation, inference reservation, or
+model inference. Luna high is an infrastructure failure and Luna xhigh is
+blocked/not started. No authoritative tokens, search batches, actions, model
+tools, or ratings exist.
+
+Persisted telemetry proves that no byte quota was exceeded: scratch peaked at
+2,274,115 apparent bytes against 536,870,912, while preserved artifacts peaked
+at 4,878 against 67,108,864. Instead, the App Server created four transient
+executable-wrapper symlinks in its private `arg0` directory. Accounting
+correctly did not follow them, but worker enforcement converted any escaping
+symlink into an aggregate `runtime_scratch` quota violation. The terminal
+message and UI therefore show the false numeric comparison
+`2,274,115 > 536,870,912`.
+
+The diagnostic was persisted before shutdown, the lease was released, SQLite
+integrity and foreign keys remain clean, and final process checks show no
+worker, App Server, dashboard, or zombie. The suite is terminal and must not
+be reused. A deterministic fix for normal App Server transient symlinks and
+the misleading failure classification is required before another authorized
+comparison. See
+`docs/reports/M7_SECOND_REAL_COMPARISON_RUNTIME.md`.
+
 ## M7 comparison resource accounting repaired deterministically
 
 SQLite schema v12 and the comparison worker now separate preserved artifacts,

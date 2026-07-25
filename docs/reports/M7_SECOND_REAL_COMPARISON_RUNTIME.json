@@ -1,0 +1,190 @@
+{
+  "report_schema_version": "1.0",
+  "date": "2026-07-25",
+  "tested_commit": "e9ebe39e9ec51cec1002f4677c77eb1900a5ba9a",
+  "preparation_evidence_commit": "418f5f7",
+  "workspace": "workspace/model-comparisons-live",
+  "suite": {
+    "suite_id": "comparison-aaabfae5a010445e9d966ea50a0958a8",
+    "name": "Luna high vs xhigh — A4 resource-accounting rerun",
+    "plan_fingerprint": "a44e96f67628cb9afcacbc6c76b8f0e6e65696ba075a62c587d5f02b9b41c6d7",
+    "plan_schema_version": "2.1",
+    "resource_accounting_version": 2,
+    "status": "failed",
+    "authorization_status": "authorized",
+    "measurement_only": true,
+    "execute_decisions": false,
+    "fail_closed": true,
+    "started_at": "2026-07-25T17:58:54Z",
+    "completed_at": "2026-07-25T17:58:55Z"
+  },
+  "authorization": {
+    "authorization_id": "authorization-34993fb5e32e4a11be80fb2295d0a5bb",
+    "plan_fingerprint_matched_before_auth_access": true,
+    "maximum_inference_starts": 2,
+    "consumed_inference_starts": 0,
+    "authorized_models": [
+      "gpt-5.6-luna"
+    ],
+    "authorized_efforts": [
+      "high",
+      "xhigh"
+    ],
+    "authorized_context_modes": [
+      "stateless_turns"
+    ],
+    "credential_copy_performed": true,
+    "credential_contents_in_report": false,
+    "credential_metadata_in_report": false,
+    "credential_hash_in_report": false
+  },
+  "attempt": {
+    "attempt_id": "comparison-attempt-23651fb3ec094bdda338c98a74f43581",
+    "status": "failed",
+    "plan_verification_passed": true,
+    "app_server_process_started": true,
+    "thread_started": false,
+    "turn_started": false,
+    "inference_reservations": 0,
+    "inference_starts": 0,
+    "authoritative_server_tokens": 0,
+    "terminal_stage": "after_app_server_start",
+    "terminal_error_type": "ComparisonResourceLimitError"
+  },
+  "arms": [
+    {
+      "effective_order": 1,
+      "arm_id": "arm-14a8a736ee554229a793961f55b28b66",
+      "contract": "gpt-5.6-luna / high / stateless_turns",
+      "status": "failed",
+      "result": "infrastructure failure before thread and inference",
+      "effective_model": null,
+      "effective_reasoning_effort": null,
+      "effective_context_mode": null,
+      "final_answer_present": false,
+      "usage_present": false,
+      "schema_valid": null,
+      "semantic_valid": null,
+      "selected_action": null,
+      "executed": false
+    },
+    {
+      "effective_order": 2,
+      "arm_id": "arm-1429a6a782504ca2b8c56d5528fcd6d9",
+      "contract": "gpt-5.6-luna / xhigh / stateless_turns",
+      "status": "blocked_not_started",
+      "effective_model": null,
+      "effective_reasoning_effort": null,
+      "effective_context_mode": null,
+      "final_answer_present": false,
+      "usage_present": false,
+      "schema_valid": null,
+      "semantic_valid": null,
+      "selected_action": null,
+      "executed": false
+    }
+  ],
+  "resource_failure": {
+    "persisted_category": "runtime_scratch",
+    "enforcement_decision": "accounting_error",
+    "lifecycle_stage": "after_app_server_start",
+    "runtime_scratch_apparent_bytes": 2274115,
+    "runtime_scratch_allocated_bytes": 2420736,
+    "runtime_scratch_limit_bytes": 536870912,
+    "runtime_scratch_byte_limit_exceeded": false,
+    "preserved_artifacts_apparent_bytes": 4878,
+    "preserved_artifacts_allocated_bytes": 12288,
+    "preserved_artifacts_limit_bytes": 67108864,
+    "preserved_artifact_byte_limit_exceeded": false,
+    "largest_regular_runtime_file_apparent_bytes": 1404952,
+    "escaping_symlink_safe_labels": [
+      "app-server-tmp/arg0/apply_patch",
+      "app-server-tmp/arg0/applypatch",
+      "app-server-tmp/arg0/codex-execve-wrapper",
+      "app-server-tmp/arg0/codex-linux-sandbox"
+    ],
+    "symlinks_followed": false,
+    "symlinks_present_after_cleanup": false,
+    "active_turn_completed": false,
+    "interruption_sent": false,
+    "later_arms_blocked": true,
+    "cleanup_status": "sampled_after_cleanup",
+    "root_cause_classification": "proven",
+    "root_cause": "normal transient App Server arg0 symlink escapes are converted into an aggregate runtime_scratch quota violation",
+    "terminal_message_numeric_inequality_valid": false,
+    "ui_failure_category_is_misleading": true
+  },
+  "zero_side_effects": {
+    "model_inference_starts": 0,
+    "comparison_turns": 0,
+    "retries_reaching_inference": 0,
+    "model_tool_calls": 0,
+    "graph_search_batches": 0,
+    "research_lanes": 0,
+    "returned_action_dispatches": 0,
+    "director_actions": 0,
+    "candidate_records": 0,
+    "ratings_submitted": 0
+  },
+  "shutdown": {
+    "app_server_shutdown_completed": true,
+    "worker_lease_released": true,
+    "active_worker_lease": false,
+    "worker_was_temporarily_defunct_under_dashboard": true,
+    "dedicated_dashboard_stopped": true,
+    "final_worker_process_present": false,
+    "final_app_server_process_present": false,
+    "final_orphan_or_zombie_present": false,
+    "loopback_port_8788_listening": false
+  },
+  "database": {
+    "schema_version": 12,
+    "integrity_check": "ok",
+    "foreign_key_check_rows": 0
+  },
+  "artifacts": [
+    {
+      "kind": "plan_verification",
+      "sha256": "e4837ec5fb4d291389e0f37c2633bb3631cd258cf1bd447c772f50dff755acc2"
+    },
+    {
+      "kind": "resource_diagnostic",
+      "sha256": "054c869579cb95e4a55b4b344749939c457f99e0df96e00d00a07db7289588ab"
+    },
+    {
+      "kind": "bounded_worker_log",
+      "sha256": "f3f0f62595f6df3b31b9461f48a119d1cee14bb0d621eb02312f253c6fe05022"
+    }
+  ],
+  "screenshots": [
+    {
+      "path": "docs/reports/m7-second-real-comparison-runtime/terminal-suite.png",
+      "sha256": "3ce624be4a73795783b2354256127cf889a1239e936d35743e768c6545a22cd0"
+    },
+    {
+      "path": "docs/reports/m7-second-real-comparison-runtime/resource-failure.png",
+      "sha256": "795946f5259b24b7bc56ca89ac8ac8a45ab2c4b7437981bb311010a30bfac59e"
+    },
+    {
+      "path": "docs/reports/m7-second-real-comparison-runtime/blind-unavailable.png",
+      "sha256": "e3234fed0fc8359078e33d987f68c6635e0b256dec414c7dbc2aaf833344a91c"
+    }
+  ],
+  "blind_comparison": {
+    "available": false,
+    "reason": "not enough valid responses",
+    "rating_submitted": false
+  },
+  "uncertainties": [
+    "The transient symlink targets were not persisted and had disappeared by post-cleanup inspection.",
+    "No rollout exists because thread/start and turn/start were not reached."
+  ],
+  "final_status": {
+    "ready_for_user_blind_rating": false,
+    "bounded_authenticated_worker_smoke": "failed",
+    "root_cause_classification": "proven",
+    "actual_byte_quota_exceeded": false,
+    "fail_closed_behavior": "proven",
+    "fresh_fix_required_before_another_comparison": true
+  }
+}
