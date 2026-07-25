@@ -44,8 +44,11 @@
     .brand{min-width:15rem}.eyebrow{text-transform:uppercase;letter-spacing:.12em;color:var(--accent-strong);font-size:.7rem;font-weight:800}
     .brand strong{display:block;font-size:1.08rem;line-height:1.2}
     nav{display:flex;gap:.3rem;align-items:center;flex-wrap:wrap;margin-left:auto}nav a{padding:.45rem .6rem;border-radius:7px;color:var(--muted);text-decoration:none;font-weight:650}nav a:hover{background:var(--surface-2);color:var(--text)}
+    .theme-toggle{min-width:9.25rem;white-space:nowrap;flex:0 0 auto}
     main{max-width:1600px;margin:auto;padding:1.4rem 1.5rem 4rem}
     .hero{display:flex;justify-content:space-between;gap:1rem;align-items:end;margin-bottom:1.2rem}.hero h1{font-size:clamp(1.8rem,3vw,2.65rem);line-height:1.05;letter-spacing:-.03em;margin:.2rem 0}.hero p{margin:.3rem 0;color:var(--muted);max-width:70ch}
+    .section-nav{display:flex;gap:.35rem;overflow-x:auto;padding:.4rem;margin:0 0 1rem;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow)}
+    .section-nav a{white-space:nowrap;padding:.45rem .62rem;color:var(--muted);font-size:.83rem;font-weight:700;text-decoration:none;border-radius:7px}.section-nav a:hover{background:var(--surface-2);color:var(--text)}
     .workspace-grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:1rem}
     section{grid-column:span 6;min-width:0;padding:1.05rem;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);scroll-margin-top:6rem}
     .wide{grid-column:1/-1}.span-4{grid-column:span 4}.span-8{grid-column:span 8}
@@ -61,15 +64,16 @@
     form{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.7rem}label{display:grid;gap:.25rem;color:var(--muted);font-size:.8rem;font-weight:650}label input,label select{color:var(--text);font-weight:400}
     .primary{background:var(--accent);border-color:var(--accent);color:#fff}.danger-button{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 45%,var(--line))}
     .notice{min-height:1.2rem;color:var(--warn);font-weight:650}.empty{padding:1.6rem;text-align:center;color:var(--muted);border:1px dashed var(--line-strong);border-radius:8px}
-    .id{font:12px/1.4 var(--mono);overflow-wrap:anywhere}.clamp{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
+    .id{font:12px/1.4 var(--mono);overflow-wrap:anywhere}.id-value{display:inline-flex;align-items:center;gap:.3rem;max-width:100%}.copy-id{padding:.12rem .3rem;font-size:.68rem;font-weight:700;color:var(--muted);background:transparent}.clamp{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
     .table-wrap{max-width:100%;overflow:auto;border:1px solid var(--line);border-radius:9px}table{width:100%;border-collapse:collapse;font-size:.82rem}th,td{text-align:left;vertical-align:top;padding:.58rem;border-bottom:1px solid var(--line)}th{background:var(--surface-2);color:var(--muted);font-size:.7rem;text-transform:uppercase;letter-spacing:.055em;white-space:nowrap}tbody tr:last-child td{border:0}
     details{margin-top:.5rem;border-top:1px solid var(--line);padding-top:.45rem}summary{cursor:pointer;color:var(--accent-strong);font-weight:650}
     pre{max-height:20rem;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--surface-2);border:1px solid var(--line);border-radius:7px;padding:.65rem;font:12px/1.5 var(--mono)}
     .log-list{display:grid;gap:.35rem;max-height:23rem;overflow:auto}.log-line{font:12px/1.45 var(--mono);padding:.45rem .55rem;background:var(--surface-2);border-radius:6px;overflow-wrap:anywhere}
+    @media(max-width:1100px){.header-inner{display:grid;grid-template-columns:1fr auto;align-items:center}.brand{min-width:0}nav{grid-column:1/-1;grid-row:2;margin:0;justify-content:flex-start;border-top:1px solid var(--line);padding-top:.45rem}.theme-toggle{grid-column:2;grid-row:1}}
     @media(max-width:1050px){section,.span-4,.span-8{grid-column:1/-1}.hide-tablet{display:none}}
     @media(max-width:700px){
-      .site-header{position:static}.header-inner{display:grid;grid-template-columns:1fr auto;padding:.8rem 1rem}.brand{min-width:0}.theme-toggle{grid-column:2;grid-row:1}
-      nav{grid-column:1/-1;margin:0;overflow-x:auto;flex-wrap:nowrap;padding-bottom:.2rem}nav a{white-space:nowrap}
+      .site-header{position:static}.header-inner{display:grid;grid-template-columns:minmax(0,1fr) auto;padding:.8rem 1rem}.brand{min-width:0}.theme-toggle{grid-column:2;grid-row:1;min-width:auto;padding:.52rem .62rem;font-size:.8rem;white-space:nowrap}
+      nav{grid-column:1/-1;margin:0;overflow:visible;flex-wrap:wrap;padding:.45rem 0 .2rem}nav a{white-space:nowrap}
       main{padding:1rem .75rem 3rem}.hero{align-items:start}.hero h1{font-size:1.75rem}.workspace-grid{display:block}section{margin-bottom:.8rem;padding:.85rem}.grid{grid-template-columns:1fr}.card-head{display:grid}
       .responsive table,.responsive thead,.responsive tbody,.responsive tr,.responsive th,.responsive td{display:block}.responsive thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}.responsive tr{padding:.65rem;border-bottom:1px solid var(--line)}.responsive tr:last-child{border:0}.responsive td{display:grid;grid-template-columns:7rem minmax(0,1fr);gap:.5rem;padding:.28rem 0;border:0}.responsive td::before{content:attr(data-label);color:var(--muted);font-size:.68rem;text-transform:uppercase;letter-spacing:.05em;font-weight:750}
     }
@@ -80,15 +84,13 @@
   <header class="site-header">
     <div class="header-inner">
       <div class="brand"><span class="eyebrow">Structural Graph Lab</span><strong>Research control room</strong></div>
-      <nav aria-label="Workspace navigation">
-        <a href="#campaign">Campaign</a><a href="#decisions">Decisions</a><a href="#lanes">Lanes</a><a href="#candidates">Candidates</a><a href="#events">Events</a>
-        <a href="/comparisons">Comparisons</a><a href="/model-cost-profiles">Cost profiles</a>
-      </nav>
+      <nav aria-label="Primary navigation"><a href="/">Dashboard</a><a href="/comparisons">Comparisons</a><a href="/comparisons/new">New suite</a><a href="/model-cost-profiles">Cost profiles</a></nav>
       <button type="button" id="theme-toggle" class="theme-toggle" aria-label="Toggle color theme"></button>
     </div>
   </header>
   <main>
     <div class="hero"><div><span class="eyebrow">Engineering telemetry</span><h1>Graph-search operations</h1><p>Campaign state, Director decisions, search lanes, verification, and retained scientific evidence. This interface reports software state—not a mathematical claim.</p></div></div>
+    <nav class="section-nav" aria-label="Dashboard sections"><a href="#campaign">Campaign</a><a href="#decisions">Decisions</a><a href="#lanes">Lanes</a><a href="#candidates">Candidates</a><a href="#events">Events</a></nav>
     <div class="workspace-grid">
       <section class="wide" id="comparisons-overview"><div class="section-heading"><div><h2>Controlled comparisons</h2><p>Measured model, effort, and context-mode evidence.</p></div><a href="/comparisons">Open comparisons →</a></div><div id="comparison-summary" class="metrics"></div></section>
       <section class="span-4" id="campaign">
@@ -115,15 +117,28 @@ const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const fmt=v=>v===null||v===undefined?'Unavailable':Number(v).toLocaleString();
 const label=v=>String(v??'').replaceAll('_',' ').replace(/\b\w/g,c=>c.toUpperCase());
 const shortId=v=>{const s=String(v??'');return s.length>20?`${s.slice(0,11)}…${s.slice(-6)}`:s};
-const id=v=>v?`<span class="id" title="${esc(v)}">${esc(shortId(v))}</span>`:'—';
+const id=v=>v?`<span class="id-value"><span class="id" title="${esc(v)}">${esc(shortId(v))}</span><button type="button" class="copy-id" data-copy="${esc(v)}" aria-label="Copy full identifier">Copy</button></span>`:'—';
 const statusTone=v=>{const s=String(v??'').toLowerCase();if(/complete|valid|pass|applied|running|active|certified/.test(s))return'good';if(/fail|invalid|reject|error|abort|disagree/.test(s))return'bad';if(/time|stop|block|pause|unknown|pressure/.test(s))return'warn';return'neutral'};
 const badge=v=>`<span class="badge ${statusTone(v)}">${esc(label(v??'unknown'))}</span>`;
 const technical=(title,value)=>value===null||value===undefined?'':`<details><summary>${esc(title)}</summary><pre>${esc(typeof value==='string'?value:JSON.stringify(value,null,2))}</pre></details>`;
-const field=(name,value)=>value===null||value===undefined||value===''?'':`<div><dt>${esc(label(name))}</dt><dd>${typeof value==='string'&&value.length>36?id(value):esc(value)}</dd></div>`;
-const semantic=(obj)=>`<dl class="semantic">${Object.entries(obj||{}).filter(([,v])=>v!==null&&v!==undefined&&v!=='').map(([k,v])=>field(k,typeof v==='object'?JSON.stringify(v):v)).join('')}</dl>`;
+const field=(name,value)=>{const technicalKey=/(id|hash|sha-?256|fingerprint|prompt|director state|output schema)/i.test(name);return value===null||value===undefined||value===''?'':`<div><dt>${esc(label(name))}</dt><dd>${typeof value==='string'&&technicalKey?id(value):esc(value)}</dd></div>`};
+function semanticValue(value,key=''){
+  if(value===null||value===undefined||value==='')return '';
+  if(typeof value==='boolean')return value?'Yes':'No';
+  if(typeof value==='number'){
+    if(/share|diversity|rate|weight|confidence|yield/.test(key)&&Math.abs(value)<=1)return `${(100*value).toFixed(1)}%`;
+    if(/seconds|elapsed|latency|wall/.test(key))return `${Number(value).toLocaleString(undefined,{maximumFractionDigits:2})} s`;
+    return Number(value).toLocaleString(undefined,{maximumFractionDigits:4});
+  }
+  if(Array.isArray(value))return `<div class="chips">${value.map(v=>`<span class="chip">${typeof v==='object'?esc(JSON.stringify(v)):esc(shortId(v))}</span>`).join('')}</div>`;
+  if(typeof value==='object')return `<dl class="semantic">${Object.entries(value).filter(([,v])=>v!==null&&v!==undefined).map(([k,v])=>`<div><dt>${esc(label(k))}</dt><dd>${semanticValue(v,k)}</dd></div>`).join('')}</dl>`;
+  return value.length>36?id(value):esc(value);
+}
+const semantic=(obj)=>`<dl class="semantic">${Object.entries(obj||{}).filter(([,v])=>v!==null&&v!==undefined&&v!=='').map(([k,v])=>`<div><dt>${esc(label(k))}</dt><dd>${semanticValue(v,k)}</dd></div>`).join('')}</dl>`;
 async function api(path,options={}){const response=await fetch(path,{...options,headers:{...headers,...(options.headers||{})},cache:'no-store'});let body;try{body=await response.json()}catch{body={error:`HTTP ${response.status}`}}if(!response.ok)throw new Error(body.error||`HTTP ${response.status}`);return body}
 function setThemeLabel(){const dark=document.documentElement.dataset.theme==='dark';const button=document.getElementById('theme-toggle');button.textContent=dark?'☀ Light theme':'☾ Dark theme';button.setAttribute('aria-pressed',String(dark))}
 document.getElementById('theme-toggle').addEventListener('click',()=>{const next=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=next;localStorage.setItem('sglab-theme',next);setThemeLabel()});setThemeLabel();
+document.addEventListener('click',async event=>{const button=event.target.closest('[data-copy]');if(!button)return;try{await navigator.clipboard.writeText(button.dataset.copy);const old=button.textContent;button.textContent='Copied';setTimeout(()=>button.textContent=old,900)}catch{button.title='Copy unavailable in this browser context'}});
 function metrics(target,items){document.getElementById(target).innerHTML=items.map(([name,value,tone=''])=>`<div class="metric ${tone}"><span>${esc(name)}</span><strong>${value&&String(value).includes('<')?value:esc(value)}</strong></div>`).join('')}
 function actionTitle(type){return ({start_lane:'Start search lane',request_diagnostic:'Request diagnostic',set_review_trigger:'Set review trigger',promote_candidate:'Promote candidate',schedule_verification:'Schedule verification',stop_lane:'Stop search lane',patch_lane:'Change lane strategy',restart_lane:'Restart lane',fork_lane:'Fork lane',reallocate_resources:'Reallocate resources'})[type]||label(type)}
 function parameters(action){
@@ -148,6 +163,23 @@ function compactTable(rows,columns){
   if(!rows.length)return '<div class="empty">No records yet.</div>';
   return `<table><thead><tr>${columns.map(c=>`<th scope="col">${esc(c[0])}</th>`).join('')}</tr></thead><tbody>${rows.map(row=>`<tr>${columns.map(c=>`<td data-label="${esc(c[0])}">${c[1](row)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
 }
+const expandedLists=new Set();
+function boundedList(targetId,rows,renderer,limit=6){
+  const target=document.getElementById(targetId);
+  const draw=()=>{
+    const expanded=expandedLists.has(targetId),visible=expanded?rows:rows.slice(0,limit);
+    target.innerHTML=visible.map(renderer).join('')||'<div class="empty">No records yet.</div>';
+    if(rows.length>limit){
+      const button=document.createElement('button');
+      button.type='button';button.className='show-more';
+      button.textContent=expanded?`Show latest ${limit}`:`Show ${rows.length-limit} more`;
+      button.setAttribute('aria-expanded',String(expanded));
+      button.onclick=()=>{expanded?expandedLists.delete(targetId):expandedLists.add(targetId);draw()};
+      target.append(button);
+    }
+  };
+  draw();
+}
 async function refresh(){
   try{
     const [state,campaign,logs,candidates,runs,comparison]=await Promise.all([api('/api/status'),api('/api/research-campaign'),api('/api/logs?limit=30'),api('/api/candidates?limit=24'),api('/api/runs'),api('/api/comparisons-summary')]);
@@ -155,14 +187,14 @@ async function refresh(){
     metrics('comparison-summary',[['Default Director context',comparison.default_context_mode,'emphasis'],['Recommendation basis',comparison.recommendation_basis],['Last suite',last?`<a href="/comparisons/${esc(last.suite_id)}">${esc(last.name)}</a>`:'—'],['Completed / planned',last?`${last.completion_count} / ${last.planned_inference_count}`:'—'],['Total server tokens',last?fmt(last.total_server_tokens):'—'],['Relative cost units',last?Number(last.relative_cost_units||0).toFixed(2):'—']]);
     metrics('campaign-metrics',[['State',campaign.state||'IDLE',statusTone(campaign.state)],['Campaign',shortId(campaign.campaign_id||'—')],['Target',campaign.target||'erdos_gyarfas'],['Active lanes',campaign.active_lane_count||0],['Effective context',campaign.effective_context_mode||campaign.director_session?.context_mode||'stateless_turns','emphasis'],['Director auth',campaign.auth_imported?'Imported':'Not imported'],['Director connection',campaign.director_session?.state||'Unavailable'],['Fault',campaign.fault_kind||'None',campaign.fault_kind?'bad':''],['Verifier queued / running',`${campaign.verification?.queued||0} / ${campaign.verification?.running||0}`],['Certified',campaign.verification?.certified||0],['Coordinator RSS',`${((campaign.resources?.coordinator_rss_bytes||0)/1048576).toFixed(1)} MiB`],['Database',`${((campaign.resources?.database_bytes||0)/1048576).toFixed(2)} MiB`]]);
     assessment.innerHTML=`<div class="effect"><strong>Current assessment</strong><p>${esc(campaign.assessment?.campaign_assessment||'No Director assessment yet.')}</p></div>`;
-    hypotheses.innerHTML=(campaign.hypotheses||[]).slice(0,12).map(h=>`<article class="card"><div class="card-head"><div><div class="chips">${badge(h.status)}<span class="chip">Confidence ${(100*Number(h.confidence||0)).toFixed(0)}%</span></div><h3>${id(h.hypothesis_id)}</h3></div><span class="meta">${esc(h.created_at)}</span></div><p class="clamp">${esc(h.statement)}</p></article>`).join('')||'<div class="empty">No hypotheses yet.</div>';
-    actions.innerHTML=(campaign.actions||[]).slice(0,20).map(actionCard).join('')||'<div class="empty">No Director decisions yet.</div>';
-    document.getElementById('lanes-list').innerHTML=(campaign.lanes||[]).slice(0,20).map(laneCard).join('')||'<div class="empty">No search lanes yet.</div>';
-    revisions.innerHTML=(campaign.revisions||[]).slice(0,20).map(r=>`<article class="card"><div class="card-head"><div><h3>${id(r.lane_id)}</h3><span class="meta">Version ${esc(r.old_lane_version)} → ${esc(r.new_lane_version)} · ${esc(r.applied_at)}</span></div>${badge(r.action_id?'Director action':'Recovery')}</div><div class="grid">${semantic({before:r.old_parameters,after:r.new_parameters})}</div>${technical('Revision record',r)}</article>`).join('')||'<div class="empty">No parameter revisions yet.</div>';
+    boundedList('hypotheses',campaign.hypotheses||[],h=>`<article class="card"><div class="card-head"><div><div class="chips">${badge(h.status)}<span class="chip">Confidence ${(100*Number(h.confidence||0)).toFixed(0)}%</span></div><h3>${id(h.hypothesis_id)}</h3></div><span class="meta">${esc(h.created_at)}</span></div><p class="clamp">${esc(h.statement)}</p></article>`);
+    boundedList('actions',campaign.actions||[],actionCard);
+    boundedList('lanes-list',campaign.lanes||[],laneCard);
+    boundedList('revisions',campaign.revisions||[],r=>`<article class="card"><div class="card-head"><div><h3>${id(r.lane_id)}</h3><span class="meta">Version ${esc(r.old_lane_version)} → ${esc(r.new_lane_version)} · ${esc(r.applied_at)}</span></div>${badge(r.action_id?'Director action':'Recovery')}</div>${semantic({before:r.old_parameters,after:r.new_parameters})}${technical('Revision record',r)}</article>`);
     turns.innerHTML=compactTable(campaign.turns||[],[['Thread / turn',r=>`${id(r.thread_id)}<br>${id(r.turn_id||'pending')}`],['Status',r=>`${badge(r.status)} ${badge(r.thread_lifecycle||'unrecorded')}`],['Latency',r=>`${Number(r.wall_seconds||0).toFixed(2)} s`],['Input',r=>`${fmt(r.input_tokens)} total<br><span class="meta">${fmt(r.cached_input_tokens)} cached · ${fmt(r.cache_write_input_tokens)} cache-write</span>`],['Output',r=>`${fmt(r.output_tokens)} total<br><span class="meta">${fmt(r.reasoning_output_tokens)} reasoning</span>`],['Server total',r=>fmt(r.total_tokens)],['Fault',r=>esc(r.error_kind||'—')]]);
     metrics('metrics',[['Status',state.status],['Run',shortId(state.run_id||'—')],['Target',state.target||'—'],['Order',state.configuration?.order??'—'],['Algorithm',label(state.configuration?.algorithm||'—')],['Seed',state.configuration?.seed??'—'],['Elapsed',`${Number(state.elapsed_seconds||0).toFixed(1)} s`],['Candidates / s',Number(state.throughput?.candidates_per_second||0).toFixed(1)],['Candidates',fmt(state.throughput?.candidates||0)],['Workers',`${state.workers?.alive??0} / ${state.workers?.configured??0}`],['Aggregate RSS',`${((state.resources?.aggregate_rss_bytes||0)/1048576).toFixed(1)} MiB`],['Exact queue',state.exact_verification?.queued??0],['Verified candidates',state.exact_verification?.verified_candidates??0],['Best score',JSON.stringify(state.best?.score?.ordering_key||[])]]);
     document.getElementById('logs').innerHTML=(logs.lines||[]).map(line=>`<div class="log-line">${esc(line)}</div>`).join('')||'<div class="empty">No recent events.</div>';
-    document.getElementById('candidates-list').innerHTML=(candidates.candidates||[]).map(candidateCard).join('')||'<div class="empty">No retained candidates yet.</div>';
+    boundedList('candidates-list',candidates.candidates||[],candidateCard);
     document.getElementById('runs').innerHTML=compactTable((runs.runs||[]).slice(0,20),[['Run',r=>id(r.run_id)],['Created',r=>esc(r.created_at)],['Target',r=>esc(r.target)],['Configuration',r=>`${esc(r.parameters?.order??'—')} · ${esc(label(r.parameters?.algorithm||'—'))}`],['Status',r=>badge(r.live_status)],['Candidates',r=>fmt(r.candidates??0)],['Throughput',r=>`${Number(r.candidates_per_second||0).toFixed(1)}/s`],['Best score',r=>esc(JSON.stringify(r.best_score||[]))]]);
   }catch(error){notice.textContent=error.message}
 }

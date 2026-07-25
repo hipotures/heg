@@ -76,6 +76,7 @@ class SemanticUiRenderingTests(unittest.TestCase):
         html = self.decode(comparisons_page())
         self.assertIn("s.length>20", html)
         self.assertIn('title="${esc(v)}"', html)
+        self.assertIn('aria-label="Copy full identifier"', html)
         self.assertIn("overflow-wrap:anywhere", html)
 
     def test_raw_json_is_secondary_to_semantic_content(self) -> None:
@@ -113,17 +114,41 @@ class SemanticUiRenderingTests(unittest.TestCase):
         self.assertIn("profileCard", html)
         self.assertIn("Relative multiplier", html)
         self.assertIn("API-equivalent", html)
+        self.assertIn("maximumFractionDigits:4", html)
         self.assertNotIn('<pre id="profiles"', html)
 
     def test_dashboard_bounds_primary_lists_and_keeps_raw_details(self) -> None:
         dashboard = (Path(__file__).parents[1] / "web" / "index.html").read_text(
             encoding="utf-8"
         )
-        self.assertIn(".slice(0,20)", dashboard)
+        self.assertIn("boundedList('actions'", dashboard)
+        self.assertIn("boundedList('candidates-list'", dashboard)
         self.assertIn("/api/candidates?limit=24", dashboard)
         self.assertIn("Raw action record", dashboard)
         self.assertIn("Candidate metadata", dashboard)
         self.assertNotIn("['Parameters', r => esc(JSON.stringify", dashboard)
+
+    def test_global_navigation_is_consistent_and_theme_label_does_not_wrap(self) -> None:
+        comparison = self.decode(comparisons_page())
+        dashboard = (Path(__file__).parents[1] / "web" / "index.html").read_text(
+            encoding="utf-8"
+        )
+        expected = (
+            '<a href="/">Dashboard</a><a href="/comparisons">Comparisons</a>'
+            '<a href="/comparisons/new">New suite</a>'
+            '<a href="/model-cost-profiles">Cost profiles</a>'
+        )
+        self.assertIn(expected, comparison)
+        self.assertIn(expected, dashboard)
+        self.assertIn("white-space:nowrap", comparison)
+        self.assertIn("white-space:nowrap", dashboard)
+        self.assertIn('aria-label="Dashboard sections"', dashboard)
+        self.assertIn("flex-wrap:wrap", dashboard)
+
+    def test_terminal_suite_controls_use_explicit_element_lookup(self) -> None:
+        html = self.decode(comparison_detail_page("suite-demo"))
+        self.assertIn("document.getElementById('stop').onclick", html)
+        self.assertNotIn("stop.onclick=", html)
 
 
 if __name__ == "__main__":
