@@ -1,6 +1,27 @@
 # Implementation Status
 
-Last implementation audit: **2026-07-24**.
+Last implementation audit: **2026-07-25**.
+
+## Fresh reduced context-mode screen completed
+
+The corrected three-slot authenticated screen completed S2, P1 and P2 with
+exactly three successful `gpt-5.6-luna:xhigh` inference starts. S2 used a
+fresh stateless A4 thread; P1 and P2 used one separate persistent thread. All
+three decisions were schema-valid, semantically valid, measurement-only and
+unexecuted.
+
+The A4 scientific state, prompt, schema, evidence registry and applicable
+action space were identical for S2 and P2. S2 used 9,591 input tokens versus
+12,754 for P2, a measured stateless reduction of 24.800062725419476%. Both
+completed reliably; the predefined single-pair decision rule therefore
+recommends `stateless_turns`, without claiming statistical superiority.
+
+The run used exactly three inference starts and zero retries, search batches,
+lanes, action dispatches, candidate evaluations, compactions or tool calls.
+Both App Server processes shut down gracefully, all skill reload gates ended
+with zero active skills, and both SQLite databases and Online Backups passed
+schema-v9 integrity checks. See
+`docs/reports/M6_REDUCED_CONTEXT_SCREEN_RERUN.md`.
 
 ## Action-applicability contract repaired deterministically
 
@@ -25,11 +46,10 @@ should not have been offered; it is not classified as an independent
 model-quality failure.
 
 Focused tests, SQLite v9 migration/integrity tests, and two 128-test
-non-network safe-suite runs pass. Doctor, compile checks, and benchmark smoke
-pass. Five HTTP/dashboard tests and `make dashboard-smoke` remain blocked
-because this execution sandbox forbids loopback sockets and rejected
-escalation. Fresh authenticated authorization is therefore not requested yet.
-See `docs/reports/M6_ACTION_APPLICABILITY_PHASE_A.md`.
+non-network safe-suite runs pass. Doctor, compile checks, benchmark smoke, all
+five previously blocked HTTP/dashboard tests, `make dashboard-smoke`, and the
+complete 133-test Phase-A-safe suite pass. See
+`docs/reports/M6_ACTION_APPLICABILITY_PHASE_A.md`.
 
 ## Reduced context-mode screen — deterministic Phase A complete
 

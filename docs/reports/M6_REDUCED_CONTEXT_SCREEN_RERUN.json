@@ -1,0 +1,4014 @@
+{
+  "artifact_evidence": {
+    "artifact_count": 610,
+    "artifact_manifest": "artifact-manifest.json",
+    "artifact_manifest_sha256": "548c7637e020edca819256767f82621a741e8cccc5c7cc08d421ed630b5081dc",
+    "private_paths_and_auth_hashes_retained_outside_git": true,
+    "private_runtime_report": "final-runtime-report.json",
+    "runner_report_sha256": "a9fbe538f6953f568935345a0a79cbede12475c44acc5b0ec60faeb68cbf9b94"
+  },
+  "authorization": {
+    "auth_hashes_retained_only_in_private_report": true,
+    "authorized_source": "/home/xai/.codex/auth.json",
+    "copied_files": [
+      "auth.json"
+    ],
+    "granted": true,
+    "other_normal_codex_home_data_copied": false,
+    "private_arm_count": 2
+  },
+  "codex_cli_version": "codex-cli 0.145.0",
+  "date": "2026-07-25",
+  "deterministic_preflight": {
+    "bundled_audit_ok": true,
+    "failures": [],
+    "phase_a_plan_ok": true,
+    "post_reload_active_skills": 0,
+    "repository_compliance_ok": true,
+    "separate_codex_sqlite_home": true,
+    "strict_config_startup": true
+  },
+  "failures": [],
+  "final_status": {
+    "canonical_evidence_registry": true,
+    "completion_reliability_comparison": "both_completed",
+    "context_mode_comparison": "complete_single_pair",
+    "director_state_v2_bounded": true,
+    "exactly_three_or_fewer_inference_starts": true,
+    "incomplete_turn_persistence": true,
+    "persistent_A1_completed": true,
+    "persistent_A4_completed": true,
+    "recommended_default_context_mode": "stateless_turns",
+    "semantic_validity_persistent_A4": true,
+    "semantic_validity_stateless_A4": true,
+    "stateless_A4_completed": true,
+    "stateless_token_reduction_percent": 24.800062725419476,
+    "usage_accounting_complete": true,
+    "zero_action_dispatches": true,
+    "zero_candidate_evaluations": true,
+    "zero_compaction_operations": true,
+    "zero_retries_reaching_inference": true,
+    "zero_search_batches": true,
+    "zero_tool_calls": true
+  },
+  "isolation": {
+    "active_skills_post_disable_per_arm": 0,
+    "agents_md_empty": true,
+    "all_skill_paths_absolute": true,
+    "apps_and_plugins_disabled": true,
+    "custom_base_instructions_bytes": 682,
+    "environments_and_runtime_roots_empty": true,
+    "normal_codex_home_or_repository_path_in_rollouts": false,
+    "platform_owned_instructions_observed": true,
+    "skill_list_errors": 0,
+    "skills_pre_disable_per_arm": 6,
+    "tool_items": 0
+  },
+  "repository": {
+    "final_documentation_commit": null,
+    "initial_commit": "4be8f745d53a0789e8fe6c2bd02865cc58d21606",
+    "planning_untouched": true,
+    "tested_production_commit": "c96ae04488514349fb0f1644ad3b908f1fb1337c"
+  },
+  "runtime": {
+    "action_dispatches": 0,
+    "arms": {
+      "persistent_thread": {
+        "action_dispatches": 0,
+        "candidate_evaluations": 0,
+        "compaction_operations": 0,
+        "completed": true,
+        "failure": null,
+        "graceful_shutdown": "graceful",
+        "latency_total_seconds": 126.34830966312438,
+        "mode": "persistent_thread",
+        "model_contract": {
+          "checked_at": "2026-07-25T10:19:54Z",
+          "checked_before_inference": true,
+          "effective_model": "gpt-5.6-luna",
+          "effective_reasoning_effort": "xhigh",
+          "expected_model": "gpt-5.6-luna",
+          "expected_reasoning_effort": "xhigh",
+          "model_contract_matched": true,
+          "schema_version": "1.0"
+        },
+        "persisted_decision_batches": 0,
+        "search_batches": 0,
+        "search_lanes": 0,
+        "sessions": [
+          {
+            "effort_requested": "xhigh",
+            "model_requested": "gpt-5.6-luna",
+            "state": "closed",
+            "thread_id": "019f98c9-df7d-78d1-a134-1a988305d19d"
+          }
+        ],
+        "sqlite_integrity_check": "ok",
+        "thread_ids": [
+          "019f98c9-df7d-78d1-a134-1a988305d19d",
+          "019f98c9-df7d-78d1-a134-1a988305d19d"
+        ],
+        "turns": [
+          {
+            "active_executable_targets": [],
+            "advisory_target_registry_sha256": "a4034680e237c720e7320e2cf18e1a974e71ad6ad7b66d2b577b3ab32f5ee6a4",
+            "applicable_action_space": {
+              "action_applicability": {
+                "request_diagnostic": "at least one submitted evidence subject is available",
+                "set_review_trigger": "review scheduling is lane-independent",
+                "start_lane": "capacity exists for one reviewed new search lane"
+              },
+              "actions": [
+                "start_lane",
+                "request_diagnostic",
+                "set_review_trigger"
+              ],
+              "active_executable_lane_ids": [],
+              "algorithm_parameters": {
+                "iterated_local_search": [
+                  "batch_candidates",
+                  "mutation_weights",
+                  "order",
+                  "perturbation_interval",
+                  "tabu_tenure",
+                  "witness_cap"
+                ],
+                "iterated_local_search_tabu": [
+                  "batch_candidates",
+                  "mutation_weights",
+                  "order",
+                  "perturbation_interval",
+                  "tabu_tenure",
+                  "witness_cap"
+                ],
+                "random_restart": [
+                  "batch_candidates",
+                  "order",
+                  "witness_cap"
+                ],
+                "simulated_annealing": [
+                  "batch_candidates",
+                  "cooling",
+                  "mutation_weights",
+                  "order",
+                  "restart_threshold",
+                  "temperature",
+                  "witness_cap"
+                ]
+              },
+              "algorithms": [
+                "random_restart",
+                "simulated_annealing",
+                "iterated_local_search_tabu",
+                "iterated_local_search"
+              ],
+              "candidate_target_ids": [],
+              "catalog_version": "1.1",
+              "diagnostics": [
+                "cycle_length_profile",
+                "graph_invariants",
+                "mutation_ancestry",
+                "archive_cluster_comparison",
+                "operator_yield",
+                "candidate_structural_diff",
+                "canonical_duplicate_analysis"
+              ],
+              "graph_families": [
+                "connected_cubic",
+                "predominantly_cubic",
+                "unrestricted_min_degree_3"
+              ],
+              "historical_lane_ids": [],
+              "mutation_operators": [
+                "uniform_two_edge_switch",
+                "forbidden_cycle_break_switch"
+              ],
+              "mutation_weights_contract": {
+                "known_operators_only": true,
+                "minimum_weight": 0.0,
+                "normalized_before_execution": true,
+                "positive_sum_required": true
+              },
+              "parameter_domains": {
+                "batch_candidates": {
+                  "maximum": 1000000,
+                  "minimum": 100,
+                  "type": "integer"
+                },
+                "cooling": {
+                  "maximum": 1.0,
+                  "minimum": 0.9,
+                  "type": "number"
+                },
+                "order": {
+                  "maximum": 128,
+                  "minimum": 4,
+                  "type": "integer"
+                },
+                "perturbation_interval": {
+                  "maximum": 1000000,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "restart_threshold": {
+                  "maximum": 10000000,
+                  "minimum": 100,
+                  "type": "integer"
+                },
+                "tabu_tenure": {
+                  "maximum": 4096,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "temperature": {
+                  "maximum": 100.0,
+                  "minimum": 0.001,
+                  "type": "number"
+                },
+                "witness_cap": {
+                  "maximum": 10000,
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "reference_objects": [],
+              "review_events": [
+                "new_global_best",
+                "meaningful_improvement",
+                "regression",
+                "stagnation",
+                "diversity_collapse",
+                "operator_yield_shift",
+                "verification_result",
+                "verifier_disagreement",
+                "lane_failure",
+                "resource_pressure",
+                "action_lease_expired"
+              ]
+            },
+            "applicable_action_space_sha256": "6afaa3324bb0012b68fc97f3216aa93adc0fa5ee0657dba04633061e459abd09",
+            "client_owned_estimated_tokens": 3323,
+            "compaction_operation_count": 0,
+            "completed_timestamp": "2026-07-25T10:20:40Z",
+            "director_state_bytes": 3246,
+            "director_state_sha256": "1baf3ca221a3461630e5bc837d3bb0ce2345d69dd8d25e962345d744f58ad3c1",
+            "evidence_references": [
+              "snapshot-81a7b29a71684fd89f0d907163186711"
+            ],
+            "evidence_registry_artifact": "director/evidence-registries/app-turn-0edebdc504fa4bb0bef42f3bce9d09f6.json",
+            "evidence_registry_sha256": "c6242bde1fe448c7aa554a5ae867b69b2fb146578b400a5691945a6c289553f8",
+            "executable_target_registry_sha256": "4c0a77edf7fdc582e5a91fc8a7e3b7dff650c7ec45d4eaba2026fae4e4f2a649",
+            "executed": false,
+            "expected_signal": "Generate certified candidate evaluations while preserving diversification against short cycles and repeated states.",
+            "final_answer_latency_seconds": 42.896477764472365,
+            "final_answer_presence": true,
+            "first_item_latency_seconds": 3.080915088765323,
+            "full_client_request_bytes": 14125,
+            "graceful_shutdown_result": "graceful",
+            "historical_evidence_targets": [],
+            "hypothesis": [
+              "A connected cubic graph search up to order 64 is a feasible initial region for finding a counterexample to the target statement."
+            ],
+            "item_id": "msg_0ab3979c7efb9d7d016a648de8dcb881919849e39297077178",
+            "item_ids": [
+              "019f98c9-eb93-7f22-a1bc-3c24dc4b9033",
+              "msg_0ab3979c7efb9d7d016a648de8dcb881919849e39297077178",
+              "rs_0ab3979c7efb9d7d016a648dcfdddc81918aa8f1ebb315fe41",
+              "rs_0ab3979c7efb9d7d016a648dd920788191a7a90d501acc2da2",
+              "rs_0ab3979c7efb9d7d016a648de275248191b96957b8da78700b"
+            ],
+            "latency_seconds": 45.909779101610184,
+            "latest_event_sequence": 711,
+            "lifecycle_status": "completed",
+            "local_semantic_validity": true,
+            "measurement_only": true,
+            "mode": "persistent_thread",
+            "model_contract": {
+              "checked_at": "2026-07-25T10:19:54Z",
+              "checked_before_inference": true,
+              "effective_model": "gpt-5.6-luna",
+              "effective_reasoning_effort": "xhigh",
+              "expected_model": "gpt-5.6-luna",
+              "expected_reasoning_effort": "xhigh",
+              "model_contract_matched": true,
+              "schema_version": "1.0"
+            },
+            "normalized_decision": {
+              "actions": [
+                {
+                  "action_id": "start_lane_001",
+                  "effective_parameters": {
+                    "batch_candidates": 5000,
+                    "mutation_weights": {
+                      "forbidden_cycle_break_switch": 0.3,
+                      "uniform_two_edge_switch": 0.7
+                    },
+                    "order": 64,
+                    "perturbation_interval": 250,
+                    "tabu_tenure": 32,
+                    "witness_cap": 512
+                  },
+                  "evaluation_window": {
+                    "max_candidate_delta": 5000,
+                    "max_wall_seconds": 120
+                  },
+                  "evidence_ids": [
+                    "snapshot-81a7b29a71684fd89f0d907163186711"
+                  ],
+                  "expected_effect": "Generate certified candidate evaluations while preserving diversification against short cycles and repeated states.",
+                  "fallback": {
+                    "on_precondition_failure": "replan"
+                  },
+                  "hypothesis_ids": [
+                    "H1_connected_cubic_initial"
+                  ],
+                  "idempotency_key": "start_lane_001_v1",
+                  "ignored_parameters": {},
+                  "implemented_controls": [
+                    "batch_candidates",
+                    "mutation_weights",
+                    "order",
+                    "perturbation_interval",
+                    "tabu_tenure",
+                    "witness_cap"
+                  ],
+                  "lease_seconds": 180,
+                  "parameter_effects": {
+                    "batch_candidates": "Maximum candidate evaluations in one lane batch.",
+                    "mutation_weights": "Normalized selection probabilities over reviewed safe mutations.",
+                    "order": "Graph order used for seed generation.",
+                    "perturbation_interval": "ILS-tabu permits a perturbation acceptance at this cadence.",
+                    "tabu_tenure": "Maximum recent candidate hashes retained by tabu search.",
+                    "witness_cap": "Per-forbidden-length witness-count cap; capped counts are not exact."
+                  },
+                  "priority": 1,
+                  "rationale": "No lane is active and capacity exists. Use a tabu-guided iterated local search with mixed mutation operators to obtain initial candidate and operator-yield telemetry.",
+                  "rejected_parameters": {},
+                  "spec": {
+                    "algorithm": "iterated_local_search_tabu",
+                    "graph_family": "connected_cubic",
+                    "parameters": {
+                      "batch_candidates": 5000,
+                      "mutation_weights": {
+                        "forbidden_cycle_break_switch": 0.3,
+                        "uniform_two_edge_switch": 0.7
+                      },
+                      "order": 64,
+                      "perturbation_interval": 250,
+                      "tabu_tenure": 32,
+                      "witness_cap": 512
+                    },
+                    "resource_share": 1.0,
+                    "seed": 81729
+                  },
+                  "type": "start_lane"
+                },
+                {
+                  "action_id": "review_trigger_001",
+                  "effective_parameters": {},
+                  "evaluation_window": {
+                    "max_candidate_delta": 5000,
+                    "max_wall_seconds": 120
+                  },
+                  "evidence_ids": [
+                    "snapshot-81a7b29a71684fd89f0d907163186711"
+                  ],
+                  "expected_effect": "Trigger reassessment on meaningful progress, stagnation, diversity loss, verification feedback, or lane failure.",
+                  "fallback": {
+                    "on_precondition_failure": "replan"
+                  },
+                  "hypothesis_ids": [
+                    "H1_connected_cubic_initial"
+                  ],
+                  "idempotency_key": "review_trigger_001_v1",
+                  "ignored_parameters": {},
+                  "lease_seconds": 600,
+                  "parameter_effects": {},
+                  "priority": 2,
+                  "rationale": "Early telemetry is necessary to assess whether the initial graph family and mutation mix are producing useful, nonduplicated candidates.",
+                  "rejected_parameters": {},
+                  "review_trigger": {
+                    "candidate_delta": 5000,
+                    "events": [
+                      "new_global_best",
+                      "meaningful_improvement",
+                      "stagnation",
+                      "diversity_collapse",
+                      "operator_yield_shift",
+                      "verification_result",
+                      "lane_failure",
+                      "resource_pressure",
+                      "action_lease_expired"
+                    ],
+                    "max_wall_seconds": 120,
+                    "min_wall_seconds": 45
+                  },
+                  "type": "set_review_trigger"
+                }
+              ],
+              "campaign_assessment": "The campaign is uninitialized: no lane has executed, no candidates or telemetry are available, and approximately 599 wall seconds remain. Start one exploratory lane and review it for stagnation or structural feedback; only M4 may certify a counterexample.",
+              "hypothesis_updates": [
+                {
+                  "confidence": 0.3,
+                  "evidence_against": [],
+                  "evidence_for": [
+                    "snapshot-81a7b29a71684fd89f0d907163186711"
+                  ],
+                  "hypothesis_id": "H1_connected_cubic_initial",
+                  "operation": "create",
+                  "statement": "A connected cubic graph search up to order 64 is a feasible initial region for finding a counterexample to the target statement."
+                }
+              ],
+              "next_review": {
+                "candidate_delta": 5000,
+                "events": [
+                  "new_global_best",
+                  "meaningful_improvement",
+                  "stagnation",
+                  "diversity_collapse",
+                  "operator_yield_shift",
+                  "verification_result",
+                  "lane_failure",
+                  "resource_pressure",
+                  "action_lease_expired"
+                ],
+                "max_wall_seconds": 120,
+                "min_wall_seconds": 45
+              },
+              "schema_version": "1.0",
+              "snapshot_id": "snapshot-81a7b29a71684fd89f0d907163186711"
+            },
+            "output_schema_bytes": 8114,
+            "output_schema_sha256": "1a1f25d9433bfaaa8fc0a1567d7da9745381ebd81ec192f85b33650fe2a5cb84",
+            "prompt_bytes": 4494,
+            "prompt_sha256": "fdb66a875fa3809467d689f95dc668eb4f742b1549fbba79bac0aa2c9f4faa7f",
+            "raw_decision": {
+              "actions": [
+                {
+                  "action_id": "start_lane_001",
+                  "evaluation_window": {
+                    "max_candidate_delta": 5000,
+                    "max_wall_seconds": 120
+                  },
+                  "evidence_ids": [
+                    "snapshot-81a7b29a71684fd89f0d907163186711"
+                  ],
+                  "expected_effect": "Generate certified candidate evaluations while preserving diversification against short cycles and repeated states.",
+                  "fallback": {
+                    "on_precondition_failure": "replan"
+                  },
+                  "hypothesis_ids": [
+                    "H1_connected_cubic_initial"
+                  ],
+                  "idempotency_key": "start_lane_001_v1",
+                  "lease_seconds": 180,
+                  "priority": 1,
+                  "rationale": "No lane is active and capacity exists. Use a tabu-guided iterated local search with mixed mutation operators to obtain initial candidate and operator-yield telemetry.",
+                  "spec": {
+                    "algorithm": "iterated_local_search_tabu",
+                    "graph_family": "connected_cubic",
+                    "parameters": {
+                      "batch_candidates": 5000,
+                      "cooling": null,
+                      "mutation_weights": {
+                        "forbidden_cycle_break_switch": 0.3,
+                        "uniform_two_edge_switch": 0.7
+                      },
+                      "order": 64,
+                      "perturbation_interval": 250,
+                      "restart_threshold": null,
+                      "tabu_tenure": 32,
+                      "temperature": null,
+                      "witness_cap": 512
+                    },
+                    "resource_share": 1.0,
+                    "seed": 81729
+                  },
+                  "type": "start_lane"
+                },
+                {
+                  "action_id": "review_trigger_001",
+                  "evaluation_window": {
+                    "max_candidate_delta": 5000,
+                    "max_wall_seconds": 120
+                  },
+                  "evidence_ids": [
+                    "snapshot-81a7b29a71684fd89f0d907163186711"
+                  ],
+                  "expected_effect": "Trigger reassessment on meaningful progress, stagnation, diversity loss, verification feedback, or lane failure.",
+                  "fallback": {
+                    "on_precondition_failure": "replan"
+                  },
+                  "hypothesis_ids": [
+                    "H1_connected_cubic_initial"
+                  ],
+                  "idempotency_key": "review_trigger_001_v1",
+                  "lease_seconds": 600,
+                  "priority": 2,
+                  "rationale": "Early telemetry is necessary to assess whether the initial graph family and mutation mix are producing useful, nonduplicated candidates.",
+                  "review_trigger": {
+                    "candidate_delta": 5000,
+                    "events": [
+                      "new_global_best",
+                      "meaningful_improvement",
+                      "stagnation",
+                      "diversity_collapse",
+                      "operator_yield_shift",
+                      "verification_result",
+                      "lane_failure",
+                      "resource_pressure",
+                      "action_lease_expired"
+                    ],
+                    "max_wall_seconds": 120,
+                    "min_wall_seconds": 45
+                  },
+                  "type": "set_review_trigger"
+                }
+              ],
+              "campaign_assessment": "The campaign is uninitialized: no lane has executed, no candidates or telemetry are available, and approximately 599 wall seconds remain. Start one exploratory lane and review it for stagnation or structural feedback; only M4 may certify a counterexample.",
+              "hypothesis_updates": [
+                {
+                  "confidence": 0.3,
+                  "evidence_against": [],
+                  "evidence_for": [
+                    "snapshot-81a7b29a71684fd89f0d907163186711"
+                  ],
+                  "hypothesis_id": "H1_connected_cubic_initial",
+                  "operation": "create",
+                  "statement": "A connected cubic graph search up to order 64 is a feasible initial region for finding a counterexample to the target statement."
+                }
+              ],
+              "next_review": {
+                "candidate_delta": 5000,
+                "events": [
+                  "new_global_best",
+                  "meaningful_improvement",
+                  "stagnation",
+                  "diversity_collapse",
+                  "operator_yield_shift",
+                  "verification_result",
+                  "lane_failure",
+                  "resource_pressure",
+                  "action_lease_expired"
+                ],
+                "max_wall_seconds": 120,
+                "min_wall_seconds": 45
+              },
+              "schema_version": "1.0",
+              "snapshot_id": "snapshot-81a7b29a71684fd89f0d907163186711"
+            },
+            "reasoning_item_ids": [
+              "rs_0ab3979c7efb9d7d016a648dcfdddc81918aa8f1ebb315fe41",
+              "rs_0ab3979c7efb9d7d016a648dd920788191a7a90d501acc2da2",
+              "rs_0ab3979c7efb9d7d016a648de275248191b96957b8da78700b"
+            ],
+            "request_artifact": "director/requests/app-turn-0edebdc504fa4bb0bef42f3bce9d09f6.json",
+            "request_id": "11",
+            "request_sha256": "da4774c407b4a1fa737b7247c5517d2db24c483317b481f124cab50812569400",
+            "response_artifact": "director/responses/app-turn-0edebdc504fa4bb0bef42f3bce9d09f6.json",
+            "response_sha256": "9ef26ff09da1aff95bb3bc7b49545f0db650dd97b76489cb19ccc24f2e2e783b",
+            "retry_count_reaching_inference": 0,
+            "schema_validity": true,
+            "selected_action": "start_lane",
+            "selected_algorithm": "iterated_local_search_tabu",
+            "selected_parameters": {
+              "batch_candidates": 5000,
+              "mutation_weights": {
+                "forbidden_cycle_break_switch": 0.3,
+                "uniform_two_edge_switch": 0.7
+              },
+              "order": 64,
+              "perturbation_interval": 250,
+              "tabu_tenure": 32,
+              "witness_cap": 512
+            },
+            "semantic_rubric": {
+              "checks": {
+                "budgets_respected": true,
+                "facts_referenced_by_structured_ids_are_present": true,
+                "implemented_parameters_only": true,
+                "inside_allowed_action_space": true,
+                "no_code_tool_file_or_shell_request": true,
+                "no_counterexample_claim": true,
+                "no_measurement_decision_execution_request": true,
+                "no_statistical_superiority_claim": true,
+                "truncated_counts_not_claimed_exact": true
+              },
+              "ok": true,
+              "scope": "Deterministic structured-ID, catalog, parameter, budget and prohibited-request checks; no free-text fact entailment inference.",
+              "validation_issues": []
+            },
+            "slot": "P1",
+            "snapshot_id": "snapshot-81a7b29a71684fd89f0d907163186711",
+            "source_snapshot_id": "snapshot-81a7b29a71684fd89f0d907163186711",
+            "start_timestamp": "2026-07-25T10:19:54Z",
+            "thread_id": "019f98c9-df7d-78d1-a134-1a988305d19d",
+            "tool_call_count": 0,
+            "turn_id": "019f98c9-df8c-7a32-9b82-391e8be435f7",
+            "turn_record_id": "app-turn-0edebdc504fa4bb0bef42f3bce9d09f6",
+            "turn_start_json_rpc_bytes": 13346,
+            "turn_started_timestamp": "2026-07-25T10:19:54Z",
+            "usage": {
+              "cache_write_input_tokens": 0,
+              "cached_input_tokens": 0,
+              "input_tokens": 4405,
+              "output_tokens": 2093,
+              "reasoning_output_tokens": 1384,
+              "server_reported_total_tokens": 6498
+            },
+            "usage_presence": true,
+            "validation_issues": [],
+            "wire_log_artifact": "director/wire/app-turn-0edebdc504fa4bb0bef42f3bce9d09f6.jsonl",
+            "wire_log_sha256": "9f8e3416435f5ba152b1a5f0fe04867820675ac7ba8e5f398a27e516c04f5276"
+          },
+          {
+            "active_executable_targets": [
+              "candidate-5ddcaa89183997470eb5e08d"
+            ],
+            "advisory_target_registry_sha256": "2f2c50f29a48c15157abc726997d8bfc1d37fb977873fd7a7d1d3d5e588ac49d",
+            "applicable_action_space": {
+              "action_applicability": {
+                "promote_candidate": "at least one retained candidate is available",
+                "request_diagnostic": "at least one submitted evidence subject is available",
+                "schedule_verification": "at least one retained candidate is available for M4 verification",
+                "set_review_trigger": "review scheduling is lane-independent",
+                "start_lane": "capacity exists for one reviewed new search lane"
+              },
+              "actions": [
+                "start_lane",
+                "promote_candidate",
+                "request_diagnostic",
+                "schedule_verification",
+                "set_review_trigger"
+              ],
+              "active_executable_lane_ids": [],
+              "algorithm_parameters": {
+                "iterated_local_search": [
+                  "batch_candidates",
+                  "mutation_weights",
+                  "order",
+                  "perturbation_interval",
+                  "tabu_tenure",
+                  "witness_cap"
+                ],
+                "iterated_local_search_tabu": [
+                  "batch_candidates",
+                  "mutation_weights",
+                  "order",
+                  "perturbation_interval",
+                  "tabu_tenure",
+                  "witness_cap"
+                ],
+                "random_restart": [
+                  "batch_candidates",
+                  "order",
+                  "witness_cap"
+                ],
+                "simulated_annealing": [
+                  "batch_candidates",
+                  "cooling",
+                  "mutation_weights",
+                  "order",
+                  "restart_threshold",
+                  "temperature",
+                  "witness_cap"
+                ]
+              },
+              "algorithms": [
+                "random_restart",
+                "simulated_annealing",
+                "iterated_local_search_tabu",
+                "iterated_local_search"
+              ],
+              "candidate_target_ids": [
+                "candidate-5ddcaa89183997470eb5e08d"
+              ],
+              "catalog_version": "1.1",
+              "checkpoint_target_ids": [
+                "checkpoint-1829a30dca43791c355f854d"
+              ],
+              "diagnostics": [
+                "cycle_length_profile",
+                "graph_invariants",
+                "mutation_ancestry",
+                "archive_cluster_comparison",
+                "operator_yield",
+                "candidate_structural_diff",
+                "canonical_duplicate_analysis"
+              ],
+              "graph_families": [
+                "connected_cubic",
+                "predominantly_cubic",
+                "unrestricted_min_degree_3"
+              ],
+              "historical_lane_ids": [
+                "lane-36ef6c44aded9d38cfc4dd72",
+                "lane-b6a9e52b62176089963c03df",
+                "lane-fc3311f3e8cd88ddb8b31293"
+              ],
+              "mutation_operators": [
+                "uniform_two_edge_switch",
+                "forbidden_cycle_break_switch"
+              ],
+              "mutation_weights_contract": {
+                "known_operators_only": true,
+                "minimum_weight": 0.0,
+                "normalized_before_execution": true,
+                "positive_sum_required": true
+              },
+              "parameter_domains": {
+                "batch_candidates": {
+                  "maximum": 1000000,
+                  "minimum": 100,
+                  "type": "integer"
+                },
+                "cooling": {
+                  "maximum": 1.0,
+                  "minimum": 0.9,
+                  "type": "number"
+                },
+                "order": {
+                  "maximum": 128,
+                  "minimum": 4,
+                  "type": "integer"
+                },
+                "perturbation_interval": {
+                  "maximum": 1000000,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "restart_threshold": {
+                  "maximum": 10000000,
+                  "minimum": 100,
+                  "type": "integer"
+                },
+                "tabu_tenure": {
+                  "maximum": 4096,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "temperature": {
+                  "maximum": 100.0,
+                  "minimum": 0.001,
+                  "type": "number"
+                },
+                "witness_cap": {
+                  "maximum": 10000,
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "reference_objects": [
+                {
+                  "advisory_allowed": true,
+                  "evidence_allowed": true,
+                  "executable_allowed": false,
+                  "id": "lane-36ef6c44aded9d38cfc4dd72",
+                  "object_kind": "lane",
+                  "status": "stopped"
+                },
+                {
+                  "advisory_allowed": true,
+                  "evidence_allowed": true,
+                  "executable_allowed": false,
+                  "id": "lane-fc3311f3e8cd88ddb8b31293",
+                  "object_kind": "lane",
+                  "status": "stopped"
+                },
+                {
+                  "advisory_allowed": true,
+                  "evidence_allowed": true,
+                  "executable_allowed": false,
+                  "id": "lane-b6a9e52b62176089963c03df",
+                  "object_kind": "lane",
+                  "status": "stopped"
+                },
+                {
+                  "advisory_allowed": true,
+                  "evidence_allowed": true,
+                  "executable_allowed": true,
+                  "id": "candidate-5ddcaa89183997470eb5e08d",
+                  "object_kind": "candidate",
+                  "status": "retained"
+                },
+                {
+                  "advisory_allowed": true,
+                  "evidence_allowed": true,
+                  "executable_allowed": false,
+                  "id": "checkpoint-1829a30dca43791c355f854d",
+                  "object_kind": "checkpoint",
+                  "status": "retained"
+                }
+              ],
+              "review_events": [
+                "new_global_best",
+                "meaningful_improvement",
+                "regression",
+                "stagnation",
+                "diversity_collapse",
+                "operator_yield_shift",
+                "verification_result",
+                "verifier_disagreement",
+                "lane_failure",
+                "resource_pressure",
+                "action_lease_expired"
+              ]
+            },
+            "applicable_action_space_sha256": "d0709fbf795ba05ae73cbfab19f2cc23ddb0f491b8c4fc542fb6eca842874461",
+            "client_owned_estimated_tokens": 7827,
+            "compaction_operation_count": 0,
+            "completed_timestamp": "2026-07-25T10:22:01Z",
+            "director_state_bytes": 18111,
+            "director_state_sha256": "94347f651d821bcbf502a517f9913f3924d89afee308f667d9adff39ee8db4bd",
+            "evidence_references": [
+              "A1",
+              "A2",
+              "A3",
+              "candidate-summary:candidate-5ddcaa89183997470eb5e08d"
+            ],
+            "evidence_registry_artifact": "director/evidence-registries/app-turn-b73a88b046cc423fb501e464c3300983.json",
+            "evidence_registry_sha256": "48571c03d8b8da9e922fbd0710bf1f98a9a3f51826ea5656333ff0f165cb5428",
+            "executable_target_registry_sha256": "07b0af203732db6b02671870fefc1bd8a54826c78f8b38f5d861f199fbc85b30",
+            "executed": false,
+            "expected_signal": "Produce an authoritative verification record confirming or superseding the existing rejection.",
+            "final_answer_latency_seconds": 77.42830162961036,
+            "final_answer_presence": true,
+            "first_item_latency_seconds": 0.009788916446268559,
+            "full_client_request_bytes": 33552,
+            "graceful_shutdown_result": "graceful",
+            "historical_evidence_targets": [
+              "lane-36ef6c44aded9d38cfc4dd72",
+              "lane-b6a9e52b62176089963c03df",
+              "lane-fc3311f3e8cd88ddb8b31293"
+            ],
+            "hypothesis": [
+              "Connected-cubic search can reduce heuristic forbidden-cycle counts, but low witness scores do not establish a counterexample; the current order-20/22 basin should be treated as rejected pending structural and verification reconciliation."
+            ],
+            "item_id": "msg_0f4c77503c515527016a648e374ea48191806c7a0809cb3556",
+            "item_ids": [
+              "019f98ca-9328-76b0-892d-9cef24641e25",
+              "msg_0f4c77503c515527016a648e374ea48191806c7a0809cb3556",
+              "rs_0f4c77503c515527016a648df9919c81918525cdf122750d43",
+              "rs_0f4c77503c515527016a648e02e54c8191a1426a8a2dcb7435",
+              "rs_0f4c77503c515527016a648e0c37d48191987e051d08ec5087",
+              "rs_0f4c77503c515527016a648e1589e88191a441d658321ce684",
+              "rs_0f4c77503c515527016a648e1ee0d881919041cf1d4801de96",
+              "rs_0f4c77503c515527016a648e2830f48191ab0cfc1a67941883",
+              "rs_0f4c77503c515527016a648e31863c8191ab4c9d56e9863b19"
+            ],
+            "latency_seconds": 80.4385305615142,
+            "latest_event_sequence": 834,
+            "lifecycle_status": "completed",
+            "local_semantic_validity": true,
+            "measurement_only": true,
+            "mode": "persistent_thread",
+            "model_contract": {
+              "checked_at": "2026-07-25T10:19:54Z",
+              "checked_before_inference": true,
+              "effective_model": "gpt-5.6-luna",
+              "effective_reasoning_effort": "xhigh",
+              "expected_model": "gpt-5.6-luna",
+              "expected_reasoning_effort": "xhigh",
+              "model_contract_matched": true,
+              "schema_version": "1.0"
+            },
+            "normalized_decision": {
+              "actions": [
+                {
+                  "action_id": "verify_candidate_001",
+                  "candidate_ids": [
+                    "candidate-5ddcaa89183997470eb5e08d"
+                  ],
+                  "effective_parameters": {},
+                  "evaluation_window": {
+                    "max_candidate_delta": 1,
+                    "max_wall_seconds": 106
+                  },
+                  "evidence_ids": [
+                    "A3",
+                    "candidate-summary:candidate-5ddcaa89183997470eb5e08d"
+                  ],
+                  "expected_effect": "Produce an authoritative verification record confirming or superseding the existing rejection.",
+                  "fallback": {
+                    "on_precondition_failure": "replan"
+                  },
+                  "hypothesis_ids": [
+                    "H3"
+                  ],
+                  "idempotency_key": "verify_candidate_5ddcaa89183997470eb5e08d_v1",
+                  "ignored_parameters": {},
+                  "lease_seconds": 30,
+                  "parameter_effects": {},
+                  "priority": 1,
+                  "rationale": "The retained candidate is marked not_submitted despite a complete exact-verifier rejection. Request formal M4 handling to reconcile certification metadata without treating the candidate as certified.",
+                  "rejected_parameters": {},
+                  "type": "schedule_verification",
+                  "verification_priority": 1
+                },
+                {
+                  "action_id": "diagnose_candidate_001",
+                  "diagnostic_type": "cycle_length_profile",
+                  "effective_parameters": {},
+                  "evaluation_window": {
+                    "max_candidate_delta": 1,
+                    "max_wall_seconds": 106
+                  },
+                  "evidence_ids": [
+                    "A1",
+                    "A2",
+                    "A3",
+                    "candidate-summary:candidate-5ddcaa89183997470eb5e08d"
+                  ],
+                  "expected_effect": "Provide structural evidence for revising the connected-cubic search hypothesis; witness-cap-truncated historical scores remain heuristic.",
+                  "fallback": {
+                    "on_precondition_failure": "reject"
+                  },
+                  "hypothesis_ids": [
+                    "H3"
+                  ],
+                  "idempotency_key": "diagnose_cycle_profile_5ddcaa89183997470eb5e08d_v1",
+                  "ignored_parameters": {},
+                  "lease_seconds": 30,
+                  "parameter_effects": {},
+                  "priority": 2,
+                  "rationale": "Characterize the rejected candidate's complete forbidden-cycle profile and check whether the low heuristic score reflects a structurally distinct basin or merely a near-miss with short cycles.",
+                  "rejected_parameters": {},
+                  "subject_ids": [
+                    "candidate-5ddcaa89183997470eb5e08d"
+                  ],
+                  "type": "request_diagnostic"
+                },
+                {
+                  "action_id": "review_trigger_001",
+                  "effective_parameters": {},
+                  "evaluation_window": {
+                    "max_candidate_delta": 1,
+                    "max_wall_seconds": 106
+                  },
+                  "evidence_ids": [
+                    "A3",
+                    "candidate-summary:candidate-5ddcaa89183997470eb5e08d"
+                  ],
+                  "expected_effect": "Reassess only if verification or diagnostic metadata changes the final campaign interpretation.",
+                  "fallback": {
+                    "on_precondition_failure": "reject"
+                  },
+                  "hypothesis_ids": [
+                    "H3"
+                  ],
+                  "idempotency_key": "final_review_trigger_v1",
+                  "ignored_parameters": {},
+                  "lease_seconds": 60,
+                  "parameter_effects": {},
+                  "priority": 3,
+                  "rationale": "The campaign is at its time and evaluation limit; schedule a final metadata review for verification disagreement rather than launching new search.",
+                  "rejected_parameters": {},
+                  "review_trigger": {
+                    "candidate_delta": 1,
+                    "events": [
+                      "verification_result",
+                      "verifier_disagreement",
+                      "action_lease_expired"
+                    ],
+                    "max_wall_seconds": 106,
+                    "min_wall_seconds": 106
+                  },
+                  "type": "set_review_trigger"
+                }
+              ],
+              "campaign_assessment": "The connected-cubic search produced a strong heuristic score at order 22, but the exact verifier rejected candidate-5ddcaa89183997470eb5e08d because it contains a forbidden 4-cycle. No evaluations or wall time remain, so starting another lane is not justified. Resolve the contradictory not_submitted metadata and retain the rejected result only as diagnostic evidence.",
+              "hypothesis_updates": [
+                {
+                  "confidence": 0.94,
+                  "evidence_against": [
+                    "A3"
+                  ],
+                  "evidence_for": [
+                    "A1",
+                    "A2",
+                    "A3"
+                  ],
+                  "hypothesis_id": "H3",
+                  "operation": "revise",
+                  "statement": "Connected-cubic search can reduce heuristic forbidden-cycle counts, but low witness scores do not establish a counterexample; the current order-20/22 basin should be treated as rejected pending structural and verification reconciliation."
+                }
+              ],
+              "next_review": {
+                "candidate_delta": 1,
+                "events": [
+                  "verification_result",
+                  "verifier_disagreement",
+                  "action_lease_expired"
+                ],
+                "max_wall_seconds": 106,
+                "min_wall_seconds": 106
+              },
+              "schema_version": "1.0",
+              "snapshot_id": "snapshot-736da511aed8450496da1b10ed707f91"
+            },
+            "output_schema_bytes": 10967,
+            "output_schema_sha256": "6f7293c8241d316c4c185b172828ef23c84f3369939f7d89d3a8de79bfde04e2",
+            "prompt_bytes": 19656,
+            "prompt_sha256": "d9ae1fd0e157825b97e4ad8d7b657f744a37c118c0a66bcbd7064f373358139c",
+            "raw_decision": {
+              "actions": [
+                {
+                  "action_id": "verify_candidate_001",
+                  "candidate_ids": [
+                    "candidate-5ddcaa89183997470eb5e08d"
+                  ],
+                  "evaluation_window": {
+                    "max_candidate_delta": 1,
+                    "max_wall_seconds": 106
+                  },
+                  "evidence_ids": [
+                    "A3",
+                    "candidate-summary:candidate-5ddcaa89183997470eb5e08d"
+                  ],
+                  "expected_effect": "Produce an authoritative verification record confirming or superseding the existing rejection.",
+                  "fallback": {
+                    "on_precondition_failure": "replan"
+                  },
+                  "hypothesis_ids": [
+                    "H3"
+                  ],
+                  "idempotency_key": "verify_candidate_5ddcaa89183997470eb5e08d_v1",
+                  "lease_seconds": 30,
+                  "priority": 1,
+                  "rationale": "The retained candidate is marked not_submitted despite a complete exact-verifier rejection. Request formal M4 handling to reconcile certification metadata without treating the candidate as certified.",
+                  "type": "schedule_verification",
+                  "verification_priority": 1
+                },
+                {
+                  "action_id": "diagnose_candidate_001",
+                  "diagnostic_type": "cycle_length_profile",
+                  "evaluation_window": {
+                    "max_candidate_delta": 1,
+                    "max_wall_seconds": 106
+                  },
+                  "evidence_ids": [
+                    "A1",
+                    "A2",
+                    "A3",
+                    "candidate-summary:candidate-5ddcaa89183997470eb5e08d"
+                  ],
+                  "expected_effect": "Provide structural evidence for revising the connected-cubic search hypothesis; witness-cap-truncated historical scores remain heuristic.",
+                  "fallback": {
+                    "on_precondition_failure": "reject"
+                  },
+                  "hypothesis_ids": [
+                    "H3"
+                  ],
+                  "idempotency_key": "diagnose_cycle_profile_5ddcaa89183997470eb5e08d_v1",
+                  "lease_seconds": 30,
+                  "priority": 2,
+                  "rationale": "Characterize the rejected candidate's complete forbidden-cycle profile and check whether the low heuristic score reflects a structurally distinct basin or merely a near-miss with short cycles.",
+                  "subject_ids": [
+                    "candidate-5ddcaa89183997470eb5e08d"
+                  ],
+                  "type": "request_diagnostic"
+                },
+                {
+                  "action_id": "review_trigger_001",
+                  "evaluation_window": {
+                    "max_candidate_delta": 1,
+                    "max_wall_seconds": 106
+                  },
+                  "evidence_ids": [
+                    "A3",
+                    "candidate-summary:candidate-5ddcaa89183997470eb5e08d"
+                  ],
+                  "expected_effect": "Reassess only if verification or diagnostic metadata changes the final campaign interpretation.",
+                  "fallback": {
+                    "on_precondition_failure": "reject"
+                  },
+                  "hypothesis_ids": [
+                    "H3"
+                  ],
+                  "idempotency_key": "final_review_trigger_v1",
+                  "lease_seconds": 60,
+                  "priority": 3,
+                  "rationale": "The campaign is at its time and evaluation limit; schedule a final metadata review for verification disagreement rather than launching new search.",
+                  "review_trigger": {
+                    "candidate_delta": 1,
+                    "events": [
+                      "verification_result",
+                      "verifier_disagreement",
+                      "action_lease_expired"
+                    ],
+                    "max_wall_seconds": 106,
+                    "min_wall_seconds": 106
+                  },
+                  "type": "set_review_trigger"
+                }
+              ],
+              "campaign_assessment": "The connected-cubic search produced a strong heuristic score at order 22, but the exact verifier rejected candidate-5ddcaa89183997470eb5e08d because it contains a forbidden 4-cycle. No evaluations or wall time remain, so starting another lane is not justified. Resolve the contradictory not_submitted metadata and retain the rejected result only as diagnostic evidence.",
+              "hypothesis_updates": [
+                {
+                  "confidence": 0.94,
+                  "evidence_against": [
+                    "A3"
+                  ],
+                  "evidence_for": [
+                    "A1",
+                    "A2",
+                    "A3"
+                  ],
+                  "hypothesis_id": "H3",
+                  "operation": "revise",
+                  "statement": "Connected-cubic search can reduce heuristic forbidden-cycle counts, but low witness scores do not establish a counterexample; the current order-20/22 basin should be treated as rejected pending structural and verification reconciliation."
+                }
+              ],
+              "next_review": {
+                "candidate_delta": 1,
+                "events": [
+                  "verification_result",
+                  "verifier_disagreement",
+                  "action_lease_expired"
+                ],
+                "max_wall_seconds": 106,
+                "min_wall_seconds": 106
+              },
+              "schema_version": "1.0",
+              "snapshot_id": "snapshot-736da511aed8450496da1b10ed707f91"
+            },
+            "reasoning_item_ids": [
+              "rs_0f4c77503c515527016a648df9919c81918525cdf122750d43",
+              "rs_0f4c77503c515527016a648e02e54c8191a1426a8a2dcb7435",
+              "rs_0f4c77503c515527016a648e0c37d48191987e051d08ec5087",
+              "rs_0f4c77503c515527016a648e1589e88191a441d658321ce684",
+              "rs_0f4c77503c515527016a648e1ee0d881919041cf1d4801de96",
+              "rs_0f4c77503c515527016a648e2830f48191ab0cfc1a67941883",
+              "rs_0f4c77503c515527016a648e31863c8191ab4c9d56e9863b19"
+            ],
+            "request_artifact": "director/requests/app-turn-b73a88b046cc423fb501e464c3300983.json",
+            "request_id": "12",
+            "request_sha256": "a000cd01741cbe478bf71262f1c7b22f3143aec20c135da9a3f3e05b6de4c6ac",
+            "response_artifact": "director/responses/app-turn-b73a88b046cc423fb501e464c3300983.json",
+            "response_sha256": "9cda5b4f9a372d92eb6c0e91a2789827d40a17f7a06dfa06f155f5099ce3863b",
+            "retry_count_reaching_inference": 0,
+            "schema_validity": true,
+            "selected_action": "schedule_verification",
+            "selected_algorithm": null,
+            "selected_parameters": {},
+            "semantic_rubric": {
+              "checks": {
+                "budgets_respected": true,
+                "facts_referenced_by_structured_ids_are_present": true,
+                "implemented_parameters_only": true,
+                "inside_allowed_action_space": true,
+                "no_code_tool_file_or_shell_request": true,
+                "no_counterexample_claim": true,
+                "no_measurement_decision_execution_request": true,
+                "no_statistical_superiority_claim": true,
+                "truncated_counts_not_claimed_exact": true
+              },
+              "ok": true,
+              "scope": "Deterministic structured-ID, catalog, parameter, budget and prohibited-request checks; no free-text fact entailment inference.",
+              "validation_issues": []
+            },
+            "slot": "P2",
+            "snapshot_id": "snapshot-736da511aed8450496da1b10ed707f91",
+            "source_snapshot_id": "snapshot-736da511aed8450496da1b10ed707f91",
+            "start_timestamp": "2026-07-25T10:20:40Z",
+            "thread_id": "019f98c9-df7d-78d1-a134-1a988305d19d",
+            "tool_call_count": 0,
+            "turn_id": "019f98ca-9321-7cd3-8fb7-4fd7bc96e508",
+            "turn_record_id": "app-turn-b73a88b046cc423fb501e464c3300983",
+            "turn_start_json_rpc_bytes": 32773,
+            "turn_started_timestamp": "2026-07-25T10:20:40Z",
+            "usage": {
+              "cache_write_input_tokens": 0,
+              "cached_input_tokens": 0,
+              "input_tokens": 12754,
+              "output_tokens": 4245,
+              "reasoning_output_tokens": 3421,
+              "server_reported_total_tokens": 16999
+            },
+            "usage_presence": true,
+            "validation_issues": [],
+            "wire_log_artifact": "director/wire/app-turn-b73a88b046cc423fb501e464c3300983.jsonl",
+            "wire_log_sha256": "039b24bf8f43b571d1b19e01f0b822bec43aabc9f548567f88ac64d62619a942"
+          }
+        ],
+        "unsupported_server_requests": 0
+      },
+      "stateless_turns": {
+        "action_dispatches": 0,
+        "candidate_evaluations": 0,
+        "compaction_operations": 0,
+        "completed": true,
+        "failure": null,
+        "graceful_shutdown": "graceful",
+        "latency_total_seconds": 117.19137288630009,
+        "mode": "stateless_turns",
+        "model_contract": {
+          "checked_at": "2026-07-25T10:17:56Z",
+          "checked_before_inference": true,
+          "effective_model": "gpt-5.6-luna",
+          "effective_reasoning_effort": "xhigh",
+          "expected_model": "gpt-5.6-luna",
+          "expected_reasoning_effort": "xhigh",
+          "model_contract_matched": true,
+          "schema_version": "1.0"
+        },
+        "persisted_decision_batches": 0,
+        "search_batches": 0,
+        "search_lanes": 0,
+        "sessions": [
+          {
+            "effort_requested": "xhigh",
+            "model_requested": "gpt-5.6-luna",
+            "state": "closed",
+            "thread_id": "019f98c8-123a-7781-aa3c-dfa556d89f92"
+          }
+        ],
+        "sqlite_integrity_check": "ok",
+        "thread_ids": [
+          "019f98c8-123a-7781-aa3c-dfa556d89f92"
+        ],
+        "turns": [
+          {
+            "active_executable_targets": [
+              "candidate-5ddcaa89183997470eb5e08d"
+            ],
+            "advisory_target_registry_sha256": "2f2c50f29a48c15157abc726997d8bfc1d37fb977873fd7a7d1d3d5e588ac49d",
+            "applicable_action_space": {
+              "action_applicability": {
+                "promote_candidate": "at least one retained candidate is available",
+                "request_diagnostic": "at least one submitted evidence subject is available",
+                "schedule_verification": "at least one retained candidate is available for M4 verification",
+                "set_review_trigger": "review scheduling is lane-independent",
+                "start_lane": "capacity exists for one reviewed new search lane"
+              },
+              "actions": [
+                "start_lane",
+                "promote_candidate",
+                "request_diagnostic",
+                "schedule_verification",
+                "set_review_trigger"
+              ],
+              "active_executable_lane_ids": [],
+              "algorithm_parameters": {
+                "iterated_local_search": [
+                  "batch_candidates",
+                  "mutation_weights",
+                  "order",
+                  "perturbation_interval",
+                  "tabu_tenure",
+                  "witness_cap"
+                ],
+                "iterated_local_search_tabu": [
+                  "batch_candidates",
+                  "mutation_weights",
+                  "order",
+                  "perturbation_interval",
+                  "tabu_tenure",
+                  "witness_cap"
+                ],
+                "random_restart": [
+                  "batch_candidates",
+                  "order",
+                  "witness_cap"
+                ],
+                "simulated_annealing": [
+                  "batch_candidates",
+                  "cooling",
+                  "mutation_weights",
+                  "order",
+                  "restart_threshold",
+                  "temperature",
+                  "witness_cap"
+                ]
+              },
+              "algorithms": [
+                "random_restart",
+                "simulated_annealing",
+                "iterated_local_search_tabu",
+                "iterated_local_search"
+              ],
+              "candidate_target_ids": [
+                "candidate-5ddcaa89183997470eb5e08d"
+              ],
+              "catalog_version": "1.1",
+              "checkpoint_target_ids": [
+                "checkpoint-1829a30dca43791c355f854d"
+              ],
+              "diagnostics": [
+                "cycle_length_profile",
+                "graph_invariants",
+                "mutation_ancestry",
+                "archive_cluster_comparison",
+                "operator_yield",
+                "candidate_structural_diff",
+                "canonical_duplicate_analysis"
+              ],
+              "graph_families": [
+                "connected_cubic",
+                "predominantly_cubic",
+                "unrestricted_min_degree_3"
+              ],
+              "historical_lane_ids": [
+                "lane-36ef6c44aded9d38cfc4dd72",
+                "lane-b6a9e52b62176089963c03df",
+                "lane-fc3311f3e8cd88ddb8b31293"
+              ],
+              "mutation_operators": [
+                "uniform_two_edge_switch",
+                "forbidden_cycle_break_switch"
+              ],
+              "mutation_weights_contract": {
+                "known_operators_only": true,
+                "minimum_weight": 0.0,
+                "normalized_before_execution": true,
+                "positive_sum_required": true
+              },
+              "parameter_domains": {
+                "batch_candidates": {
+                  "maximum": 1000000,
+                  "minimum": 100,
+                  "type": "integer"
+                },
+                "cooling": {
+                  "maximum": 1.0,
+                  "minimum": 0.9,
+                  "type": "number"
+                },
+                "order": {
+                  "maximum": 128,
+                  "minimum": 4,
+                  "type": "integer"
+                },
+                "perturbation_interval": {
+                  "maximum": 1000000,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "restart_threshold": {
+                  "maximum": 10000000,
+                  "minimum": 100,
+                  "type": "integer"
+                },
+                "tabu_tenure": {
+                  "maximum": 4096,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "temperature": {
+                  "maximum": 100.0,
+                  "minimum": 0.001,
+                  "type": "number"
+                },
+                "witness_cap": {
+                  "maximum": 10000,
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "reference_objects": [
+                {
+                  "advisory_allowed": true,
+                  "evidence_allowed": true,
+                  "executable_allowed": false,
+                  "id": "lane-36ef6c44aded9d38cfc4dd72",
+                  "object_kind": "lane",
+                  "status": "stopped"
+                },
+                {
+                  "advisory_allowed": true,
+                  "evidence_allowed": true,
+                  "executable_allowed": false,
+                  "id": "lane-fc3311f3e8cd88ddb8b31293",
+                  "object_kind": "lane",
+                  "status": "stopped"
+                },
+                {
+                  "advisory_allowed": true,
+                  "evidence_allowed": true,
+                  "executable_allowed": false,
+                  "id": "lane-b6a9e52b62176089963c03df",
+                  "object_kind": "lane",
+                  "status": "stopped"
+                },
+                {
+                  "advisory_allowed": true,
+                  "evidence_allowed": true,
+                  "executable_allowed": true,
+                  "id": "candidate-5ddcaa89183997470eb5e08d",
+                  "object_kind": "candidate",
+                  "status": "retained"
+                },
+                {
+                  "advisory_allowed": true,
+                  "evidence_allowed": true,
+                  "executable_allowed": false,
+                  "id": "checkpoint-1829a30dca43791c355f854d",
+                  "object_kind": "checkpoint",
+                  "status": "retained"
+                }
+              ],
+              "review_events": [
+                "new_global_best",
+                "meaningful_improvement",
+                "regression",
+                "stagnation",
+                "diversity_collapse",
+                "operator_yield_shift",
+                "verification_result",
+                "verifier_disagreement",
+                "lane_failure",
+                "resource_pressure",
+                "action_lease_expired"
+              ]
+            },
+            "applicable_action_space_sha256": "d0709fbf795ba05ae73cbfab19f2cc23ddb0f491b8c4fc542fb6eca842874461",
+            "client_owned_estimated_tokens": 7827,
+            "compaction_operation_count": 0,
+            "completed_timestamp": "2026-07-25T10:19:53Z",
+            "director_state_bytes": 18111,
+            "director_state_sha256": "94347f651d821bcbf502a517f9913f3924d89afee308f667d9adff39ee8db4bd",
+            "evidence_references": [
+              "A3",
+              "candidate-summary:candidate-5ddcaa89183997470eb5e08d",
+              "snapshot-736da511aed8450496da1b10ed707f91"
+            ],
+            "evidence_registry_artifact": "director/evidence-registries/app-turn-58dbf51a4c184b8ab9f69c9d564535ac.json",
+            "evidence_registry_sha256": "48571c03d8b8da9e922fbd0710bf1f98a9a3f51826ea5656333ff0f165cb5428",
+            "executable_target_registry_sha256": "07b0af203732db6b02671870fefc1bd8a54826c78f8b38f5d861f199fbc85b30",
+            "executed": false,
+            "expected_signal": "Identify the residual forbidden-cycle structure and clarify whether capped telemetry obscured any relevant cycle multiplicities; this does not certify the candidate.",
+            "final_answer_latency_seconds": 114.18362879566848,
+            "final_answer_presence": true,
+            "first_item_latency_seconds": 1.118570321239531,
+            "full_client_request_bytes": 33552,
+            "graceful_shutdown_result": "graceful",
+            "historical_evidence_targets": [
+              "lane-36ef6c44aded9d38cfc4dd72",
+              "lane-b6a9e52b62176089963c03df",
+              "lane-fc3311f3e8cd88ddb8b31293"
+            ],
+            "hypothesis": [
+              "The H3 local score and witness-count threshold is attainable at order 22, but it is not a proxy for M4 validity: the candidate scored [0,3,40,0,33] with two 4-cycle witnesses and was rejected.",
+              "Residual forbidden 4-cycles are the immediate blocker for the retained candidate; postmortem analysis should focus on exact cycle structure rather than aggregate penalty reduction."
+            ],
+            "item_id": "msg_02eb7f1dc86aa6b5016a648db8ea448191a9898296a7cfe818",
+            "item_ids": [
+              "019f98c8-16db-73a2-908d-af54b7285168",
+              "msg_02eb7f1dc86aa6b5016a648db8ea448191a9898296a7cfe818",
+              "rs_02eb7f1dc86aa6b5016a648d56e3108191b4e81afd1c0a4936",
+              "rs_02eb7f1dc86aa6b5016a648d6033f48191ac07392a2420bdc3",
+              "rs_02eb7f1dc86aa6b5016a648d6985088191b54d304cecc4cb0b",
+              "rs_02eb7f1dc86aa6b5016a648d72d8808191ae4826b4adcf5ff7",
+              "rs_02eb7f1dc86aa6b5016a648d7c2c6881918520d4e2c4faf007",
+              "rs_02eb7f1dc86aa6b5016a648d857d5c8191872297f6349662bf",
+              "rs_02eb7f1dc86aa6b5016a648d8ed17881919a70149d9d2548de",
+              "rs_02eb7f1dc86aa6b5016a648d9889f08191a1b49ee51c5f310d",
+              "rs_02eb7f1dc86aa6b5016a648da177288191831f7aa2d626addb",
+              "rs_02eb7f1dc86aa6b5016a648daacd208191aa36e5084e4a2772",
+              "rs_02eb7f1dc86aa6b5016a648db41fb8819199fe54a63919d075"
+            ],
+            "latency_seconds": 117.19137288630009,
+            "latest_event_sequence": 795,
+            "lifecycle_status": "completed",
+            "local_semantic_validity": true,
+            "measurement_only": true,
+            "mode": "stateless_turns",
+            "model_contract": {
+              "checked_at": "2026-07-25T10:17:56Z",
+              "checked_before_inference": true,
+              "effective_model": "gpt-5.6-luna",
+              "effective_reasoning_effort": "xhigh",
+              "expected_model": "gpt-5.6-luna",
+              "expected_reasoning_effort": "xhigh",
+              "model_contract_matched": true,
+              "schema_version": "1.0"
+            },
+            "normalized_decision": {
+              "actions": [
+                {
+                  "action_id": "D4-cycle-profile",
+                  "diagnostic_type": "cycle_length_profile",
+                  "effective_parameters": {},
+                  "evaluation_window": {
+                    "max_candidate_delta": 1,
+                    "max_wall_seconds": 100
+                  },
+                  "evidence_ids": [
+                    "candidate-summary:candidate-5ddcaa89183997470eb5e08d",
+                    "A3"
+                  ],
+                  "expected_effect": "Identify the residual forbidden-cycle structure and clarify whether capped telemetry obscured any relevant cycle multiplicities; this does not certify the candidate.",
+                  "fallback": {
+                    "on_precondition_failure": "reject"
+                  },
+                  "hypothesis_ids": [
+                    "H3",
+                    "H4"
+                  ],
+                  "idempotency_key": "diag-cycle-profile-candidate-5ddcaa89183997470eb5e08d",
+                  "ignored_parameters": {},
+                  "lease_seconds": 30,
+                  "parameter_effects": {},
+                  "priority": 1,
+                  "rationale": "The retained candidate improved substantially but was exactly rejected for a forbidden 4-cycle; a cycle profile is the most direct postmortem diagnostic.",
+                  "rejected_parameters": {},
+                  "subject_ids": [
+                    "candidate-5ddcaa89183997470eb5e08d"
+                  ],
+                  "type": "request_diagnostic"
+                },
+                {
+                  "action_id": "R4-stop-review",
+                  "effective_parameters": {},
+                  "evaluation_window": {
+                    "max_candidate_delta": 1,
+                    "max_wall_seconds": 100
+                  },
+                  "evidence_ids": [
+                    "snapshot-736da511aed8450496da1b10ed707f91"
+                  ],
+                  "expected_effect": "Prevent unbudgeted search while surfacing any verifier disagreement or action-lease anomaly for scientific review.",
+                  "fallback": {
+                    "on_precondition_failure": "reject"
+                  },
+                  "hypothesis_ids": [
+                    "H3",
+                    "H4"
+                  ],
+                  "idempotency_key": "review-stop-candidate-5ddcaa89183997470eb5e08d",
+                  "ignored_parameters": {},
+                  "lease_seconds": 30,
+                  "parameter_effects": {},
+                  "priority": 2,
+                  "rationale": "The campaign is stopped with zero evaluation and wall-clock budget remaining; review should occur only for stale-action or verifier-state changes, not trigger an unbudgeted restart.",
+                  "rejected_parameters": {},
+                  "review_trigger": {
+                    "candidate_delta": 1,
+                    "events": [
+                      "verification_result",
+                      "verifier_disagreement",
+                      "resource_pressure",
+                      "action_lease_expired"
+                    ],
+                    "max_wall_seconds": 100,
+                    "min_wall_seconds": 100
+                  },
+                  "type": "set_review_trigger"
+                }
+              ],
+              "campaign_assessment": "The search exhausted its budget and produced no certified counterexample. A3 achieved the H3 score threshold, but the exact verifier rejected the retained candidate because it contains a forbidden 4-cycle. No new search lane or verification promotion is justified after the stop condition.",
+              "hypothesis_updates": [
+                {
+                  "confidence": 0.99,
+                  "evidence_against": [
+                    "snapshot-736da511aed8450496da1b10ed707f91"
+                  ],
+                  "evidence_for": [
+                    "A3",
+                    "candidate-summary:candidate-5ddcaa89183997470eb5e08d"
+                  ],
+                  "hypothesis_id": "H3",
+                  "operation": "revise",
+                  "statement": "The H3 local score and witness-count threshold is attainable at order 22, but it is not a proxy for M4 validity: the candidate scored [0,3,40,0,33] with two 4-cycle witnesses and was rejected."
+                },
+                {
+                  "confidence": 0.98,
+                  "evidence_against": [],
+                  "evidence_for": [
+                    "candidate-summary:candidate-5ddcaa89183997470eb5e08d",
+                    "snapshot-736da511aed8450496da1b10ed707f91"
+                  ],
+                  "hypothesis_id": "H4",
+                  "operation": "create",
+                  "statement": "Residual forbidden 4-cycles are the immediate blocker for the retained candidate; postmortem analysis should focus on exact cycle structure rather than aggregate penalty reduction."
+                }
+              ],
+              "next_review": {
+                "candidate_delta": 1,
+                "events": [
+                  "verification_result",
+                  "verifier_disagreement",
+                  "resource_pressure",
+                  "action_lease_expired"
+                ],
+                "max_wall_seconds": 100,
+                "min_wall_seconds": 100
+              },
+              "schema_version": "1.0",
+              "snapshot_id": "snapshot-736da511aed8450496da1b10ed707f91"
+            },
+            "output_schema_bytes": 10967,
+            "output_schema_sha256": "6f7293c8241d316c4c185b172828ef23c84f3369939f7d89d3a8de79bfde04e2",
+            "prompt_bytes": 19656,
+            "prompt_sha256": "d9ae1fd0e157825b97e4ad8d7b657f744a37c118c0a66bcbd7064f373358139c",
+            "raw_decision": {
+              "actions": [
+                {
+                  "action_id": "D4-cycle-profile",
+                  "diagnostic_type": "cycle_length_profile",
+                  "evaluation_window": {
+                    "max_candidate_delta": 1,
+                    "max_wall_seconds": 100
+                  },
+                  "evidence_ids": [
+                    "candidate-summary:candidate-5ddcaa89183997470eb5e08d",
+                    "A3"
+                  ],
+                  "expected_effect": "Identify the residual forbidden-cycle structure and clarify whether capped telemetry obscured any relevant cycle multiplicities; this does not certify the candidate.",
+                  "fallback": {
+                    "on_precondition_failure": "reject"
+                  },
+                  "hypothesis_ids": [
+                    "H3",
+                    "H4"
+                  ],
+                  "idempotency_key": "diag-cycle-profile-candidate-5ddcaa89183997470eb5e08d",
+                  "lease_seconds": 30,
+                  "priority": 1,
+                  "rationale": "The retained candidate improved substantially but was exactly rejected for a forbidden 4-cycle; a cycle profile is the most direct postmortem diagnostic.",
+                  "subject_ids": [
+                    "candidate-5ddcaa89183997470eb5e08d"
+                  ],
+                  "type": "request_diagnostic"
+                },
+                {
+                  "action_id": "R4-stop-review",
+                  "evaluation_window": {
+                    "max_candidate_delta": 1,
+                    "max_wall_seconds": 100
+                  },
+                  "evidence_ids": [
+                    "snapshot-736da511aed8450496da1b10ed707f91"
+                  ],
+                  "expected_effect": "Prevent unbudgeted search while surfacing any verifier disagreement or action-lease anomaly for scientific review.",
+                  "fallback": {
+                    "on_precondition_failure": "reject"
+                  },
+                  "hypothesis_ids": [
+                    "H3",
+                    "H4"
+                  ],
+                  "idempotency_key": "review-stop-candidate-5ddcaa89183997470eb5e08d",
+                  "lease_seconds": 30,
+                  "priority": 2,
+                  "rationale": "The campaign is stopped with zero evaluation and wall-clock budget remaining; review should occur only for stale-action or verifier-state changes, not trigger an unbudgeted restart.",
+                  "review_trigger": {
+                    "candidate_delta": 1,
+                    "events": [
+                      "verification_result",
+                      "verifier_disagreement",
+                      "resource_pressure",
+                      "action_lease_expired"
+                    ],
+                    "max_wall_seconds": 100,
+                    "min_wall_seconds": 100
+                  },
+                  "type": "set_review_trigger"
+                }
+              ],
+              "campaign_assessment": "The search exhausted its budget and produced no certified counterexample. A3 achieved the H3 score threshold, but the exact verifier rejected the retained candidate because it contains a forbidden 4-cycle. No new search lane or verification promotion is justified after the stop condition.",
+              "hypothesis_updates": [
+                {
+                  "confidence": 0.99,
+                  "evidence_against": [
+                    "snapshot-736da511aed8450496da1b10ed707f91"
+                  ],
+                  "evidence_for": [
+                    "A3",
+                    "candidate-summary:candidate-5ddcaa89183997470eb5e08d"
+                  ],
+                  "hypothesis_id": "H3",
+                  "operation": "revise",
+                  "statement": "The H3 local score and witness-count threshold is attainable at order 22, but it is not a proxy for M4 validity: the candidate scored [0,3,40,0,33] with two 4-cycle witnesses and was rejected."
+                },
+                {
+                  "confidence": 0.98,
+                  "evidence_against": [],
+                  "evidence_for": [
+                    "candidate-summary:candidate-5ddcaa89183997470eb5e08d",
+                    "snapshot-736da511aed8450496da1b10ed707f91"
+                  ],
+                  "hypothesis_id": "H4",
+                  "operation": "create",
+                  "statement": "Residual forbidden 4-cycles are the immediate blocker for the retained candidate; postmortem analysis should focus on exact cycle structure rather than aggregate penalty reduction."
+                }
+              ],
+              "next_review": {
+                "candidate_delta": 1,
+                "events": [
+                  "verification_result",
+                  "verifier_disagreement",
+                  "resource_pressure",
+                  "action_lease_expired"
+                ],
+                "max_wall_seconds": 100,
+                "min_wall_seconds": 100
+              },
+              "schema_version": "1.0",
+              "snapshot_id": "snapshot-736da511aed8450496da1b10ed707f91"
+            },
+            "reasoning_item_ids": [
+              "rs_02eb7f1dc86aa6b5016a648d56e3108191b4e81afd1c0a4936",
+              "rs_02eb7f1dc86aa6b5016a648d6033f48191ac07392a2420bdc3",
+              "rs_02eb7f1dc86aa6b5016a648d6985088191b54d304cecc4cb0b",
+              "rs_02eb7f1dc86aa6b5016a648d72d8808191ae4826b4adcf5ff7",
+              "rs_02eb7f1dc86aa6b5016a648d7c2c6881918520d4e2c4faf007",
+              "rs_02eb7f1dc86aa6b5016a648d857d5c8191872297f6349662bf",
+              "rs_02eb7f1dc86aa6b5016a648d8ed17881919a70149d9d2548de",
+              "rs_02eb7f1dc86aa6b5016a648d9889f08191a1b49ee51c5f310d",
+              "rs_02eb7f1dc86aa6b5016a648da177288191831f7aa2d626addb",
+              "rs_02eb7f1dc86aa6b5016a648daacd208191aa36e5084e4a2772",
+              "rs_02eb7f1dc86aa6b5016a648db41fb8819199fe54a63919d075"
+            ],
+            "request_artifact": "director/requests/app-turn-58dbf51a4c184b8ab9f69c9d564535ac.json",
+            "request_id": "11",
+            "request_sha256": "28e9151524b1903d8a9472da8815826a5534bb43ab37ae4ab9f5e8b33fa069ee",
+            "response_artifact": "director/responses/app-turn-58dbf51a4c184b8ab9f69c9d564535ac.json",
+            "response_sha256": "c25060d7fadfc034f32f53cef9cdf3cfab506453478525633305767c8173da40",
+            "retry_count_reaching_inference": 0,
+            "schema_validity": true,
+            "selected_action": "request_diagnostic",
+            "selected_algorithm": null,
+            "selected_parameters": {},
+            "semantic_rubric": {
+              "checks": {
+                "budgets_respected": true,
+                "facts_referenced_by_structured_ids_are_present": true,
+                "implemented_parameters_only": true,
+                "inside_allowed_action_space": true,
+                "no_code_tool_file_or_shell_request": true,
+                "no_counterexample_claim": true,
+                "no_measurement_decision_execution_request": true,
+                "no_statistical_superiority_claim": true,
+                "truncated_counts_not_claimed_exact": true
+              },
+              "ok": true,
+              "scope": "Deterministic structured-ID, catalog, parameter, budget and prohibited-request checks; no free-text fact entailment inference.",
+              "validation_issues": []
+            },
+            "slot": "S2",
+            "snapshot_id": "snapshot-736da511aed8450496da1b10ed707f91",
+            "source_snapshot_id": "snapshot-736da511aed8450496da1b10ed707f91",
+            "start_timestamp": "2026-07-25T10:17:56Z",
+            "thread_id": "019f98c8-123a-7781-aa3c-dfa556d89f92",
+            "tool_call_count": 0,
+            "turn_id": "019f98c8-127f-7e53-bbe3-598b316e3765",
+            "turn_record_id": "app-turn-58dbf51a4c184b8ab9f69c9d564535ac",
+            "turn_start_json_rpc_bytes": 32772,
+            "turn_started_timestamp": "2026-07-25T10:17:56Z",
+            "usage": {
+              "cache_write_input_tokens": 0,
+              "cached_input_tokens": 0,
+              "input_tokens": 9591,
+              "output_tokens": 6215,
+              "reasoning_output_tokens": 5438,
+              "server_reported_total_tokens": 15806
+            },
+            "usage_presence": true,
+            "validation_issues": [],
+            "wire_log_artifact": "director/wire/app-turn-58dbf51a4c184b8ab9f69c9d564535ac.jsonl",
+            "wire_log_sha256": "7fbd2c475e3e2ffd139564ce8fcff03b91192b353bb4298006dfec62830885bb"
+          }
+        ],
+        "unsupported_server_requests": 0
+      }
+    },
+    "candidate_evaluations": 0,
+    "codex_version": "codex-cli 0.145.0",
+    "compaction_operations": 0,
+    "created_at": "2026-07-25T10:22:01Z",
+    "deterministic_preparation": {
+      "context_budgets": [
+        {
+          "advisory_target_registry": {
+            "director_state_sha256": "94347f651d821bcbf502a517f9913f3924d89afee308f667d9adff39ee8db4bd",
+            "references": [
+              {
+                "advisory_allowed": true,
+                "current_lifecycle_status": "retained",
+                "director_state_json_paths": [
+                  "$.allowed_action_space.reference_objects[3].id",
+                  "$.ancestry.final_best_accepted_ancestors[7].candidate_id",
+                  "$.ancestry.global_record_summaries[7].candidate_id",
+                  "$.artifact_references[4].id",
+                  "$.best_ever_result.candidate_id",
+                  "$.latest_batch_outcome.best_candidate_identifier"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": true,
+                "id": "candidate-5ddcaa89183997470eb5e08d",
+                "object_kind": "best_candidate",
+                "object_kinds": [
+                  "best_candidate",
+                  "candidate"
+                ]
+              },
+              {
+                "advisory_allowed": true,
+                "current_lifecycle_status": "retained",
+                "director_state_json_paths": [
+                  "$.allowed_action_space.reference_objects[4].id",
+                  "$.best_ever_result.checkpoint_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "checkpoint-1829a30dca43791c355f854d",
+                "object_kind": "checkpoint",
+                "object_kinds": [
+                  "checkpoint"
+                ]
+              },
+              {
+                "advisory_allowed": true,
+                "current_lifecycle_status": "stopped",
+                "director_state_json_paths": [
+                  "$.allowed_action_space.reference_objects[0].id",
+                  "$.best_ever_result.lane_id",
+                  "$.latest_batch_outcome.lane_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "lane-36ef6c44aded9d38cfc4dd72",
+                "object_kind": "lane",
+                "object_kinds": [
+                  "lane"
+                ]
+              },
+              {
+                "advisory_allowed": true,
+                "current_lifecycle_status": "stopped",
+                "director_state_json_paths": [
+                  "$.allowed_action_space.reference_objects[2].id",
+                  "$.previous_outcomes[1].lane_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "lane-b6a9e52b62176089963c03df",
+                "object_kind": "lane",
+                "object_kinds": [
+                  "lane"
+                ]
+              },
+              {
+                "advisory_allowed": true,
+                "current_lifecycle_status": "stopped",
+                "director_state_json_paths": [
+                  "$.allowed_action_space.reference_objects[1].id",
+                  "$.previous_outcomes[0].lane_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "lane-fc3311f3e8cd88ddb8b31293",
+                "object_kind": "lane",
+                "object_kinds": [
+                  "lane"
+                ]
+              }
+            ],
+            "role": "advisory_target_ids",
+            "schema_version": "2.0"
+          },
+          "advisory_target_registry_sha256": "2f2c50f29a48c15157abc726997d8bfc1d37fb977873fd7a7d1d3d5e588ac49d",
+          "allowed_action_space_sha256": "d0709fbf795ba05ae73cbfab19f2cc23ddb0f491b8c4fc542fb6eca842874461",
+          "ancestry_bytes": 5611,
+          "applicable_action_space": {
+            "action_applicability": {
+              "promote_candidate": "at least one retained candidate is available",
+              "request_diagnostic": "at least one submitted evidence subject is available",
+              "schedule_verification": "at least one retained candidate is available for M4 verification",
+              "set_review_trigger": "review scheduling is lane-independent",
+              "start_lane": "capacity exists for one reviewed new search lane"
+            },
+            "actions": [
+              "start_lane",
+              "promote_candidate",
+              "request_diagnostic",
+              "schedule_verification",
+              "set_review_trigger"
+            ],
+            "active_executable_lane_ids": [],
+            "algorithm_parameters": {
+              "iterated_local_search": [
+                "batch_candidates",
+                "mutation_weights",
+                "order",
+                "perturbation_interval",
+                "tabu_tenure",
+                "witness_cap"
+              ],
+              "iterated_local_search_tabu": [
+                "batch_candidates",
+                "mutation_weights",
+                "order",
+                "perturbation_interval",
+                "tabu_tenure",
+                "witness_cap"
+              ],
+              "random_restart": [
+                "batch_candidates",
+                "order",
+                "witness_cap"
+              ],
+              "simulated_annealing": [
+                "batch_candidates",
+                "cooling",
+                "mutation_weights",
+                "order",
+                "restart_threshold",
+                "temperature",
+                "witness_cap"
+              ]
+            },
+            "algorithms": [
+              "random_restart",
+              "simulated_annealing",
+              "iterated_local_search_tabu",
+              "iterated_local_search"
+            ],
+            "candidate_target_ids": [
+              "candidate-5ddcaa89183997470eb5e08d"
+            ],
+            "catalog_version": "1.1",
+            "checkpoint_target_ids": [
+              "checkpoint-1829a30dca43791c355f854d"
+            ],
+            "diagnostics": [
+              "cycle_length_profile",
+              "graph_invariants",
+              "mutation_ancestry",
+              "archive_cluster_comparison",
+              "operator_yield",
+              "candidate_structural_diff",
+              "canonical_duplicate_analysis"
+            ],
+            "graph_families": [
+              "connected_cubic",
+              "predominantly_cubic",
+              "unrestricted_min_degree_3"
+            ],
+            "historical_lane_ids": [
+              "lane-36ef6c44aded9d38cfc4dd72",
+              "lane-b6a9e52b62176089963c03df",
+              "lane-fc3311f3e8cd88ddb8b31293"
+            ],
+            "mutation_operators": [
+              "uniform_two_edge_switch",
+              "forbidden_cycle_break_switch"
+            ],
+            "mutation_weights_contract": {
+              "known_operators_only": true,
+              "minimum_weight": 0.0,
+              "normalized_before_execution": true,
+              "positive_sum_required": true
+            },
+            "parameter_domains": {
+              "batch_candidates": {
+                "maximum": 1000000,
+                "minimum": 100,
+                "type": "integer"
+              },
+              "cooling": {
+                "maximum": 1.0,
+                "minimum": 0.9,
+                "type": "number"
+              },
+              "order": {
+                "maximum": 128,
+                "minimum": 4,
+                "type": "integer"
+              },
+              "perturbation_interval": {
+                "maximum": 1000000,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "restart_threshold": {
+                "maximum": 10000000,
+                "minimum": 100,
+                "type": "integer"
+              },
+              "tabu_tenure": {
+                "maximum": 4096,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "temperature": {
+                "maximum": 100.0,
+                "minimum": 0.001,
+                "type": "number"
+              },
+              "witness_cap": {
+                "maximum": 10000,
+                "minimum": 1,
+                "type": "integer"
+              }
+            },
+            "reference_objects": [
+              {
+                "advisory_allowed": true,
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "lane-36ef6c44aded9d38cfc4dd72",
+                "object_kind": "lane",
+                "status": "stopped"
+              },
+              {
+                "advisory_allowed": true,
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "lane-fc3311f3e8cd88ddb8b31293",
+                "object_kind": "lane",
+                "status": "stopped"
+              },
+              {
+                "advisory_allowed": true,
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "lane-b6a9e52b62176089963c03df",
+                "object_kind": "lane",
+                "status": "stopped"
+              },
+              {
+                "advisory_allowed": true,
+                "evidence_allowed": true,
+                "executable_allowed": true,
+                "id": "candidate-5ddcaa89183997470eb5e08d",
+                "object_kind": "candidate",
+                "status": "retained"
+              },
+              {
+                "advisory_allowed": true,
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "checkpoint-1829a30dca43791c355f854d",
+                "object_kind": "checkpoint",
+                "status": "retained"
+              }
+            ],
+            "review_events": [
+              "new_global_best",
+              "meaningful_improvement",
+              "regression",
+              "stagnation",
+              "diversity_collapse",
+              "operator_yield_shift",
+              "verification_result",
+              "verifier_disagreement",
+              "lane_failure",
+              "resource_pressure",
+              "action_lease_expired"
+            ]
+          },
+          "artifact_references_sha256": "1110750775df3b4efc47316f3a93443e5eb05490c151e28e2fd04c5ff385c32a",
+          "base_instructions_bytes": 682,
+          "campaign_budget_sha256": "31e7fad5b6cb280aab8dfbc86ebd356fdd65e9821da0b542c5f7cfaa0527ce84",
+          "client_owned_estimated_tokens": 7827,
+          "complete_client_request_bytes": 33374,
+          "complete_client_request_sha256": "0a8f4052017b59576bcdb4a717e2bf8d841b8d7abe32f291de22b15ac5c6c18f",
+          "director_state_bytes": 18111,
+          "director_state_sha256": "94347f651d821bcbf502a517f9913f3924d89afee308f667d9adff39ee8db4bd",
+          "dispatch_scheduled": false,
+          "evidence_registry": {
+            "director_state_sha256": "94347f651d821bcbf502a517f9913f3924d89afee308f667d9adff39ee8db4bd",
+            "references": [
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.artifact_references[3].sha256",
+                  "$.previous_outcomes[1].outcome_artifact_sha256"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "4eb752b7275194530a96ce13b0a4bbc0b8a070d41de4cd42f7903ba0082099b9",
+                "object_kind": "artifact_hash",
+                "object_kinds": [
+                  "artifact_hash"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.artifact_references[2].sha256",
+                  "$.previous_outcomes[0].outcome_artifact_sha256"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "6145071ee7cfea359d936a5a929acdac3c2fa0e99a94e1d10df10d2dbb152c1e",
+                "object_kind": "artifact_hash",
+                "object_kinds": [
+                  "artifact_hash"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.artifact_references[1].sha256",
+                  "$.latest_batch_outcome.outcome_artifact_sha256"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "7b7c458c802f7e52394d27601c870cc0368e341515c082f1853f0168ef86e217",
+                "object_kind": "artifact_hash",
+                "object_kinds": [
+                  "artifact_hash"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.artifact_references[0].sha256"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "7c2ad497245a1bc7bf8356329eefe00ec539111bb9844f7d69f7081ea9da08d0",
+                "object_kind": "artifact_hash",
+                "object_kinds": [
+                  "artifact_hash"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.artifact_references[3].id",
+                  "$.previous_outcomes[1].action_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "A1",
+                "object_kind": "action",
+                "object_kinds": [
+                  "action",
+                  "batch_outcome"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.artifact_references[2].id",
+                  "$.previous_outcomes[0].action_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "A2",
+                "object_kind": "action",
+                "object_kinds": [
+                  "action",
+                  "batch_outcome"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.artifact_references[1].id",
+                  "$.latest_batch_outcome.action_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "A3",
+                "object_kind": "action",
+                "object_kinds": [
+                  "action",
+                  "batch_outcome"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.previous_hypothesis.hypothesis_ids[0]"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "H3",
+                "object_kind": "hypothesis",
+                "object_kinds": [
+                  "hypothesis"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.ancestry.global_record_summaries[0].candidate_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "candidate-0a2a763335eb6d0388058fe8",
+                "object_kind": "candidate",
+                "object_kinds": [
+                  "candidate"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.ancestry.final_best_accepted_ancestors[3].candidate_id",
+                  "$.ancestry.final_best_accepted_ancestors[4].parent_candidate_id",
+                  "$.ancestry.global_record_summaries[5].candidate_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "candidate-1d2d119aa30692e7d28e31bd",
+                "object_kind": "candidate",
+                "object_kinds": [
+                  "candidate"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.ancestry.final_best_accepted_ancestors[0].parent_candidate_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "candidate-1f40a0d45dab2614c0ff0750",
+                "object_kind": "candidate",
+                "object_kinds": [
+                  "candidate"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.ancestry.final_best_accepted_ancestors[1].candidate_id",
+                  "$.ancestry.final_best_accepted_ancestors[2].parent_candidate_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "candidate-26517f60bb883b50c4378fbd",
+                "object_kind": "candidate",
+                "object_kinds": [
+                  "candidate"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.ancestry.global_record_summaries[1].candidate_id",
+                  "$.ancestry.global_record_summaries[2].parent_candidate_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "candidate-2c647533e9b49e0d33a107fc",
+                "object_kind": "candidate",
+                "object_kinds": [
+                  "candidate"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.previous_outcomes[0].best_candidate_identifier",
+                  "$.previous_outcomes[1].best_candidate_identifier"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "candidate-448e5cacbc09498951498f5f",
+                "object_kind": "candidate",
+                "object_kinds": [
+                  "candidate"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.ancestry.global_record_summaries[3].candidate_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "candidate-4f610991765d2e631d4c195f",
+                "object_kind": "candidate",
+                "object_kinds": [
+                  "candidate"
+                ]
+              },
+              {
+                "advisory_allowed": true,
+                "current_lifecycle_status": "retained",
+                "director_state_json_paths": [
+                  "$.allowed_action_space.reference_objects[3].id",
+                  "$.ancestry.final_best_accepted_ancestors[7].candidate_id",
+                  "$.ancestry.global_record_summaries[7].candidate_id",
+                  "$.artifact_references[4].id",
+                  "$.best_ever_result.candidate_id",
+                  "$.latest_batch_outcome.best_candidate_identifier"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": true,
+                "id": "candidate-5ddcaa89183997470eb5e08d",
+                "object_kind": "best_candidate",
+                "object_kinds": [
+                  "best_candidate",
+                  "candidate"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.ancestry.final_best_accepted_ancestors[0].candidate_id",
+                  "$.ancestry.final_best_accepted_ancestors[1].parent_candidate_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "candidate-61d057fa38b488beccbf14e0",
+                "object_kind": "candidate",
+                "object_kinds": [
+                  "candidate"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.ancestry.global_record_summaries[1].parent_candidate_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "candidate-68c1c74ee81ccc5a39724a88",
+                "object_kind": "candidate",
+                "object_kinds": [
+                  "candidate"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.ancestry.global_record_summaries[2].candidate_id",
+                  "$.ancestry.global_record_summaries[3].parent_candidate_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "candidate-6df36f95200463af0dd60fbb",
+                "object_kind": "candidate",
+                "object_kinds": [
+                  "candidate"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.ancestry.global_record_summaries[4].candidate_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "candidate-7a3c026ec820f1bc5a85168e",
+                "object_kind": "candidate",
+                "object_kinds": [
+                  "candidate"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.ancestry.global_record_summaries[4].parent_candidate_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "candidate-82b649985da028c9eb4c9848",
+                "object_kind": "candidate",
+                "object_kinds": [
+                  "candidate"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.ancestry.final_best_accepted_ancestors[5].candidate_id",
+                  "$.ancestry.final_best_accepted_ancestors[6].parent_candidate_id",
+                  "$.ancestry.global_record_summaries[6].parent_candidate_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "candidate-94d90ab97ba8030062a7e3c5",
+                "object_kind": "candidate",
+                "object_kinds": [
+                  "candidate"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.ancestry.global_record_summaries[0].parent_candidate_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "candidate-9d6602a36163d79a572c756f",
+                "object_kind": "candidate",
+                "object_kinds": [
+                  "candidate"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.ancestry.final_best_accepted_ancestors[6].candidate_id",
+                  "$.ancestry.final_best_accepted_ancestors[7].parent_candidate_id",
+                  "$.ancestry.global_record_summaries[6].candidate_id",
+                  "$.ancestry.global_record_summaries[7].parent_candidate_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "candidate-b79fb12be706d8b571870a41",
+                "object_kind": "candidate",
+                "object_kinds": [
+                  "candidate"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.ancestry.final_best_accepted_ancestors[4].candidate_id",
+                  "$.ancestry.final_best_accepted_ancestors[5].parent_candidate_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "candidate-c722a8ab20f101f328666517",
+                "object_kind": "candidate",
+                "object_kinds": [
+                  "candidate"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.ancestry.final_best_accepted_ancestors[2].candidate_id",
+                  "$.ancestry.final_best_accepted_ancestors[3].parent_candidate_id",
+                  "$.ancestry.global_record_summaries[5].parent_candidate_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "candidate-d03192a8f6e6b5129a158f84",
+                "object_kind": "candidate",
+                "object_kinds": [
+                  "candidate"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.best_ever_result.evidence_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "candidate-summary:candidate-5ddcaa89183997470eb5e08d",
+                "object_kind": "evidence",
+                "object_kinds": [
+                  "evidence"
+                ]
+              },
+              {
+                "advisory_allowed": true,
+                "current_lifecycle_status": "retained",
+                "director_state_json_paths": [
+                  "$.allowed_action_space.reference_objects[4].id",
+                  "$.best_ever_result.checkpoint_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "checkpoint-1829a30dca43791c355f854d",
+                "object_kind": "checkpoint",
+                "object_kinds": [
+                  "checkpoint"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.latest_batch_outcome.decision_batch_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "decision-batch-24c29dbe778d49b0b556807eefde216b",
+                "object_kind": "outcome",
+                "object_kinds": [
+                  "outcome"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.previous_outcomes[1].decision_batch_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "decision-batch-7541928559534ed2ab2d5dd90373edd5",
+                "object_kind": "outcome",
+                "object_kinds": [
+                  "outcome"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.previous_outcomes[0].decision_batch_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "decision-batch-8f029c1671e242dd836ec8bc1033625b",
+                "object_kind": "outcome",
+                "object_kinds": [
+                  "outcome"
+                ]
+              },
+              {
+                "advisory_allowed": true,
+                "current_lifecycle_status": "stopped",
+                "director_state_json_paths": [
+                  "$.allowed_action_space.reference_objects[0].id",
+                  "$.best_ever_result.lane_id",
+                  "$.latest_batch_outcome.lane_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "lane-36ef6c44aded9d38cfc4dd72",
+                "object_kind": "lane",
+                "object_kinds": [
+                  "lane"
+                ]
+              },
+              {
+                "advisory_allowed": true,
+                "current_lifecycle_status": "stopped",
+                "director_state_json_paths": [
+                  "$.allowed_action_space.reference_objects[2].id",
+                  "$.previous_outcomes[1].lane_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "lane-b6a9e52b62176089963c03df",
+                "object_kind": "lane",
+                "object_kinds": [
+                  "lane"
+                ]
+              },
+              {
+                "advisory_allowed": true,
+                "current_lifecycle_status": "stopped",
+                "director_state_json_paths": [
+                  "$.allowed_action_space.reference_objects[1].id",
+                  "$.previous_outcomes[0].lane_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "lane-fc3311f3e8cd88ddb8b31293",
+                "object_kind": "lane",
+                "object_kinds": [
+                  "lane"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.previous_outcomes[1].metric_window_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "metric-978ef4ea90554ebaa27cb56583100bb2",
+                "object_kind": "outcome",
+                "object_kinds": [
+                  "outcome"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.latest_batch_outcome.metric_window_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "metric-a217d7dd34b64f06b8885685bdf831c6",
+                "object_kind": "outcome",
+                "object_kinds": [
+                  "outcome"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.previous_outcomes[0].metric_window_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "metric-c4dd866ed1f140d7a9211a6599632216",
+                "object_kind": "outcome",
+                "object_kinds": [
+                  "outcome"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.artifact_references[0].id",
+                  "$.source_snapshot_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "snapshot-736da511aed8450496da1b10ed707f91",
+                "object_kind": "snapshot",
+                "object_kinds": [
+                  "snapshot",
+                  "source_snapshot"
+                ]
+              }
+            ],
+            "role": "evidence_ids",
+            "schema_version": "2.0"
+          },
+          "evidence_registry_sha256": "48571c03d8b8da9e922fbd0710bf1f98a9a3f51826ea5656333ff0f165cb5428",
+          "executable_target_registry": {
+            "director_state_sha256": "94347f651d821bcbf502a517f9913f3924d89afee308f667d9adff39ee8db4bd",
+            "references": [
+              {
+                "advisory_allowed": true,
+                "current_lifecycle_status": "retained",
+                "director_state_json_paths": [
+                  "$.allowed_action_space.reference_objects[3].id",
+                  "$.ancestry.final_best_accepted_ancestors[7].candidate_id",
+                  "$.ancestry.global_record_summaries[7].candidate_id",
+                  "$.artifact_references[4].id",
+                  "$.best_ever_result.candidate_id",
+                  "$.latest_batch_outcome.best_candidate_identifier"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": true,
+                "id": "candidate-5ddcaa89183997470eb5e08d",
+                "object_kind": "best_candidate",
+                "object_kinds": [
+                  "best_candidate",
+                  "candidate"
+                ]
+              }
+            ],
+            "role": "executable_target_ids",
+            "schema_version": "2.0"
+          },
+          "executable_target_registry_sha256": "07b0af203732db6b02671870fefc1bd8a54826c78f8b38f5d861f199fbc85b30",
+          "executed": false,
+          "historical_outcomes_bytes": 3593,
+          "measurement_only": true,
+          "mode": "stateless_turns",
+          "output_schema_bytes": 10967,
+          "output_schema_sha256": "6f7293c8241d316c4c185b172828ef23c84f3369939f7d89d3a8de79bfde04e2",
+          "prompt_bytes": 19656,
+          "prompt_sha256": "d9ae1fd0e157825b97e4ad8d7b657f744a37c118c0a66bcbd7064f373358139c",
+          "search_components_present": false,
+          "slot": "S2",
+          "snapshot_id": "snapshot-736da511aed8450496da1b10ed707f91",
+          "source_state": "A4",
+          "target_metadata_sha256": "6db3a2a05e6ad7e66100f3c337618023eed19095e7d94ac4272fce2373f72ce5",
+          "within_client_token_limit": true,
+          "within_state_limits": true
+        },
+        {
+          "advisory_target_registry": {
+            "director_state_sha256": "1baf3ca221a3461630e5bc837d3bb0ce2345d69dd8d25e962345d744f58ad3c1",
+            "references": [],
+            "role": "advisory_target_ids",
+            "schema_version": "2.0"
+          },
+          "advisory_target_registry_sha256": "a4034680e237c720e7320e2cf18e1a974e71ad6ad7b66d2b577b3ab32f5ee6a4",
+          "allowed_action_space_sha256": "6afaa3324bb0012b68fc97f3216aa93adc0fa5ee0657dba04633061e459abd09",
+          "ancestry_bytes": 65,
+          "applicable_action_space": {
+            "action_applicability": {
+              "request_diagnostic": "at least one submitted evidence subject is available",
+              "set_review_trigger": "review scheduling is lane-independent",
+              "start_lane": "capacity exists for one reviewed new search lane"
+            },
+            "actions": [
+              "start_lane",
+              "request_diagnostic",
+              "set_review_trigger"
+            ],
+            "active_executable_lane_ids": [],
+            "algorithm_parameters": {
+              "iterated_local_search": [
+                "batch_candidates",
+                "mutation_weights",
+                "order",
+                "perturbation_interval",
+                "tabu_tenure",
+                "witness_cap"
+              ],
+              "iterated_local_search_tabu": [
+                "batch_candidates",
+                "mutation_weights",
+                "order",
+                "perturbation_interval",
+                "tabu_tenure",
+                "witness_cap"
+              ],
+              "random_restart": [
+                "batch_candidates",
+                "order",
+                "witness_cap"
+              ],
+              "simulated_annealing": [
+                "batch_candidates",
+                "cooling",
+                "mutation_weights",
+                "order",
+                "restart_threshold",
+                "temperature",
+                "witness_cap"
+              ]
+            },
+            "algorithms": [
+              "random_restart",
+              "simulated_annealing",
+              "iterated_local_search_tabu",
+              "iterated_local_search"
+            ],
+            "candidate_target_ids": [],
+            "catalog_version": "1.1",
+            "diagnostics": [
+              "cycle_length_profile",
+              "graph_invariants",
+              "mutation_ancestry",
+              "archive_cluster_comparison",
+              "operator_yield",
+              "candidate_structural_diff",
+              "canonical_duplicate_analysis"
+            ],
+            "graph_families": [
+              "connected_cubic",
+              "predominantly_cubic",
+              "unrestricted_min_degree_3"
+            ],
+            "historical_lane_ids": [],
+            "mutation_operators": [
+              "uniform_two_edge_switch",
+              "forbidden_cycle_break_switch"
+            ],
+            "mutation_weights_contract": {
+              "known_operators_only": true,
+              "minimum_weight": 0.0,
+              "normalized_before_execution": true,
+              "positive_sum_required": true
+            },
+            "parameter_domains": {
+              "batch_candidates": {
+                "maximum": 1000000,
+                "minimum": 100,
+                "type": "integer"
+              },
+              "cooling": {
+                "maximum": 1.0,
+                "minimum": 0.9,
+                "type": "number"
+              },
+              "order": {
+                "maximum": 128,
+                "minimum": 4,
+                "type": "integer"
+              },
+              "perturbation_interval": {
+                "maximum": 1000000,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "restart_threshold": {
+                "maximum": 10000000,
+                "minimum": 100,
+                "type": "integer"
+              },
+              "tabu_tenure": {
+                "maximum": 4096,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "temperature": {
+                "maximum": 100.0,
+                "minimum": 0.001,
+                "type": "number"
+              },
+              "witness_cap": {
+                "maximum": 10000,
+                "minimum": 1,
+                "type": "integer"
+              }
+            },
+            "reference_objects": [],
+            "review_events": [
+              "new_global_best",
+              "meaningful_improvement",
+              "regression",
+              "stagnation",
+              "diversity_collapse",
+              "operator_yield_shift",
+              "verification_result",
+              "verifier_disagreement",
+              "lane_failure",
+              "resource_pressure",
+              "action_lease_expired"
+            ]
+          },
+          "artifact_references_sha256": "bbbf4ca53d3f6d8b73a4f711aeaa2dc927b90d8fe1b94a9c53f2972a63beacf2",
+          "base_instructions_bytes": 682,
+          "campaign_budget_sha256": "f77084bca0bd04704916ea6d1f844ac1d20445a118ef879ed00bf43e1cdf5745",
+          "client_owned_estimated_tokens": 3323,
+          "complete_client_request_bytes": 13947,
+          "complete_client_request_sha256": "3ed0cbbeb9b6eecd6c7494a14d183d0d10195f09ea3692fa9e63defd89af5b1e",
+          "director_state_bytes": 3246,
+          "director_state_sha256": "1baf3ca221a3461630e5bc837d3bb0ce2345d69dd8d25e962345d744f58ad3c1",
+          "dispatch_scheduled": false,
+          "evidence_registry": {
+            "director_state_sha256": "1baf3ca221a3461630e5bc837d3bb0ce2345d69dd8d25e962345d744f58ad3c1",
+            "references": [
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.artifact_references[0].sha256"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "51ea0a6294dc17a8097928c7fdf7a22b14e717e5fe4b176273e5dba4103798a3",
+                "object_kind": "artifact_hash",
+                "object_kinds": [
+                  "artifact_hash"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.artifact_references[0].id",
+                  "$.source_snapshot_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "snapshot-81a7b29a71684fd89f0d907163186711",
+                "object_kind": "snapshot",
+                "object_kinds": [
+                  "snapshot",
+                  "source_snapshot"
+                ]
+              }
+            ],
+            "role": "evidence_ids",
+            "schema_version": "2.0"
+          },
+          "evidence_registry_sha256": "c6242bde1fe448c7aa554a5ae867b69b2fb146578b400a5691945a6c289553f8",
+          "executable_target_registry": {
+            "director_state_sha256": "1baf3ca221a3461630e5bc837d3bb0ce2345d69dd8d25e962345d744f58ad3c1",
+            "references": [],
+            "role": "executable_target_ids",
+            "schema_version": "2.0"
+          },
+          "executable_target_registry_sha256": "4c0a77edf7fdc582e5a91fc8a7e3b7dff650c7ec45d4eaba2026fae4e4f2a649",
+          "executed": false,
+          "historical_outcomes_bytes": 2,
+          "measurement_only": true,
+          "mode": "persistent_thread",
+          "output_schema_bytes": 8114,
+          "output_schema_sha256": "1a1f25d9433bfaaa8fc0a1567d7da9745381ebd81ec192f85b33650fe2a5cb84",
+          "prompt_bytes": 4494,
+          "prompt_sha256": "fdb66a875fa3809467d689f95dc668eb4f742b1549fbba79bac0aa2c9f4faa7f",
+          "search_components_present": false,
+          "slot": "P1",
+          "snapshot_id": "snapshot-81a7b29a71684fd89f0d907163186711",
+          "source_state": "A1",
+          "target_metadata_sha256": "77ea63cbaac49a9d412e23e69f8b6f6cdf4efc788ea2bcd3a7a6c34fa814c060",
+          "within_client_token_limit": true,
+          "within_state_limits": true
+        },
+        {
+          "advisory_target_registry": {
+            "director_state_sha256": "94347f651d821bcbf502a517f9913f3924d89afee308f667d9adff39ee8db4bd",
+            "references": [
+              {
+                "advisory_allowed": true,
+                "current_lifecycle_status": "retained",
+                "director_state_json_paths": [
+                  "$.allowed_action_space.reference_objects[3].id",
+                  "$.ancestry.final_best_accepted_ancestors[7].candidate_id",
+                  "$.ancestry.global_record_summaries[7].candidate_id",
+                  "$.artifact_references[4].id",
+                  "$.best_ever_result.candidate_id",
+                  "$.latest_batch_outcome.best_candidate_identifier"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": true,
+                "id": "candidate-5ddcaa89183997470eb5e08d",
+                "object_kind": "best_candidate",
+                "object_kinds": [
+                  "best_candidate",
+                  "candidate"
+                ]
+              },
+              {
+                "advisory_allowed": true,
+                "current_lifecycle_status": "retained",
+                "director_state_json_paths": [
+                  "$.allowed_action_space.reference_objects[4].id",
+                  "$.best_ever_result.checkpoint_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "checkpoint-1829a30dca43791c355f854d",
+                "object_kind": "checkpoint",
+                "object_kinds": [
+                  "checkpoint"
+                ]
+              },
+              {
+                "advisory_allowed": true,
+                "current_lifecycle_status": "stopped",
+                "director_state_json_paths": [
+                  "$.allowed_action_space.reference_objects[0].id",
+                  "$.best_ever_result.lane_id",
+                  "$.latest_batch_outcome.lane_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "lane-36ef6c44aded9d38cfc4dd72",
+                "object_kind": "lane",
+                "object_kinds": [
+                  "lane"
+                ]
+              },
+              {
+                "advisory_allowed": true,
+                "current_lifecycle_status": "stopped",
+                "director_state_json_paths": [
+                  "$.allowed_action_space.reference_objects[2].id",
+                  "$.previous_outcomes[1].lane_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "lane-b6a9e52b62176089963c03df",
+                "object_kind": "lane",
+                "object_kinds": [
+                  "lane"
+                ]
+              },
+              {
+                "advisory_allowed": true,
+                "current_lifecycle_status": "stopped",
+                "director_state_json_paths": [
+                  "$.allowed_action_space.reference_objects[1].id",
+                  "$.previous_outcomes[0].lane_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "lane-fc3311f3e8cd88ddb8b31293",
+                "object_kind": "lane",
+                "object_kinds": [
+                  "lane"
+                ]
+              }
+            ],
+            "role": "advisory_target_ids",
+            "schema_version": "2.0"
+          },
+          "advisory_target_registry_sha256": "2f2c50f29a48c15157abc726997d8bfc1d37fb977873fd7a7d1d3d5e588ac49d",
+          "allowed_action_space_sha256": "d0709fbf795ba05ae73cbfab19f2cc23ddb0f491b8c4fc542fb6eca842874461",
+          "ancestry_bytes": 5611,
+          "applicable_action_space": {
+            "action_applicability": {
+              "promote_candidate": "at least one retained candidate is available",
+              "request_diagnostic": "at least one submitted evidence subject is available",
+              "schedule_verification": "at least one retained candidate is available for M4 verification",
+              "set_review_trigger": "review scheduling is lane-independent",
+              "start_lane": "capacity exists for one reviewed new search lane"
+            },
+            "actions": [
+              "start_lane",
+              "promote_candidate",
+              "request_diagnostic",
+              "schedule_verification",
+              "set_review_trigger"
+            ],
+            "active_executable_lane_ids": [],
+            "algorithm_parameters": {
+              "iterated_local_search": [
+                "batch_candidates",
+                "mutation_weights",
+                "order",
+                "perturbation_interval",
+                "tabu_tenure",
+                "witness_cap"
+              ],
+              "iterated_local_search_tabu": [
+                "batch_candidates",
+                "mutation_weights",
+                "order",
+                "perturbation_interval",
+                "tabu_tenure",
+                "witness_cap"
+              ],
+              "random_restart": [
+                "batch_candidates",
+                "order",
+                "witness_cap"
+              ],
+              "simulated_annealing": [
+                "batch_candidates",
+                "cooling",
+                "mutation_weights",
+                "order",
+                "restart_threshold",
+                "temperature",
+                "witness_cap"
+              ]
+            },
+            "algorithms": [
+              "random_restart",
+              "simulated_annealing",
+              "iterated_local_search_tabu",
+              "iterated_local_search"
+            ],
+            "candidate_target_ids": [
+              "candidate-5ddcaa89183997470eb5e08d"
+            ],
+            "catalog_version": "1.1",
+            "checkpoint_target_ids": [
+              "checkpoint-1829a30dca43791c355f854d"
+            ],
+            "diagnostics": [
+              "cycle_length_profile",
+              "graph_invariants",
+              "mutation_ancestry",
+              "archive_cluster_comparison",
+              "operator_yield",
+              "candidate_structural_diff",
+              "canonical_duplicate_analysis"
+            ],
+            "graph_families": [
+              "connected_cubic",
+              "predominantly_cubic",
+              "unrestricted_min_degree_3"
+            ],
+            "historical_lane_ids": [
+              "lane-36ef6c44aded9d38cfc4dd72",
+              "lane-b6a9e52b62176089963c03df",
+              "lane-fc3311f3e8cd88ddb8b31293"
+            ],
+            "mutation_operators": [
+              "uniform_two_edge_switch",
+              "forbidden_cycle_break_switch"
+            ],
+            "mutation_weights_contract": {
+              "known_operators_only": true,
+              "minimum_weight": 0.0,
+              "normalized_before_execution": true,
+              "positive_sum_required": true
+            },
+            "parameter_domains": {
+              "batch_candidates": {
+                "maximum": 1000000,
+                "minimum": 100,
+                "type": "integer"
+              },
+              "cooling": {
+                "maximum": 1.0,
+                "minimum": 0.9,
+                "type": "number"
+              },
+              "order": {
+                "maximum": 128,
+                "minimum": 4,
+                "type": "integer"
+              },
+              "perturbation_interval": {
+                "maximum": 1000000,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "restart_threshold": {
+                "maximum": 10000000,
+                "minimum": 100,
+                "type": "integer"
+              },
+              "tabu_tenure": {
+                "maximum": 4096,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "temperature": {
+                "maximum": 100.0,
+                "minimum": 0.001,
+                "type": "number"
+              },
+              "witness_cap": {
+                "maximum": 10000,
+                "minimum": 1,
+                "type": "integer"
+              }
+            },
+            "reference_objects": [
+              {
+                "advisory_allowed": true,
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "lane-36ef6c44aded9d38cfc4dd72",
+                "object_kind": "lane",
+                "status": "stopped"
+              },
+              {
+                "advisory_allowed": true,
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "lane-fc3311f3e8cd88ddb8b31293",
+                "object_kind": "lane",
+                "status": "stopped"
+              },
+              {
+                "advisory_allowed": true,
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "lane-b6a9e52b62176089963c03df",
+                "object_kind": "lane",
+                "status": "stopped"
+              },
+              {
+                "advisory_allowed": true,
+                "evidence_allowed": true,
+                "executable_allowed": true,
+                "id": "candidate-5ddcaa89183997470eb5e08d",
+                "object_kind": "candidate",
+                "status": "retained"
+              },
+              {
+                "advisory_allowed": true,
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "checkpoint-1829a30dca43791c355f854d",
+                "object_kind": "checkpoint",
+                "status": "retained"
+              }
+            ],
+            "review_events": [
+              "new_global_best",
+              "meaningful_improvement",
+              "regression",
+              "stagnation",
+              "diversity_collapse",
+              "operator_yield_shift",
+              "verification_result",
+              "verifier_disagreement",
+              "lane_failure",
+              "resource_pressure",
+              "action_lease_expired"
+            ]
+          },
+          "artifact_references_sha256": "1110750775df3b4efc47316f3a93443e5eb05490c151e28e2fd04c5ff385c32a",
+          "base_instructions_bytes": 682,
+          "campaign_budget_sha256": "31e7fad5b6cb280aab8dfbc86ebd356fdd65e9821da0b542c5f7cfaa0527ce84",
+          "client_owned_estimated_tokens": 7827,
+          "complete_client_request_bytes": 33374,
+          "complete_client_request_sha256": "0a8f4052017b59576bcdb4a717e2bf8d841b8d7abe32f291de22b15ac5c6c18f",
+          "director_state_bytes": 18111,
+          "director_state_sha256": "94347f651d821bcbf502a517f9913f3924d89afee308f667d9adff39ee8db4bd",
+          "dispatch_scheduled": false,
+          "evidence_registry": {
+            "director_state_sha256": "94347f651d821bcbf502a517f9913f3924d89afee308f667d9adff39ee8db4bd",
+            "references": [
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.artifact_references[3].sha256",
+                  "$.previous_outcomes[1].outcome_artifact_sha256"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "4eb752b7275194530a96ce13b0a4bbc0b8a070d41de4cd42f7903ba0082099b9",
+                "object_kind": "artifact_hash",
+                "object_kinds": [
+                  "artifact_hash"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.artifact_references[2].sha256",
+                  "$.previous_outcomes[0].outcome_artifact_sha256"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "6145071ee7cfea359d936a5a929acdac3c2fa0e99a94e1d10df10d2dbb152c1e",
+                "object_kind": "artifact_hash",
+                "object_kinds": [
+                  "artifact_hash"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.artifact_references[1].sha256",
+                  "$.latest_batch_outcome.outcome_artifact_sha256"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "7b7c458c802f7e52394d27601c870cc0368e341515c082f1853f0168ef86e217",
+                "object_kind": "artifact_hash",
+                "object_kinds": [
+                  "artifact_hash"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.artifact_references[0].sha256"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "7c2ad497245a1bc7bf8356329eefe00ec539111bb9844f7d69f7081ea9da08d0",
+                "object_kind": "artifact_hash",
+                "object_kinds": [
+                  "artifact_hash"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.artifact_references[3].id",
+                  "$.previous_outcomes[1].action_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "A1",
+                "object_kind": "action",
+                "object_kinds": [
+                  "action",
+                  "batch_outcome"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.artifact_references[2].id",
+                  "$.previous_outcomes[0].action_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "A2",
+                "object_kind": "action",
+                "object_kinds": [
+                  "action",
+                  "batch_outcome"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.artifact_references[1].id",
+                  "$.latest_batch_outcome.action_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "A3",
+                "object_kind": "action",
+                "object_kinds": [
+                  "action",
+                  "batch_outcome"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.previous_hypothesis.hypothesis_ids[0]"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "H3",
+                "object_kind": "hypothesis",
+                "object_kinds": [
+                  "hypothesis"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.ancestry.global_record_summaries[0].candidate_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "candidate-0a2a763335eb6d0388058fe8",
+                "object_kind": "candidate",
+                "object_kinds": [
+                  "candidate"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.ancestry.final_best_accepted_ancestors[3].candidate_id",
+                  "$.ancestry.final_best_accepted_ancestors[4].parent_candidate_id",
+                  "$.ancestry.global_record_summaries[5].candidate_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "candidate-1d2d119aa30692e7d28e31bd",
+                "object_kind": "candidate",
+                "object_kinds": [
+                  "candidate"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.ancestry.final_best_accepted_ancestors[0].parent_candidate_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "candidate-1f40a0d45dab2614c0ff0750",
+                "object_kind": "candidate",
+                "object_kinds": [
+                  "candidate"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.ancestry.final_best_accepted_ancestors[1].candidate_id",
+                  "$.ancestry.final_best_accepted_ancestors[2].parent_candidate_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "candidate-26517f60bb883b50c4378fbd",
+                "object_kind": "candidate",
+                "object_kinds": [
+                  "candidate"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.ancestry.global_record_summaries[1].candidate_id",
+                  "$.ancestry.global_record_summaries[2].parent_candidate_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "candidate-2c647533e9b49e0d33a107fc",
+                "object_kind": "candidate",
+                "object_kinds": [
+                  "candidate"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.previous_outcomes[0].best_candidate_identifier",
+                  "$.previous_outcomes[1].best_candidate_identifier"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "candidate-448e5cacbc09498951498f5f",
+                "object_kind": "candidate",
+                "object_kinds": [
+                  "candidate"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.ancestry.global_record_summaries[3].candidate_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "candidate-4f610991765d2e631d4c195f",
+                "object_kind": "candidate",
+                "object_kinds": [
+                  "candidate"
+                ]
+              },
+              {
+                "advisory_allowed": true,
+                "current_lifecycle_status": "retained",
+                "director_state_json_paths": [
+                  "$.allowed_action_space.reference_objects[3].id",
+                  "$.ancestry.final_best_accepted_ancestors[7].candidate_id",
+                  "$.ancestry.global_record_summaries[7].candidate_id",
+                  "$.artifact_references[4].id",
+                  "$.best_ever_result.candidate_id",
+                  "$.latest_batch_outcome.best_candidate_identifier"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": true,
+                "id": "candidate-5ddcaa89183997470eb5e08d",
+                "object_kind": "best_candidate",
+                "object_kinds": [
+                  "best_candidate",
+                  "candidate"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.ancestry.final_best_accepted_ancestors[0].candidate_id",
+                  "$.ancestry.final_best_accepted_ancestors[1].parent_candidate_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "candidate-61d057fa38b488beccbf14e0",
+                "object_kind": "candidate",
+                "object_kinds": [
+                  "candidate"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.ancestry.global_record_summaries[1].parent_candidate_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "candidate-68c1c74ee81ccc5a39724a88",
+                "object_kind": "candidate",
+                "object_kinds": [
+                  "candidate"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.ancestry.global_record_summaries[2].candidate_id",
+                  "$.ancestry.global_record_summaries[3].parent_candidate_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "candidate-6df36f95200463af0dd60fbb",
+                "object_kind": "candidate",
+                "object_kinds": [
+                  "candidate"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.ancestry.global_record_summaries[4].candidate_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "candidate-7a3c026ec820f1bc5a85168e",
+                "object_kind": "candidate",
+                "object_kinds": [
+                  "candidate"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.ancestry.global_record_summaries[4].parent_candidate_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "candidate-82b649985da028c9eb4c9848",
+                "object_kind": "candidate",
+                "object_kinds": [
+                  "candidate"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.ancestry.final_best_accepted_ancestors[5].candidate_id",
+                  "$.ancestry.final_best_accepted_ancestors[6].parent_candidate_id",
+                  "$.ancestry.global_record_summaries[6].parent_candidate_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "candidate-94d90ab97ba8030062a7e3c5",
+                "object_kind": "candidate",
+                "object_kinds": [
+                  "candidate"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.ancestry.global_record_summaries[0].parent_candidate_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "candidate-9d6602a36163d79a572c756f",
+                "object_kind": "candidate",
+                "object_kinds": [
+                  "candidate"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.ancestry.final_best_accepted_ancestors[6].candidate_id",
+                  "$.ancestry.final_best_accepted_ancestors[7].parent_candidate_id",
+                  "$.ancestry.global_record_summaries[6].candidate_id",
+                  "$.ancestry.global_record_summaries[7].parent_candidate_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "candidate-b79fb12be706d8b571870a41",
+                "object_kind": "candidate",
+                "object_kinds": [
+                  "candidate"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.ancestry.final_best_accepted_ancestors[4].candidate_id",
+                  "$.ancestry.final_best_accepted_ancestors[5].parent_candidate_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "candidate-c722a8ab20f101f328666517",
+                "object_kind": "candidate",
+                "object_kinds": [
+                  "candidate"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.ancestry.final_best_accepted_ancestors[2].candidate_id",
+                  "$.ancestry.final_best_accepted_ancestors[3].parent_candidate_id",
+                  "$.ancestry.global_record_summaries[5].parent_candidate_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "candidate-d03192a8f6e6b5129a158f84",
+                "object_kind": "candidate",
+                "object_kinds": [
+                  "candidate"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.best_ever_result.evidence_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "candidate-summary:candidate-5ddcaa89183997470eb5e08d",
+                "object_kind": "evidence",
+                "object_kinds": [
+                  "evidence"
+                ]
+              },
+              {
+                "advisory_allowed": true,
+                "current_lifecycle_status": "retained",
+                "director_state_json_paths": [
+                  "$.allowed_action_space.reference_objects[4].id",
+                  "$.best_ever_result.checkpoint_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "checkpoint-1829a30dca43791c355f854d",
+                "object_kind": "checkpoint",
+                "object_kinds": [
+                  "checkpoint"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.latest_batch_outcome.decision_batch_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "decision-batch-24c29dbe778d49b0b556807eefde216b",
+                "object_kind": "outcome",
+                "object_kinds": [
+                  "outcome"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.previous_outcomes[1].decision_batch_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "decision-batch-7541928559534ed2ab2d5dd90373edd5",
+                "object_kind": "outcome",
+                "object_kinds": [
+                  "outcome"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.previous_outcomes[0].decision_batch_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "decision-batch-8f029c1671e242dd836ec8bc1033625b",
+                "object_kind": "outcome",
+                "object_kinds": [
+                  "outcome"
+                ]
+              },
+              {
+                "advisory_allowed": true,
+                "current_lifecycle_status": "stopped",
+                "director_state_json_paths": [
+                  "$.allowed_action_space.reference_objects[0].id",
+                  "$.best_ever_result.lane_id",
+                  "$.latest_batch_outcome.lane_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "lane-36ef6c44aded9d38cfc4dd72",
+                "object_kind": "lane",
+                "object_kinds": [
+                  "lane"
+                ]
+              },
+              {
+                "advisory_allowed": true,
+                "current_lifecycle_status": "stopped",
+                "director_state_json_paths": [
+                  "$.allowed_action_space.reference_objects[2].id",
+                  "$.previous_outcomes[1].lane_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "lane-b6a9e52b62176089963c03df",
+                "object_kind": "lane",
+                "object_kinds": [
+                  "lane"
+                ]
+              },
+              {
+                "advisory_allowed": true,
+                "current_lifecycle_status": "stopped",
+                "director_state_json_paths": [
+                  "$.allowed_action_space.reference_objects[1].id",
+                  "$.previous_outcomes[0].lane_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "lane-fc3311f3e8cd88ddb8b31293",
+                "object_kind": "lane",
+                "object_kinds": [
+                  "lane"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.previous_outcomes[1].metric_window_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "metric-978ef4ea90554ebaa27cb56583100bb2",
+                "object_kind": "outcome",
+                "object_kinds": [
+                  "outcome"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.latest_batch_outcome.metric_window_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "metric-a217d7dd34b64f06b8885685bdf831c6",
+                "object_kind": "outcome",
+                "object_kinds": [
+                  "outcome"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.previous_outcomes[0].metric_window_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "metric-c4dd866ed1f140d7a9211a6599632216",
+                "object_kind": "outcome",
+                "object_kinds": [
+                  "outcome"
+                ]
+              },
+              {
+                "advisory_allowed": false,
+                "current_lifecycle_status": "visible_evidence",
+                "director_state_json_paths": [
+                  "$.artifact_references[0].id",
+                  "$.source_snapshot_id"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": false,
+                "id": "snapshot-736da511aed8450496da1b10ed707f91",
+                "object_kind": "snapshot",
+                "object_kinds": [
+                  "snapshot",
+                  "source_snapshot"
+                ]
+              }
+            ],
+            "role": "evidence_ids",
+            "schema_version": "2.0"
+          },
+          "evidence_registry_sha256": "48571c03d8b8da9e922fbd0710bf1f98a9a3f51826ea5656333ff0f165cb5428",
+          "executable_target_registry": {
+            "director_state_sha256": "94347f651d821bcbf502a517f9913f3924d89afee308f667d9adff39ee8db4bd",
+            "references": [
+              {
+                "advisory_allowed": true,
+                "current_lifecycle_status": "retained",
+                "director_state_json_paths": [
+                  "$.allowed_action_space.reference_objects[3].id",
+                  "$.ancestry.final_best_accepted_ancestors[7].candidate_id",
+                  "$.ancestry.global_record_summaries[7].candidate_id",
+                  "$.artifact_references[4].id",
+                  "$.best_ever_result.candidate_id",
+                  "$.latest_batch_outcome.best_candidate_identifier"
+                ],
+                "evidence_allowed": true,
+                "executable_allowed": true,
+                "id": "candidate-5ddcaa89183997470eb5e08d",
+                "object_kind": "best_candidate",
+                "object_kinds": [
+                  "best_candidate",
+                  "candidate"
+                ]
+              }
+            ],
+            "role": "executable_target_ids",
+            "schema_version": "2.0"
+          },
+          "executable_target_registry_sha256": "07b0af203732db6b02671870fefc1bd8a54826c78f8b38f5d861f199fbc85b30",
+          "executed": false,
+          "historical_outcomes_bytes": 3593,
+          "measurement_only": true,
+          "mode": "persistent_thread",
+          "output_schema_bytes": 10967,
+          "output_schema_sha256": "6f7293c8241d316c4c185b172828ef23c84f3369939f7d89d3a8de79bfde04e2",
+          "prompt_bytes": 19656,
+          "prompt_sha256": "d9ae1fd0e157825b97e4ad8d7b657f744a37c118c0a66bcbd7064f373358139c",
+          "search_components_present": false,
+          "slot": "P2",
+          "snapshot_id": "snapshot-736da511aed8450496da1b10ed707f91",
+          "source_state": "A4",
+          "target_metadata_sha256": "6db3a2a05e6ad7e66100f3c337618023eed19095e7d94ac4272fce2373f72ce5",
+          "within_client_token_limit": true,
+          "within_state_limits": true
+        }
+      ],
+      "inference_slots": [
+        "S2",
+        "P1",
+        "P2"
+      ],
+      "plan_fingerprint": "4e2f2aa34a8beb024f4180a5297c70d23bc87afb6755d214f80b59750d7514da",
+      "s2_p2_equivalence": {
+        "all_equal": true,
+        "equalities": {
+          "advisory_target_registry_sha256": true,
+          "allowed_action_space_sha256": true,
+          "artifact_references_sha256": true,
+          "campaign_budget_sha256": true,
+          "complete_client_request_sha256": true,
+          "director_state_sha256": true,
+          "evidence_registry_sha256": true,
+          "executable_target_registry_sha256": true,
+          "output_schema_sha256": true,
+          "prompt_sha256": true,
+          "target_metadata_sha256": true
+        },
+        "only_intended_difference": "P2 retains the P1 persistent-thread conversation history",
+        "p2": {
+          "advisory_target_registry_sha256": "2f2c50f29a48c15157abc726997d8bfc1d37fb977873fd7a7d1d3d5e588ac49d",
+          "allowed_action_space_sha256": "d0709fbf795ba05ae73cbfab19f2cc23ddb0f491b8c4fc542fb6eca842874461",
+          "artifact_references_sha256": "1110750775df3b4efc47316f3a93443e5eb05490c151e28e2fd04c5ff385c32a",
+          "campaign_budget_sha256": "31e7fad5b6cb280aab8dfbc86ebd356fdd65e9821da0b542c5f7cfaa0527ce84",
+          "complete_client_request_sha256": "0a8f4052017b59576bcdb4a717e2bf8d841b8d7abe32f291de22b15ac5c6c18f",
+          "director_state_sha256": "94347f651d821bcbf502a517f9913f3924d89afee308f667d9adff39ee8db4bd",
+          "evidence_registry_sha256": "48571c03d8b8da9e922fbd0710bf1f98a9a3f51826ea5656333ff0f165cb5428",
+          "executable_target_registry_sha256": "07b0af203732db6b02671870fefc1bd8a54826c78f8b38f5d861f199fbc85b30",
+          "output_schema_sha256": "6f7293c8241d316c4c185b172828ef23c84f3369939f7d89d3a8de79bfde04e2",
+          "prompt_sha256": "d9ae1fd0e157825b97e4ad8d7b657f744a37c118c0a66bcbd7064f373358139c",
+          "target_metadata_sha256": "6db3a2a05e6ad7e66100f3c337618023eed19095e7d94ac4272fce2373f72ce5"
+        },
+        "primary_comparison": [
+          "S2",
+          "P2"
+        ],
+        "s2": {
+          "advisory_target_registry_sha256": "2f2c50f29a48c15157abc726997d8bfc1d37fb977873fd7a7d1d3d5e588ac49d",
+          "allowed_action_space_sha256": "d0709fbf795ba05ae73cbfab19f2cc23ddb0f491b8c4fc542fb6eca842874461",
+          "artifact_references_sha256": "1110750775df3b4efc47316f3a93443e5eb05490c151e28e2fd04c5ff385c32a",
+          "campaign_budget_sha256": "31e7fad5b6cb280aab8dfbc86ebd356fdd65e9821da0b542c5f7cfaa0527ce84",
+          "complete_client_request_sha256": "0a8f4052017b59576bcdb4a717e2bf8d841b8d7abe32f291de22b15ac5c6c18f",
+          "director_state_sha256": "94347f651d821bcbf502a517f9913f3924d89afee308f667d9adff39ee8db4bd",
+          "evidence_registry_sha256": "48571c03d8b8da9e922fbd0710bf1f98a9a3f51826ea5656333ff0f165cb5428",
+          "executable_target_registry_sha256": "07b0af203732db6b02671870fefc1bd8a54826c78f8b38f5d861f199fbc85b30",
+          "output_schema_sha256": "6f7293c8241d316c4c185b172828ef23c84f3369939f7d89d3a8de79bfde04e2",
+          "prompt_sha256": "d9ae1fd0e157825b97e4ad8d7b657f744a37c118c0a66bcbd7064f373358139c",
+          "target_metadata_sha256": "6db3a2a05e6ad7e66100f3c337618023eed19095e7d94ac4272fce2373f72ce5"
+        },
+        "schema_version": "1.0",
+        "slots": [
+          "S2",
+          "P1",
+          "P2"
+        ]
+      }
+    },
+    "inference_starts_reaching_model": 3,
+    "ok": true,
+    "retries_reaching_inference": 0,
+    "runtime_contract": {
+      "approval_policy": "never",
+      "base_instructions_bytes": 682,
+      "base_instructions_sha256": "bb79f9078bf017c9079d10fc1619dfe52072d58172977a7868b5201c2c37f151",
+      "compaction": false,
+      "developer_instructions": "",
+      "dynamic_tools": [],
+      "environments": [],
+      "excluded_runtime_components": [
+        "LaneManager",
+        "search kernel",
+        "candidate evaluator",
+        "action dispatcher",
+        "graph verifier",
+        "graph-search worker",
+        "batch executor"
+      ],
+      "expected_model": "gpt-5.6-luna",
+      "expected_reasoning_effort": "xhigh",
+      "historical_failed_thread_reuse": false,
+      "model": "gpt-5.6-luna",
+      "output_schema_contract": "generated_per_submitted_action_space",
+      "personality": "none",
+      "reasoning_effort": "xhigh",
+      "runtime_workspace_roots": [],
+      "sandbox": "read-only",
+      "selected_capability_roots": [],
+      "thread_plan": {
+        "P1": "fresh_persistent_thread",
+        "P2": "same_thread_as_P1",
+        "S2": "fresh_stateless_thread"
+      },
+      "turn_timeout_seconds": 300.0
+    },
+    "s2_vs_p2": {
+      "cache": {
+        "persistent_cache_write_input_tokens": 0,
+        "persistent_cached_input_tokens": 0,
+        "stateless_cache_write_input_tokens": 0,
+        "stateless_cached_input_tokens": 0
+      },
+      "comparison": "complete_single_pair",
+      "decision": {
+        "action_agreement": false,
+        "algorithm_agreement": true,
+        "expected_signal_agreement": false,
+        "hypothesis_agreement": false,
+        "parameter_agreement": true,
+        "persistent": {
+          "action": "schedule_verification",
+          "algorithm": null,
+          "parameters": {}
+        },
+        "stateless": {
+          "action": "request_diagnostic",
+          "algorithm": null,
+          "parameters": {}
+        }
+      },
+      "evidence_registry_equal": true,
+      "input_token_difference": 3163,
+      "latency_seconds_difference": -36.75284232478589,
+      "scientific_input_equal": true,
+      "stateless_input_token_reduction_percent": 24.800062725419476,
+      "stateless_total_token_reduction_percent": 7.01805988587564,
+      "statistical_superiority_claimed": false
+    },
+    "schema_version": "1.0",
+    "search_batches": 0,
+    "search_lanes": 0,
+    "source": {
+      "campaign_id": "ai-experiment-163b7b6f9d6c45e1be1352f64e025202",
+      "report_sha256": "1bd7011db5c380ff4944d71b5bc23bbded5e56d929d60868434fe442747c8b50",
+      "source_artifacts_modified": false,
+      "source_model_inferences": 4,
+      "source_search_batches": 3
+    },
+    "status": {
+      "canonical_evidence_registry": true,
+      "completion_reliability_comparison": "both_completed",
+      "context_mode_comparison": "complete_single_pair",
+      "director_state_v2_bounded": true,
+      "exactly_three_or_fewer_inference_starts": true,
+      "incomplete_turn_persistence": true,
+      "persistent_A1_completed": true,
+      "persistent_A4_completed": true,
+      "recommended_default_context_mode": "stateless_turns",
+      "semantic_validity_persistent_A4": true,
+      "semantic_validity_stateless_A4": true,
+      "stateless_A4_completed": true,
+      "stateless_token_reduction_percent": 24.800062725419476,
+      "usage_accounting_complete": true,
+      "zero_action_dispatches": true,
+      "zero_candidate_evaluations": true,
+      "zero_compaction_operations": true,
+      "zero_retries_reaching_inference": true,
+      "zero_search_batches": true,
+      "zero_tool_calls": true
+    },
+    "successful_completed_turns": 3,
+    "timed_out_or_aborted_turns": 0,
+    "tool_calls": 0,
+    "usage_totals": {
+      "persistent_thread": {
+        "cache_write_input_tokens": 0,
+        "cached_input_tokens": 0,
+        "input_tokens": 17159,
+        "output_tokens": 6338,
+        "reasoning_output_tokens": 4805,
+        "server_reported_total_tokens": 23497
+      },
+      "stateless_turns": {
+        "cache_write_input_tokens": 0,
+        "cached_input_tokens": 0,
+        "input_tokens": 9591,
+        "output_tokens": 6215,
+        "reasoning_output_tokens": 5438,
+        "server_reported_total_tokens": 15806
+      }
+    }
+  },
+  "schema_version": "1.0",
+  "sqlite": {
+    "online_backup_integrity_checks": "ok",
+    "persistent_integrity_check": "ok",
+    "schema_version": 9,
+    "stateless_integrity_check": "ok"
+  },
+  "uncertainties": [
+    "One S2/P2 pair does not establish statistical superiority.",
+    "All cached-input and cache-write input fields were zero.",
+    "Platform-owned sandbox/developer instructions and the minimal environment wrapper remained.",
+    "Skill includeInstructions metadata remained true, but all six skills were disabled and no skill instructions were present."
+  ]
+}
