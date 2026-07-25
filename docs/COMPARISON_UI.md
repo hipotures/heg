@@ -107,7 +107,7 @@ model_contract_matched
 
 A mismatch marks preflight failed and must abort before inference.
 
-## Schema v12
+## Schema v13
 
 The v10 comparison schema contains:
 
@@ -160,6 +160,21 @@ infrastructure failures show the exceeded category and whether the active arm
 had already completed and later arms were blocked. Private absolute paths,
 credential paths, credential hashes, and credential contents are never
 rendered.
+
+Schema v13 adds durable, independent byte-quota, accounting, filesystem-policy,
+and process-reaping summaries. The progress card renders genuine byte
+crossings as `Runtime scratch exceeded` with current/peak/limit and contributor.
+Filesystem violations instead render their failure code, lifecycle stage, and
+safe relative link label. They never borrow a byte limit or display a false
+numeric inequality.
+
+The second historical Luna suite is not rewritten. Its persisted v12 evidence
+is recognized as the known legacy wrapper rejection because the recorded
+scratch peak is below its recorded limit and the threshold sample contains
+the four reviewed wrapper basenames. The page therefore shows `Actual byte
+quota exceeded: No`, the measured 2,274,115 B versus 536,870,912 B, zero
+inference starts, and xhigh blocked/not started. Private target paths are not
+derived or displayed.
 
 The historical first Luna suite remains terminal and unchanged. Its high arm
 renders as completed valid, xhigh renders as blocked/not started for clarity,

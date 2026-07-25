@@ -384,7 +384,9 @@ class ComparisonWorkerTests(unittest.TestCase):
             max_runtime_scratch_bytes=4 * 1024 * 1024,
             max_single_runtime_file_bytes=4 * 1024 * 1024,
         )
-        result = self._run(suite_id, "director-screen-scratch-exceed")
+        result = self._run(
+            suite_id, "director-screen-scratch-total-exceed"
+        )
         self.assertFalse(result.ok)
         self.assertEqual(result.inference_starts, 1)
         with ComparisonStore(self.database) as store:
@@ -398,11 +400,17 @@ class ComparisonWorkerTests(unittest.TestCase):
             ).fetchone()
             self.assertIsNotNone(crossing)
             self.assertGreaterEqual(
-                crossing["peak_apparent_bytes"], 8 * 1024 * 1024
+                crossing["peak_apparent_bytes"], 6 * 1024 * 1024
             )
             self.assertIn(
                 "transient-runtime.bin",
                 crossing["largest_contributor_relative_path"],
+            )
+            self.assertEqual(crossing["failure_domain"], "byte_quota")
+            self.assertEqual(crossing["byte_quota_exceeded"], 1)
+            self.assertGreater(
+                crossing["current_apparent_bytes"],
+                crossing["configured_limit_bytes"],
             )
             self.assertEqual(crossing["interruption_sent"], 1)
             latest = [
@@ -543,6 +551,15 @@ class ComparisonWorkerTests(unittest.TestCase):
             ).fetchone()
             self.assertIn("escape-link", crossing["accounting_errors_json"])
             self.assertEqual(
+                crossing["failure_domain"], "filesystem_policy"
+            )
+            self.assertEqual(
+                crossing["failure_code"],
+                "unexpected_external_symlink",
+            )
+            self.assertEqual(crossing["byte_quota_exceeded"], 0)
+            self.assertEqual(crossing["byte_quota_status"], "within_limit")
+            self.assertEqual(
                 store.connection.execute(
                     """
                     SELECT lifecycle_state FROM comparison_arm_transitions
@@ -552,6 +569,143 @@ class ComparisonWorkerTests(unittest.TestCase):
                 ).fetchone()[0],
                 "blocked",
             )
+
+    def test_expected_app_server_wrappers_allow_two_fake_arms(self) -> None:
+        suite_id, _ = self._authorize()
+        result = self._run(suite_id, "director-screen-wrappers")
+        self.assertTrue(result.ok, result.terminal_reason)
+        self.assertEqual(result.inference_starts, 2)
+        with ComparisonStore(self.database) as store:
+            rows = list(
+                store.connection.execute(
+                    """
+                    SELECT symlink_policy_status, symlink_observations_json
+                    FROM comparison_resource_samples
+                    WHERE suite_id=? AND category='runtime_scratch'
+                    """,
+                    (suite_id,),
+                )
+            )
+            self.assertTrue(rows)
+            self.assertTrue(
+                all(row["symlink_policy_status"] == "passed" for row in rows)
+            )
+            observed = [
+                item
+                for row in rows
+                for item in json.loads(
+                    row["symlink_observations_json"] or "[]"
+                )
+            ]
+            self.assertEqual(
+                {
+                    item["wrapper_basename"]
+                    for item in observed
+                    if item["classification"]
+                    == "expected_runtime_wrapper"
+                },
+                {
+                    "apply_patch",
+                    "applypatch",
+                    "codex-execve-wrapper",
+                    "codex-linux-sandbox",
+                },
+            )
+            self.assertTrue(
+                all(item["no_follow_confirmed"] for item in observed)
+            )
+
+    def test_expected_wrapper_two_arm_soak_ten_times(self) -> None:
+        for _ in range(10):
+            suite_id, _ = self._authorize()
+            result = self._run(suite_id, "director-screen-wrappers")
+            self.assertTrue(result.ok, result.terminal_reason)
+            self.assertEqual(result.inference_starts, 2)
+            with ComparisonStore(self.database) as store:
+                self.assertEqual(
+                    store.connection.execute(
+                        """
+                        SELECT count(*) FROM comparison_worker_leases
+                        WHERE suite_id=? AND released_at IS NULL
+                        """,
+                        (suite_id,),
+                    ).fetchone()[0],
+                    0,
+                )
+
+    def test_unexpected_wrapper_fails_as_filesystem_policy(self) -> None:
+        suite_id, arm_ids = self._authorize()
+        result = self._run(
+            suite_id, "director-screen-wrapper-unexpected"
+        )
+        self.assertFalse(result.ok)
+        self.assertEqual(result.inference_starts, 0)
+        with ComparisonStore(self.database) as store:
+            suite = store._suite_row(suite_id)
+            self.assertEqual(suite["failure_domain"], "filesystem_policy")
+            self.assertEqual(
+                suite["failure_code"], "unexpected_external_symlink"
+            )
+            self.assertEqual(suite["byte_quota_exceeded"], 0)
+            self.assertIsNone(suite["resource_exceeded_limit_bytes"])
+            self.assertEqual(
+                store.connection.execute(
+                    """
+                    SELECT lifecycle_state FROM comparison_arm_transitions
+                    WHERE arm_id=? ORDER BY sequence_number DESC LIMIT 1
+                    """,
+                    (arm_ids[1],),
+                ).fetchone()[0],
+                "blocked",
+            )
+
+    def test_wrapper_basename_in_wrong_directory_is_rejected(self) -> None:
+        suite_id, _ = self._authorize()
+        result = self._run(
+            suite_id, "director-screen-wrapper-wrong-directory"
+        )
+        self.assertFalse(result.ok)
+        with ComparisonStore(self.database) as store:
+            suite = store._suite_row(suite_id)
+            self.assertEqual(suite["failure_domain"], "filesystem_policy")
+            self.assertEqual(
+                suite["failure_code"], "unexpected_external_symlink"
+            )
+
+    def test_wrapper_with_untrusted_target_is_rejected(self) -> None:
+        suite_id, _ = self._authorize()
+        result = self._run(
+            suite_id, "director-screen-wrapper-untrusted"
+        )
+        self.assertFalse(result.ok)
+        with ComparisonStore(self.database) as store:
+            suite = store._suite_row(suite_id)
+            self.assertEqual(suite["failure_domain"], "filesystem_policy")
+
+    def test_broken_wrapper_is_rejected_explicitly(self) -> None:
+        suite_id, _ = self._authorize()
+        result = self._run(
+            suite_id, "director-screen-wrapper-broken"
+        )
+        self.assertFalse(result.ok)
+        with ComparisonStore(self.database) as store:
+            suite = store._suite_row(suite_id)
+            self.assertEqual(suite["failure_domain"], "filesystem_policy")
+            self.assertEqual(suite["failure_code"], "broken_symlink")
+
+    def test_single_runtime_file_has_separate_failure_domain(self) -> None:
+        suite_id, _ = self._authorize_with_limits(
+            max_runtime_scratch_bytes=16 * 1024 * 1024,
+            max_single_runtime_file_bytes=4 * 1024 * 1024,
+        )
+        result = self._run(suite_id, "director-screen-scratch-exceed")
+        self.assertFalse(result.ok)
+        with ComparisonStore(self.database) as store:
+            suite = store._suite_row(suite_id)
+            self.assertEqual(
+                suite["failure_domain"], "single_file_quota"
+            )
+            self.assertEqual(suite["byte_quota_exceeded"], 0)
 
     def test_completed_arm_remains_valid_when_shutdown_scratch_fails_suite(self) -> None:
         suite_id, arm_ids = self._authorize_with_limits(
@@ -1122,7 +1276,7 @@ class ComparisonWorkerMigrationTests(unittest.TestCase):
                     canonical_sha256(metadata["materials"]["output_schema"]),
                 )
 
-    def test_v11_online_backup_migrates_to_v12_and_preserves_rows(self) -> None:
+    def test_v11_online_backup_migrates_to_v13_and_preserves_rows(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = root / "source.sqlite3"
@@ -1164,8 +1318,8 @@ class ComparisonWorkerMigrationTests(unittest.TestCase):
             backup.close()
             connection.close()
             migrated = connect(backup_path)
-            self.assertEqual(SCHEMA_VERSION, 12)
-            self.assertEqual(migrated.execute("PRAGMA user_version").fetchone()[0], 12)
+            self.assertEqual(SCHEMA_VERSION, 13)
+            self.assertEqual(migrated.execute("PRAGMA user_version").fetchone()[0], 13)
             self.assertEqual(
                 migrated.execute("PRAGMA integrity_check").fetchone()[0],
                 "ok",
@@ -1181,6 +1335,94 @@ class ComparisonWorkerMigrationTests(unittest.TestCase):
                 """
             ).fetchone()
             self.assertEqual(tuple(preserved), (1, 1, 1))
+            migrated.close()
+
+    def test_v12_online_backup_migrates_to_v13_without_rewriting_suite(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source.sqlite3"
+            with ComparisonStore(source) as store:
+                seed_worker_fixture(store)
+                suite_id = store.create_suite(
+                    worker_suite_payload(),
+                    created_by="migration-test",
+                )
+                plan = store.prepare(suite_id)
+            raw = sqlite3.connect(source)
+            for table, names in (
+                (
+                    "comparison_suites",
+                    (
+                        "byte_quota_status",
+                        "byte_quota_exceeded",
+                        "accounting_status",
+                        "symlink_policy_status",
+                        "policy_violation_code",
+                        "failure_domain",
+                        "failure_code",
+                        "resource_policy_label",
+                    ),
+                ),
+                (
+                    "comparison_resource_samples",
+                    (
+                        "byte_quota_status",
+                        "byte_quota_exceeded",
+                        "accounting_status",
+                        "symlink_policy_status",
+                        "policy_violation_code",
+                        "failure_domain",
+                        "failure_code",
+                        "symlink_observations_json",
+                    ),
+                ),
+                (
+                    "comparison_execution_attempts",
+                    (
+                        "process_reap_status",
+                        "process_reaped_at",
+                        "process_return_code",
+                    ),
+                ),
+            ):
+                for name in names:
+                    raw.execute(
+                        f"ALTER TABLE {table} DROP COLUMN {name}"
+                    )
+            raw.execute("PRAGMA user_version=12")
+            raw.commit()
+            backup_path = root / "snapshot.sqlite3"
+            backup = sqlite3.connect(backup_path)
+            raw.backup(backup)
+            backup.close()
+            raw.close()
+            migrated = connect(backup_path)
+            self.assertEqual(
+                migrated.execute("PRAGMA user_version").fetchone()[0],
+                13,
+            )
+            suite = migrated.execute(
+                """
+                SELECT status, plan_fingerprint, consumed_inference_starts,
+                       failure_domain, byte_quota_exceeded
+                FROM comparison_suites WHERE suite_id=?
+                """,
+                (suite_id,),
+            ).fetchone()
+            self.assertEqual(
+                tuple(suite),
+                ("prepared", plan["plan_fingerprint"], 0, None, None),
+            )
+            self.assertEqual(
+                migrated.execute("PRAGMA integrity_check").fetchone()[0],
+                "ok",
+            )
+            self.assertEqual(
+                migrated.execute("PRAGMA foreign_key_check").fetchall(),
+                [],
+            )
             migrated.close()
 
 
@@ -1230,7 +1472,7 @@ class ComparisonWorkerHttpTests(unittest.TestCase):
             os.environ[
                 "SGLAB_COMPARISON_CODEX_LAUNCHER_JSON"
             ] = self.old_launcher
-        for process in self.server.comparison_runners.values():
+        for process in list(self.server.comparison_runners.values()):
             if process.poll() is None:
                 process.wait(timeout=5)
         self.temporary.cleanup()
@@ -1308,6 +1550,26 @@ class ComparisonWorkerHttpTests(unittest.TestCase):
             ["completed", "completed", "timed_out", "blocked"],
         )
         self.assertEqual(len(progress["turns"]), 3)
+        deadline = monotonic() + 5
+        while (
+            monotonic() < deadline
+            and suite_id in self.server.comparison_runners
+        ):
+            sleep(0.02)
+        self.assertNotIn(suite_id, self.server.comparison_runners)
+        with ComparisonStore(self.database) as store:
+            attempt = store.connection.execute(
+                """
+                SELECT process_reap_status, process_reaped_at,
+                       process_return_code
+                FROM comparison_execution_attempts
+                WHERE suite_id=? ORDER BY started_at DESC LIMIT 1
+                """,
+                (suite_id,),
+            ).fetchone()
+            self.assertEqual(attempt["process_reap_status"], "reaped")
+            self.assertIsNotNone(attempt["process_reaped_at"])
+            self.assertEqual(attempt["process_return_code"], 1)
         valid_turns = [
             turn
             for turn in progress["turns"]
@@ -1358,6 +1620,111 @@ class ComparisonWorkerHttpTests(unittest.TestCase):
                 ).fetchone()[0],
                 1,
             )
+
+    def test_successful_wrapper_worker_is_reaped_while_dashboard_runs(
+        self,
+    ) -> None:
+        os.environ["SGLAB_COMPARISON_CODEX_LAUNCHER_JSON"] = json.dumps(
+            [
+                sys.executable,
+                str(self.fake),
+                "--fake-mode=director-screen-wrappers",
+            ]
+        )
+        status, created = self._request(
+            "POST", "/api/comparisons", worker_suite_payload()
+        )
+        self.assertEqual(status, 201)
+        suite_id = created["suite_id"]
+        _, prepared = self._request(
+            "POST", f"/api/comparisons/{suite_id}/prepare", {}
+        )
+        self._request(
+            "POST",
+            f"/api/comparisons/{suite_id}/authorize",
+            {"plan_fingerprint": prepared["plan_fingerprint"]},
+        )
+        status, started = self._request(
+            "POST", f"/api/comparisons/{suite_id}/start", {}
+        )
+        self.assertEqual(status, 202, started)
+        deadline = monotonic() + 10
+        progress: dict = {}
+        while monotonic() < deadline:
+            _, progress = self._request(
+                "GET", f"/api/comparisons/{suite_id}/progress"
+            )
+            if (
+                progress["suite"]["status"] == "completed"
+                and suite_id not in self.server.comparison_runners
+            ):
+                break
+            sleep(0.05)
+        self.assertEqual(progress["suite"]["status"], "completed")
+        self.assertNotIn(suite_id, self.server.comparison_runners)
+        self.assertFalse(process_is_live(int(started["pid"])))
+        with ComparisonStore(self.database) as store:
+            attempt = store.connection.execute(
+                """
+                SELECT process_reap_status, process_return_code
+                FROM comparison_execution_attempts
+                WHERE suite_id=? ORDER BY started_at DESC LIMIT 1
+                """,
+                (suite_id,),
+            ).fetchone()
+            self.assertEqual(tuple(attempt), ("reaped", 0))
+
+    def test_pre_inference_policy_failure_is_reaped_and_not_restartable(
+        self,
+    ) -> None:
+        os.environ["SGLAB_COMPARISON_CODEX_LAUNCHER_JSON"] = json.dumps(
+            [
+                sys.executable,
+                str(self.fake),
+                "--fake-mode=director-screen-wrapper-unexpected",
+            ]
+        )
+        status, created = self._request(
+            "POST", "/api/comparisons", worker_suite_payload()
+        )
+        self.assertEqual(status, 201)
+        suite_id = created["suite_id"]
+        _, prepared = self._request(
+            "POST", f"/api/comparisons/{suite_id}/prepare", {}
+        )
+        self._request(
+            "POST",
+            f"/api/comparisons/{suite_id}/authorize",
+            {"plan_fingerprint": prepared["plan_fingerprint"]},
+        )
+        status, _ = self._request(
+            "POST", f"/api/comparisons/{suite_id}/start", {}
+        )
+        self.assertEqual(status, 202)
+        deadline = monotonic() + 10
+        progress: dict = {}
+        while monotonic() < deadline:
+            _, progress = self._request(
+                "GET", f"/api/comparisons/{suite_id}/progress"
+            )
+            if (
+                progress["suite"]["status"] == "failed"
+                and suite_id not in self.server.comparison_runners
+            ):
+                break
+            sleep(0.05)
+        self.assertEqual(progress["suite"]["status"], "failed")
+        self.assertEqual(
+            progress["suite"]["failure_domain"], "filesystem_policy"
+        )
+        self.assertEqual(
+            progress["suite"]["consumed_inference_starts"], 0
+        )
+        self.assertNotIn(suite_id, self.server.comparison_runners)
+        status, duplicate = self._request(
+            "POST", f"/api/comparisons/{suite_id}/start", {}
+        )
+        self.assertEqual(status, 409, duplicate)
 
     def test_stop_endpoint_persists_request_without_pid_input(self) -> None:
         payload = worker_suite_payload()

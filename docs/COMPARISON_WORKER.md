@@ -29,7 +29,7 @@ sglab comparisons import-campaign-snapshot \
 
 The importer takes an SQLite Online Backup for consistent read-only
 validation, copies only the hash-verified snapshot artifact, creates a fresh
-schema-v12 database, and derives the prompt, schema, registries, action space,
+current schema-v13 database, and derives the prompt, schema, registries, action space,
 base instructions, and campaign budget deterministically. It rejects
 synthetic/demo sources and private or absolute runtime references.
 
@@ -179,6 +179,15 @@ attempt and suite failed, releases only reservations that never reached
 inference, and never resumes paid work automatically. Consumed starts and
 incomplete `app_server_turns` remain inspectable.
 
+Dashboard-launched comparison workers remain in a bounded registry of owned
+`Popen` handles. The HTTP server's nonblocking service loop polls only those
+children, which performs the equivalent of `waitpid(..., WNOHANG)`, persists
+the return code and reaping timestamp, and removes the live registration.
+Terminal attempt persistence is owned by the worker and does not depend on
+reaping. `/proc` state `Z` is treated as non-live during restart recovery, so
+a zombie PID cannot block a future unrelated suite. No global `waitpid` is
+used.
+
 ## Stop and limits
 
 `POST /api/comparisons/<id>/stop` records a stop request and returns. It accepts
@@ -228,10 +237,34 @@ Legacy schema-2.0 plans remain reproducible for audit but cannot start a new
 worker.
 
 One `lstat`-based traversal supplies both telemetry and enforcement. It never
-follows symlinks, reports escaping links, deduplicates regular files by
+follows symlinks, classifies them independently of bytes, deduplicates regular files by
 device/inode, records apparent and allocated bytes, detects sparse files, and
 fails on inaccessible entries or bounded traversal limits. It traverses only
 the suite execution root.
+
+Schema v13 separates `byte_quota`, `single_file_quota`, `log_quota`,
+`filesystem_policy`, `accounting_error`, `process_lifecycle`, and
+`app_server_protocol`. Every sample records byte-quota status, accounting
+status, symlink-policy status, failure domain/code, and bounded safe symlink
+metadata. A numeric `current > limit` message is constructed only after that
+inequality has been checked.
+
+The only accepted escaping links are the four App Server wrappers
+`apply_patch`, `applypatch`, `codex-execve-wrapper`, and
+`codex-linux-sandbox`, at the reviewed private
+`app-server-tmp/arg0/<wrapper>` location. Their target must resolve below a
+server-discovered Codex installation root, be a regular executable, be
+non-world-writable, and be outside the research workspace. Discovery uses the
+server-owned launcher, never browser input, suite metadata, or model output.
+Only the safe wrapper label, basename, trust class, root class, and policy
+decision are persisted. The target path is never persisted or rendered.
+
+Each link is inspected with `lstat`, `readlink`, target metadata, and a second
+`lstat` of both link and trusted target. Type or inode changes become an
+explicit accounting error. Internal links remain non-followed and rejected
+unless a future reviewed policy explicitly permits them. Broken, unreadable,
+wrong-directory, untrusted-target, and unexpected external links fail closed
+as filesystem policy, never as scratch-byte exhaustion.
 
 `comparison_resource_samples` retains at most the latest, peak,
 threshold-crossing, and terminal row for each category and attempt. Samples

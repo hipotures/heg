@@ -69,10 +69,51 @@ class DashboardServer(ThreadingHTTPServer):
         self.launch_lock = Lock()
         super().__init__(address, DashboardHandler)
 
+    def service_actions(self) -> None:
+        super().service_actions()
+        with self.launch_lock:
+            self._reap_comparison_workers_locked()
+
+    def server_close(self) -> None:
+        with self.launch_lock:
+            self._reap_comparison_workers_locked()
+        super().server_close()
+
+    def _reap_comparison_workers_locked(self) -> None:
+        reaped: list[tuple[str, Popen[bytes], int]] = []
+        for suite_id, process in list(self.comparison_runners.items()):
+            return_code = process.poll()
+            if return_code is None:
+                continue
+            reaped.append((suite_id, process, return_code))
+            del self.comparison_runners[suite_id]
+        if not reaped:
+            return
+        with ComparisonStore(self.workspace / "results.sqlite3") as store:
+            with store.connection:
+                for suite_id, process, return_code in reaped:
+                    store.connection.execute(
+                        """
+                        UPDATE comparison_execution_attempts
+                        SET process_reap_status='reaped',
+                            process_reaped_at=?,
+                            process_return_code=?
+                        WHERE suite_id=? AND pid=?
+                          AND process_reaped_at IS NULL
+                        """,
+                        (
+                            utc_now(),
+                            return_code,
+                            suite_id,
+                            process.pid,
+                        ),
+                    )
+
     def start_comparison(
         self, suite_id: str
     ) -> tuple[int, dict[str, Any]]:
         with self.launch_lock:
+            self._reap_comparison_workers_locked()
             recover_stale_workers(self.workspace / "results.sqlite3")
             current = self.comparison_runners.get(suite_id)
             if current is not None and current.poll() is None:

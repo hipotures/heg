@@ -2,6 +2,37 @@
 
 Last implementation audit: **2026-07-25**.
 
+## M7 comparison symlink policy and worker reaping
+
+Schema v13 separates byte inequalities, single-file and log caps, filesystem
+policy, accounting errors, process lifecycle, and App Server protocol
+failures. The four reviewed App Server `arg0` wrapper names are accepted only
+at the exact private runtime location and only when their target is a stable,
+regular, executable, non-world-writable file below the server-discovered
+Codex installation root and outside the research workspace. Accounting never
+follows a target or charges its bytes, and persists only safe relative labels
+and trust classes.
+
+Deterministic production-worker tests cover the exact four wrappers, unexpected
+external and wrong-directory links, untrusted and broken targets, link inode
+races, genuine aggregate and single-file crossings, two successful arms, and
+a ten-run wrapper soak. Filesystem failures no longer carry scratch limits or
+false `current > limit` messages. The historical second suite remains
+terminal and unchanged; its UI derives the corrected legacy explanation from
+the v12 crossing sample.
+
+The dashboard now polls only its owned comparison `Popen` handles, persists
+the reaping result, removes completed registrations, and treats Linux zombie
+state as non-live. HTTP tests prove successful and failed workers are reaped
+while the dashboard remains responsive and terminal detail remains readable.
+
+The installed no-auth lifecycle smoke starts, initializes, accounts, shuts
+down, and reaps Codex without `thread/start` or `turn/start`. The installed
+build creates no `arg0` wrapper symlinks in that bounded phase, so direct
+classification of real installed wrappers remains unproven without crossing
+the explicitly forbidden thread boundary. Consequently a fresh authenticated
+comparison is not yet declared ready.
+
 ## M7 second real comparison failed before inference
 
 Fresh authorization bound the schema-2.1/accounting-v2 Luna high-versus-xhigh

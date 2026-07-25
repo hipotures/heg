@@ -35,6 +35,7 @@ from .resource_accounting import (
     RUNTIME_SCRATCH,
     ResourceAccountingError,
     account_execution_root,
+    discover_trusted_codex_roots,
 )
 from .state import atomic_write_json, read_json, utc_now
 
@@ -79,16 +80,43 @@ class ComparisonResourceLimitError(ComparisonWorkerError):
         peak_bytes: int,
         contributor: str,
         stage: str,
+        *,
+        failure_domain: str = "byte_quota",
+        failure_code: str = "byte_quota_exceeded",
     ):
+        if peak_bytes <= limit_bytes:
+            raise ValueError("resource quota errors require measured bytes > limit")
         self.category = category
         self.limit_bytes = limit_bytes
         self.peak_bytes = peak_bytes
         self.contributor = contributor
         self.stage = stage
+        self.failure_domain = failure_domain
+        self.failure_code = failure_code
         super().__init__(
             f"{category} limit exceeded at {stage}: "
             f"{peak_bytes} > {limit_bytes}; largest={contributor or 'none'}"
         )
+
+
+class ComparisonFilesystemPolicyError(ComparisonWorkerError):
+    def __init__(self, code: str, label: str, stage: str):
+        self.failure_domain = "filesystem_policy"
+        self.failure_code = code
+        self.label = label
+        self.stage = stage
+        super().__init__(
+            f"filesystem policy violation at {stage}: {code}; "
+            f"entry={label or 'unavailable'}"
+        )
+
+
+class ComparisonAccountingError(ComparisonWorkerError):
+    def __init__(self, code: str, stage: str):
+        self.failure_domain = "accounting_error"
+        self.failure_code = code
+        self.stage = stage
+        super().__init__(f"resource accounting failed at {stage}: {code}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,6 +174,16 @@ def process_is_live(pid: int) -> bool:
         return False
     except PermissionError:
         return True
+    try:
+        fields = Path(f"/proc/{pid}/stat").read_text(
+            encoding="utf-8"
+        ).split()
+    except (FileNotFoundError, ProcessLookupError):
+        return False
+    except (OSError, UnicodeError):
+        return True
+    if len(fields) >= 3 and fields[2] == "Z":
+        return False
     return True
 
 
@@ -389,6 +427,9 @@ class ComparisonWorker:
         self._resource_previous: dict[str, int] = {}
         self._resource_last_sample = 0.0
         self._active_plan: dict[str, Any] | None = None
+        self._trusted_symlink_roots = discover_trusted_codex_roots(
+            self.launcher
+        )
 
     def run(self) -> WorkerResult:
         terminal = "failed"
@@ -1310,14 +1351,23 @@ class ComparisonWorker:
         self._sample_resources(
             plan, "after_private_directories", arm_id=str(arm["arm_id"])
         )
-        await client.start()
-        self._transition(str(arm["arm_id"]), "server_started")
-        self._sample_resources(
-            plan, "after_app_server_start", arm_id=str(arm["arm_id"])
-        )
-        session = await client.start_thread(contract.base_instructions)
-        session_record_id = self._record_session(session, arm)
-        return RuntimeGroup(client, session, session_record_id, application_data)
+        try:
+            await client.start()
+            self._transition(str(arm["arm_id"]), "server_started")
+            self._sample_resources(
+                plan, "after_app_server_start", arm_id=str(arm["arm_id"])
+            )
+            session = await client.start_thread(contract.base_instructions)
+            session_record_id = self._record_session(session, arm)
+            return RuntimeGroup(
+                client,
+                session,
+                session_record_id,
+                application_data,
+            )
+        except BaseException:
+            await client.close()
+            raise
 
     def _record_session(
         self,
@@ -1484,7 +1534,11 @@ class ComparisonWorker:
                         pass
                     raise WorkerStopped("operator stop requested")
             return await asyncio.wait_for(task, timeout=timeout_seconds)
-        except ComparisonResourceLimitError:
+        except (
+            ComparisonResourceLimitError,
+            ComparisonFilesystemPolicyError,
+            ComparisonAccountingError,
+        ):
             await client.interrupt_active_turn()
             self._mark_resource_interruption()
             try:
@@ -2102,6 +2156,13 @@ class ComparisonWorker:
             return int(plan["max_runtime_scratch_bytes"])
         return None
 
+    def _account_resources(self) -> Any:
+        return account_execution_root(
+            self._execution_root(),
+            research_workspace=self.workspace,
+            trusted_symlink_roots=self._trusted_symlink_roots,
+        )
+
     def _write_preserved_json(
         self, path: Path, value: dict[str, Any], stage: str
     ) -> str:
@@ -2130,7 +2191,7 @@ class ComparisonWorker:
             raise ComparisonWorkerError(
                 "preserved artifact path escapes execution root"
             ) from error
-        accounting = account_execution_root(root)
+        accounting = self._account_resources()
         total = accounting.categories[PRESERVED_ARTIFACTS].apparent_bytes
         if path.exists():
             metadata = path.lstat()
@@ -2152,7 +2213,14 @@ class ComparisonWorker:
             log_limit = int(plan["maximum_stdout_bytes"])
         if log_limit is not None and size > log_limit:
             self._raise_prospective_limit(
-                accounting, LOGS, log_limit, size, relative.as_posix(), stage
+                accounting,
+                LOGS,
+                log_limit,
+                size,
+                relative.as_posix(),
+                stage,
+                failure_domain="log_quota",
+                failure_code="log_quota_exceeded",
             )
         if size > single_limit:
             self._raise_prospective_limit(
@@ -2162,6 +2230,8 @@ class ComparisonWorker:
                 size,
                 relative.as_posix(),
                 stage,
+                failure_domain="single_file_quota",
+                failure_code="single_preserved_artifact_exceeded",
             )
         if prospective > total_limit:
             self._raise_prospective_limit(
@@ -2171,6 +2241,8 @@ class ComparisonWorker:
                 prospective,
                 relative.as_posix(),
                 stage,
+                failure_domain="byte_quota",
+                failure_code="preserved_artifact_quota_exceeded",
             )
 
     def _raise_prospective_limit(
@@ -2181,6 +2253,9 @@ class ComparisonWorker:
         measured: int,
         contributor: str,
         stage: str,
+        *,
+        failure_domain: str,
+        failure_code: str,
     ) -> None:
         old_peak = self._resource_peaks.get(category, (0, 0))
         peak = max(old_peak[0], measured)
@@ -2201,6 +2276,14 @@ class ComparisonWorker:
             limit=limit,
             cleanup=False,
             errors=[],
+            byte_quota_status="exceeded",
+            byte_quota_exceeded=True,
+            accounting_status="ok",
+            symlink_policy_status="passed",
+            policy_violation_code=None,
+            failure_domain=failure_domain,
+            failure_code=failure_code,
+            symlink_observations=[],
         )
         self._persist_resource_diagnostic(
             accounting,
@@ -2210,6 +2293,8 @@ class ComparisonWorker:
             contributor,
             stage,
             None,
+            failure_domain=failure_domain,
+            failure_code=failure_code,
         )
         if self.attempt_id is not None:
             with ComparisonStore(self.database) as store, store.connection:
@@ -2221,7 +2306,15 @@ class ComparisonWorker:
                         resource_peak_bytes=?,
                         resource_largest_contributor=?,
                         resource_enforcement_stage=?,
-                        resource_cleanup_status='pending'
+                        resource_cleanup_status='pending',
+                        byte_quota_status='exceeded',
+                        byte_quota_exceeded=1,
+                        accounting_status='ok',
+                        symlink_policy_status='passed',
+                        policy_violation_code=NULL,
+                        failure_domain=?,
+                        failure_code=?,
+                        resource_policy_label=NULL
                     WHERE suite_id=?
                     """,
                     (
@@ -2230,11 +2323,19 @@ class ComparisonWorker:
                         peak,
                         contributor,
                         stage,
+                        failure_domain,
+                        failure_code,
                         self.suite_id,
                     ),
                 )
         raise ComparisonResourceLimitError(
-            category, limit, peak, contributor, stage
+            category,
+            limit,
+            peak,
+            contributor,
+            stage,
+            failure_domain=failure_domain,
+            failure_code=failure_code,
         )
 
     def _sample_resources(
@@ -2248,13 +2349,147 @@ class ComparisonWorker:
         cleanup: bool = False,
     ) -> None:
         try:
-            accounting = account_execution_root(self._execution_root())
+            accounting = self._account_resources()
         except ResourceAccountingError as error:
-            raise ComparisonWorkerError(
-                f"resource accounting failed at {stage}: {error}"
+            if self.attempt_id is not None:
+                with ComparisonStore(
+                    self.database
+                ) as store, store.connection:
+                    store.connection.execute(
+                        """
+                        UPDATE comparison_suites
+                        SET accounting_status='error',
+                            symlink_policy_status='unknown',
+                            byte_quota_status='unknown',
+                            byte_quota_exceeded=0,
+                            failure_domain='accounting_error',
+                            failure_code='resource_traversal_error',
+                            resource_enforcement_stage=?
+                        WHERE suite_id=?
+                        """,
+                        (stage, self.suite_id),
+                    )
+            raise ComparisonAccountingError(
+                "resource_traversal_error", stage
             ) from error
-        violation: tuple[str, int, int, str] | None = None
-        errors = list(accounting.escaping_symlinks)
+
+        byte_violations: list[dict[str, Any]] = []
+        byte_results: dict[str, tuple[str, bool, int | None]] = {}
+        for category, totals in accounting.categories.items():
+            limit = self._resource_limit(plan, category)
+            exceeded = (
+                limit is not None and totals.apparent_bytes > limit
+            )
+            byte_results[category] = (
+                "exceeded"
+                if exceeded
+                else "within_limit"
+                if limit is not None
+                else "not_applicable",
+                exceeded,
+                limit,
+            )
+            if exceeded:
+                byte_violations.append(
+                    {
+                        "category": category,
+                        "limit": int(limit),
+                        "measured": totals.apparent_bytes,
+                        "contributor": (
+                            totals.largest_files[0].relative_path
+                            if totals.largest_files
+                            else ""
+                        ),
+                        "failure_domain": "byte_quota",
+                        "failure_code": f"{category}_quota_exceeded",
+                    }
+                )
+
+        single_file_violations: list[dict[str, Any]] = []
+        for value in accounting.files:
+            cap: int | None = None
+            failure_domain = "single_file_quota"
+            failure_code = "single_runtime_file_exceeded"
+            if value.category == PRESERVED_ARTIFACTS:
+                cap = int(plan["max_single_preserved_artifact_bytes"])
+                failure_code = "single_preserved_artifact_exceeded"
+            elif value.category == RUNTIME_SCRATCH:
+                cap = int(plan["max_single_runtime_file_bytes"])
+            elif value.category == LOGS:
+                failure_domain = "log_quota"
+                lowered = value.relative_path.lower()
+                if "wire" in lowered:
+                    cap = int(plan["maximum_wire_log_bytes"])
+                    failure_code = "wire_log_quota_exceeded"
+                elif "stderr" in lowered:
+                    cap = int(plan["maximum_stderr_bytes"])
+                    failure_code = "stderr_log_quota_exceeded"
+                elif "stdout" in lowered:
+                    cap = int(plan["maximum_stdout_bytes"])
+                    failure_code = "stdout_log_quota_exceeded"
+                else:
+                    cap = int(plan["max_single_runtime_file_bytes"])
+                    failure_code = "runtime_log_file_exceeded"
+            if cap is not None and value.apparent_bytes > cap:
+                single_file_violations.append(
+                    {
+                        "category": value.category,
+                        "limit": cap,
+                        "measured": value.apparent_bytes,
+                        "contributor": value.relative_path,
+                        "failure_domain": failure_domain,
+                        "failure_code": failure_code,
+                    }
+                )
+
+        rejected_links = [
+            value
+            for value in accounting.symlinks
+            if value.policy_status == "rejected"
+        ]
+        violation: dict[str, Any] | None = None
+        if accounting.accounting_status == "error":
+            observed = rejected_links[0]
+            violation = {
+                "category": RUNTIME_SCRATCH,
+                "limit": None,
+                "measured": accounting.categories[
+                    RUNTIME_SCRATCH
+                ].apparent_bytes,
+                "contributor": observed.relative_path,
+                "failure_domain": "accounting_error",
+                "failure_code": (
+                    observed.policy_violation_code
+                    or "resource_accounting_error"
+                ),
+            }
+        elif rejected_links:
+            observed = rejected_links[0]
+            violation = {
+                "category": RUNTIME_SCRATCH,
+                "limit": None,
+                "measured": accounting.categories[
+                    RUNTIME_SCRATCH
+                ].apparent_bytes,
+                "contributor": observed.relative_path,
+                "failure_domain": "filesystem_policy",
+                "failure_code": (
+                    observed.policy_violation_code
+                    or "unexpected_external_symlink"
+                ),
+            }
+        elif single_file_violations:
+            violation = single_file_violations[0]
+        elif byte_violations:
+            violation = byte_violations[0]
+
+        errors = [
+            value.relative_path
+            for value in rejected_links
+        ]
+        observations = [
+            value.as_dict() for value in accounting.symlinks
+        ]
         for category, totals in accounting.categories.items():
             previous = self._resource_previous.get(category, 0)
             old_peak = self._resource_peaks.get(category, (0, 0))
@@ -2275,33 +2510,27 @@ class ComparisonWorker:
                 if totals.apparent_bytes > previous
                 else None
             )
-            limit = self._resource_limit(plan, category)
+            byte_status, byte_exceeded, limit = byte_results[category]
             contributor = (
                 totals.largest_files[0].relative_path
                 if totals.largest_files
                 else None
             )
             decision = "within_limit"
-            if accounting.escaping_symlinks and category == RUNTIME_SCRATCH:
-                decision = "accounting_error"
-                violation = (
-                    RUNTIME_SCRATCH,
-                    int(plan["max_runtime_scratch_bytes"]),
-                    totals.apparent_bytes,
-                    accounting.escaping_symlinks[0],
-                )
-            elif (
-                limit is not None
-                and totals.apparent_bytes > limit
-                and violation is None
+            if (
+                violation is not None
+                and violation["category"] == category
+                and violation["failure_domain"] == "accounting_error"
             ):
+                decision = "accounting_error"
+            elif (
+                violation is not None
+                and violation["category"] == category
+                and violation["failure_domain"] == "filesystem_policy"
+            ):
+                decision = "policy_violation"
+            elif byte_exceeded:
                 decision = "exceeded"
-                violation = (
-                    category,
-                    limit,
-                    totals.apparent_bytes,
-                    contributor or "",
-                )
             self._persist_resource_sample(
                 accounting=accounting,
                 category=category,
@@ -2314,6 +2543,24 @@ class ComparisonWorker:
                 limit=limit,
                 cleanup=cleanup,
                 errors=errors,
+                byte_quota_status=byte_status,
+                byte_quota_exceeded=byte_exceeded,
+                accounting_status=accounting.accounting_status,
+                symlink_policy_status=accounting.symlink_policy_status,
+                policy_violation_code=accounting.policy_violation_code,
+                failure_domain=(
+                    violation["failure_domain"]
+                    if violation is not None
+                    and violation["category"] == category
+                    else None
+                ),
+                failure_code=(
+                    violation["failure_code"]
+                    if violation is not None
+                    and violation["category"] == category
+                    else None
+                ),
+                symlink_observations=observations,
             )
             if is_new_peak:
                 self._persist_resource_sample(
@@ -2328,39 +2575,37 @@ class ComparisonWorker:
                     limit=limit,
                     cleanup=cleanup,
                     errors=errors,
-                )
-
-        for value in accounting.files:
-            cap: int | None = None
-            if value.category == PRESERVED_ARTIFACTS:
-                cap = int(plan["max_single_preserved_artifact_bytes"])
-            elif value.category == RUNTIME_SCRATCH:
-                cap = int(plan["max_single_runtime_file_bytes"])
-            elif value.category == LOGS:
-                lowered = value.relative_path.lower()
-                if "wire" in lowered:
-                    cap = int(plan["maximum_wire_log_bytes"])
-                elif "stderr" in lowered:
-                    cap = int(plan["maximum_stderr_bytes"])
-                elif "stdout" in lowered:
-                    cap = int(plan["maximum_stdout_bytes"])
-                else:
-                    cap = int(plan["max_single_runtime_file_bytes"])
-            if (
-                cap is not None
-                and value.apparent_bytes > cap
-                and violation is None
-            ):
-                violation = (
-                    value.category,
-                    cap,
-                    value.apparent_bytes,
-                    value.relative_path,
+                    byte_quota_status=byte_status,
+                    byte_quota_exceeded=byte_exceeded,
+                    accounting_status=accounting.accounting_status,
+                    symlink_policy_status=accounting.symlink_policy_status,
+                    policy_violation_code=accounting.policy_violation_code,
+                    failure_domain=(
+                        violation["failure_domain"]
+                        if violation is not None
+                        and violation["category"] == category
+                        else None
+                    ),
+                    failure_code=(
+                        violation["failure_code"]
+                        if violation is not None
+                        and violation["category"] == category
+                        else None
+                    ),
+                    symlink_observations=observations,
                 )
 
         if violation is not None and enforce:
-            category, limit, measured, contributor = violation
+            category = str(violation["category"])
+            limit = violation["limit"]
+            measured = int(violation["measured"])
+            contributor = str(violation["contributor"])
+            failure_domain = str(violation["failure_domain"])
+            failure_code = str(violation["failure_code"])
             peak = max(self._resource_peaks.get(category, (0, 0))[0], measured)
+            byte_status, byte_exceeded, configured_limit = byte_results[
+                category
+            ]
             self._persist_resource_sample(
                 accounting=accounting,
                 category=category,
@@ -2369,10 +2614,29 @@ class ComparisonWorker:
                 arm_id=arm_id,
                 peak=(peak, self._resource_peaks.get(category, (0, 0))[1]),
                 growth=None,
-                decision="exceeded",
-                limit=limit,
+                decision=(
+                    "exceeded"
+                    if failure_domain
+                    in {"byte_quota", "single_file_quota", "log_quota"}
+                    else "accounting_error"
+                    if failure_domain == "accounting_error"
+                    else "policy_violation"
+                ),
+                limit=(
+                    int(limit)
+                    if limit is not None
+                    else configured_limit
+                ),
                 cleanup=False,
                 errors=errors,
+                byte_quota_status=byte_status,
+                byte_quota_exceeded=byte_exceeded,
+                accounting_status=accounting.accounting_status,
+                symlink_policy_status=accounting.symlink_policy_status,
+                policy_violation_code=accounting.policy_violation_code,
+                failure_domain=failure_domain,
+                failure_code=failure_code,
+                symlink_observations=observations,
             )
             self._persist_resource_diagnostic(
                 accounting,
@@ -2382,6 +2646,8 @@ class ComparisonWorker:
                 contributor,
                 stage,
                 arm_id,
+                failure_domain=failure_domain,
+                failure_code=failure_code,
             )
             with ComparisonStore(self.database) as store, store.connection:
                 store.connection.execute(
@@ -2392,20 +2658,91 @@ class ComparisonWorker:
                         resource_peak_bytes=?,
                         resource_largest_contributor=?,
                         resource_enforcement_stage=?,
-                        resource_cleanup_status='pending'
+                        resource_cleanup_status='pending',
+                        byte_quota_status=?,
+                        byte_quota_exceeded=?,
+                        accounting_status=?,
+                        symlink_policy_status=?,
+                        policy_violation_code=?,
+                        failure_domain=?,
+                        failure_code=?,
+                        resource_policy_label=?
                     WHERE suite_id=?
                     """,
                     (
-                        category,
-                        limit,
-                        peak,
-                        contributor,
+                        (
+                            category
+                            if failure_domain
+                            in {
+                                "byte_quota",
+                                "single_file_quota",
+                                "log_quota",
+                            }
+                            else None
+                        ),
+                        (
+                            int(limit)
+                            if limit is not None
+                            and failure_domain
+                            in {
+                                "byte_quota",
+                                "single_file_quota",
+                                "log_quota",
+                            }
+                            else None
+                        ),
+                        (
+                            peak
+                            if failure_domain
+                            in {
+                                "byte_quota",
+                                "single_file_quota",
+                                "log_quota",
+                            }
+                            else None
+                        ),
+                        (
+                            contributor
+                            if failure_domain
+                            in {
+                                "byte_quota",
+                                "single_file_quota",
+                                "log_quota",
+                            }
+                            else None
+                        ),
                         stage,
+                        byte_status,
+                        int(byte_exceeded),
+                        accounting.accounting_status,
+                        accounting.symlink_policy_status,
+                        accounting.policy_violation_code,
+                        failure_domain,
+                        failure_code,
+                        (
+                            contributor
+                            if failure_domain
+                            in {"filesystem_policy", "accounting_error"}
+                            else None
+                        ),
                         self.suite_id,
                     ),
                 )
+            if failure_domain == "filesystem_policy":
+                raise ComparisonFilesystemPolicyError(
+                    failure_code, contributor, stage
+                )
+            if failure_domain == "accounting_error":
+                raise ComparisonAccountingError(failure_code, stage)
+            assert limit is not None
             raise ComparisonResourceLimitError(
-                category, limit, peak, contributor, stage
+                category,
+                int(limit),
+                peak,
+                contributor,
+                stage,
+                failure_domain=failure_domain,
+                failure_code=failure_code,
             )
 
     def _persist_resource_sample(
@@ -2422,6 +2759,14 @@ class ComparisonWorker:
         limit: int | None,
         cleanup: bool,
         errors: list[str],
+        byte_quota_status: str,
+        byte_quota_exceeded: bool,
+        accounting_status: str,
+        symlink_policy_status: str,
+        policy_violation_code: str | None,
+        failure_domain: str | None,
+        failure_code: str | None,
+        symlink_observations: list[dict[str, Any]],
     ) -> None:
         if self.attempt_id is None:
             return
@@ -2457,6 +2802,14 @@ class ComparisonWorker:
             0,
             cleanup_reduced,
             json.dumps(errors, sort_keys=True),
+            byte_quota_status,
+            int(byte_quota_exceeded),
+            accounting_status,
+            symlink_policy_status,
+            policy_violation_code,
+            failure_domain,
+            failure_code,
+            json.dumps(symlink_observations, sort_keys=True),
         )
         with ComparisonStore(self.database) as store, store.connection:
             store.connection.execute(
@@ -2471,9 +2824,12 @@ class ComparisonWorker:
                  largest_directories_json, last_growth_event_json,
                  enforcement_decision, configured_limit_bytes,
                  interruption_sent, cleanup_reduced_size,
-                 accounting_errors_json)
+                 accounting_errors_json, byte_quota_status,
+                 byte_quota_exceeded, accounting_status,
+                 symlink_policy_status, policy_violation_code,
+                 failure_domain, failure_code, symlink_observations_json)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?, ?, ?)
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(suite_id, attempt_id, category, sample_kind)
                 DO UPDATE SET
                     arm_id=excluded.arm_id,
@@ -2510,7 +2866,16 @@ class ComparisonWorker:
                         excluded.cleanup_reduced_size,
                         comparison_resource_samples.cleanup_reduced_size
                     ),
-                    accounting_errors_json=excluded.accounting_errors_json
+                    accounting_errors_json=excluded.accounting_errors_json,
+                    byte_quota_status=excluded.byte_quota_status,
+                    byte_quota_exceeded=excluded.byte_quota_exceeded,
+                    accounting_status=excluded.accounting_status,
+                    symlink_policy_status=excluded.symlink_policy_status,
+                    policy_violation_code=excluded.policy_violation_code,
+                    failure_domain=excluded.failure_domain,
+                    failure_code=excluded.failure_code,
+                    symlink_observations_json=
+                        excluded.symlink_observations_json
                 """,
                 values,
             )
@@ -2519,22 +2884,40 @@ class ComparisonWorker:
         self,
         accounting: Any,
         category: str,
-        limit: int,
+        limit: int | None,
         peak: int,
         contributor: str,
         stage: str,
         arm_id: str | None,
+        *,
+        failure_domain: str,
+        failure_code: str,
     ) -> None:
         if self.attempt_id is None:
             return
         totals = accounting.categories[category]
         payload = {
-            "schema_version": "1.0",
+            "schema_version": "2.0",
             "suite_id": self.suite_id,
             "attempt_id": self.attempt_id,
             "arm_id": arm_id,
             "category": category,
             "configured_limit_bytes": limit,
+            "byte_quota_status": (
+                "exceeded"
+                if failure_domain == "byte_quota"
+                else "within_limit"
+                if category in {PRESERVED_ARTIFACTS, RUNTIME_SCRATCH}
+                else "not_applicable"
+            ),
+            "byte_quota_exceeded": bool(
+                failure_domain == "byte_quota"
+            ),
+            "accounting_status": accounting.accounting_status,
+            "symlink_policy_status": accounting.symlink_policy_status,
+            "policy_violation_code": accounting.policy_violation_code,
+            "failure_domain": failure_domain,
+            "failure_code": failure_code,
             "current_apparent_bytes": totals.apparent_bytes,
             "current_allocated_bytes": totals.allocated_bytes,
             "peak_apparent_bytes": peak,
@@ -2543,6 +2926,9 @@ class ComparisonWorker:
                 value.as_dict() for value in totals.largest_files[:8]
             ],
             "largest_directories": totals.largest_directories[:8],
+            "symlink_observations": [
+                value.as_dict() for value in accounting.symlinks
+            ],
             "lifecycle_stage": stage,
             "interruption_sent": False,
             "cleanup_reduced_size": None,

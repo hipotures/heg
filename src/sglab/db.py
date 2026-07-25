@@ -5,7 +5,7 @@ from typing import Any, Iterable
 import json
 import sqlite3
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 MAX_METRIC_ROWS = 100_000
 
 BASE_SCHEMA_SQL = """
@@ -853,6 +853,14 @@ CREATE TABLE IF NOT EXISTS comparison_resource_samples (
     interruption_sent INTEGER NOT NULL DEFAULT 0,
     cleanup_reduced_size INTEGER,
     accounting_errors_json TEXT NOT NULL DEFAULT '[]',
+    byte_quota_status TEXT,
+    byte_quota_exceeded INTEGER,
+    accounting_status TEXT,
+    symlink_policy_status TEXT,
+    policy_violation_code TEXT,
+    failure_domain TEXT,
+    failure_code TEXT,
+    symlink_observations_json TEXT,
     CHECK(category IN (
         'preserved_artifacts', 'runtime_scratch',
         'credential_material', 'logs'
@@ -873,7 +881,7 @@ CREATE TABLE IF NOT EXISTS comparison_resource_samples (
 CREATE INDEX IF NOT EXISTS idx_comparison_resource_samples_suite
     ON comparison_resource_samples(suite_id, sampled_at);
 
-PRAGMA user_version=12;
+PRAGMA user_version=13;
 """
 
 
@@ -1202,6 +1210,14 @@ def _ensure_comparison_resource_schema(connection: sqlite3.Connection) -> None:
         "resource_cleanup_status": "TEXT",
         "resource_active_turn_completed": "INTEGER",
         "resource_later_arms_blocked": "INTEGER",
+        "byte_quota_status": "TEXT",
+        "byte_quota_exceeded": "INTEGER",
+        "accounting_status": "TEXT",
+        "symlink_policy_status": "TEXT",
+        "policy_violation_code": "TEXT",
+        "failure_domain": "TEXT",
+        "failure_code": "TEXT",
+        "resource_policy_label": "TEXT",
     }
     present = {
         str(row[1])
@@ -1212,8 +1228,47 @@ def _ensure_comparison_resource_schema(connection: sqlite3.Connection) -> None:
             connection.execute(
                 f"ALTER TABLE comparison_suites ADD COLUMN {name} {definition}"
             )
+    sample_columns = {
+        "byte_quota_status": "TEXT",
+        "byte_quota_exceeded": "INTEGER",
+        "accounting_status": "TEXT",
+        "symlink_policy_status": "TEXT",
+        "policy_violation_code": "TEXT",
+        "failure_domain": "TEXT",
+        "failure_code": "TEXT",
+        "symlink_observations_json": "TEXT",
+    }
     connection.executescript(COMPARISON_RESOURCE_SCHEMA_SQL)
-    connection.execute("PRAGMA user_version=12")
+    sample_present = {
+        str(row[1])
+        for row in connection.execute(
+            "PRAGMA table_info(comparison_resource_samples)"
+        )
+    }
+    for name, definition in sample_columns.items():
+        if name not in sample_present:
+            connection.execute(
+                "ALTER TABLE comparison_resource_samples "
+                f"ADD COLUMN {name} {definition}"
+            )
+    attempt_columns = {
+        "process_reap_status": "TEXT",
+        "process_reaped_at": "TEXT",
+        "process_return_code": "INTEGER",
+    }
+    attempt_present = {
+        str(row[1])
+        for row in connection.execute(
+            "PRAGMA table_info(comparison_execution_attempts)"
+        )
+    }
+    for name, definition in attempt_columns.items():
+        if name not in attempt_present:
+            connection.execute(
+                "ALTER TABLE comparison_execution_attempts "
+                f"ADD COLUMN {name} {definition}"
+            )
+    connection.execute("PRAGMA user_version=13")
     connection.commit()
 
 

@@ -1,0 +1,151 @@
+{
+  "report": "M7_COMPARISON_SYMLINK_POLICY_PHASE_A",
+  "date": "2026-07-25",
+  "tested_base_commit": "c18770483faf91153621cf5b6be209162ab19aa8",
+  "branch": "m7-ui-review-phase-a",
+  "workspace": "workspace/model-comparisons-live",
+  "schema_version": 13,
+  "historical_suites": {
+    "comparison-4407a28f8e7c47b89a7226045b61b1b4": {
+      "terminal_unchanged": true,
+      "fingerprint": "89e09e8f82428e86f2a75ae24ff51f7187536c22c2ad023152dcb80b60512886"
+    },
+    "comparison-aaabfae5a010445e9d966ea50a0958a8": {
+      "terminal_unchanged": true,
+      "fingerprint": "a44e96f67628cb9afcacbc6c76b8f0e6e65696ba075a62c587d5f02b9b41c6d7",
+      "consumed_inference_starts": 0,
+      "first_arm": "failed_before_thread_start",
+      "second_arm": "blocked_not_started",
+      "historical_resource_sample_count": 12,
+      "scratch_current_bytes": 2274115,
+      "scratch_limit_bytes": 536870912,
+      "actual_byte_quota_exceeded": false
+    }
+  },
+  "preserved_hashes": {
+    "plan_verification": "e4837ec5fb4d291389e0f37c2633bb3631cd258cf1bd447c772f50dff755acc2",
+    "threshold_diagnostic": "054c869579cb95e4a55b4b344749939c457f99e0df96e00d00a07db7289588ab",
+    "worker_log": "f3f0f62595f6df3b31b9461f48a119d1cee14bb0d621eb02312f253c6fe05022",
+    "runtime_report_markdown": "32917d77148c74cce9b875d16d055f7bbea0b5b39190d2b5b766b9e626096505",
+    "runtime_report_json": "631065c63041e0c68282e4ac375155dbccc60f7313d0319a35afffb3631eaba0"
+  },
+  "failure_contract": {
+    "domains": [
+      "byte_quota",
+      "single_file_quota",
+      "log_quota",
+      "filesystem_policy",
+      "accounting_error",
+      "process_lifecycle",
+      "app_server_protocol"
+    ],
+    "byte_and_policy_results_independent": true,
+    "numeric_quota_message_requires_true_inequality": true
+  },
+  "symlink_contract": {
+    "accounting_uses_lstat": true,
+    "targets_followed": false,
+    "target_bytes_charged": false,
+    "classifications": [
+      "internal_nonfollowed",
+      "expected_runtime_wrapper",
+      "unexpected_external",
+      "broken",
+      "malformed_or_unreadable"
+    ],
+    "expected_wrapper_names": [
+      "apply_patch",
+      "applypatch",
+      "codex-execve-wrapper",
+      "codex-linux-sandbox"
+    ],
+    "expected_safe_location": "app-server-tmp/arg0/<wrapper-name>",
+    "trusted_target_contract": {
+      "server_owned_installation_root": true,
+      "regular_executable": true,
+      "outside_research_workspace": true,
+      "not_world_writable": true,
+      "browser_supplied": false,
+      "suite_supplied": false,
+      "model_supplied": false
+    },
+    "unexpected_external_failure_domain": "filesystem_policy",
+    "unexpected_external_failure_code": "unexpected_external_symlink"
+  },
+  "process_reaping": {
+    "bounded_owned_popen_registry": true,
+    "nonblocking_poll": true,
+    "global_waitpid": false,
+    "reaping_persisted": true,
+    "zombie_pid_considered_active": false,
+    "dashboard_shutdown_required": false
+  },
+  "verification": {
+    "focused_policy_accounting_worker_reaper_http_migration": "passed",
+    "full_safe_suite_runs": [
+      {
+        "tests": 227,
+        "result": "passed"
+      },
+      {
+        "tests": 227,
+        "result": "passed"
+      }
+    ],
+    "fake_wrapper_soak_runs": 10,
+    "fake_wrapper_soak_result": "passed",
+    "make_doctor": "passed",
+    "make_test": "passed",
+    "make_check": "passed",
+    "make_benchmark_smoke": "passed",
+    "make_dashboard_smoke": "passed",
+    "http_tests": "passed",
+    "sqlite_integrity_check": "ok",
+    "sqlite_foreign_key_check_rows": 0,
+    "installed_app_server_smoke": {
+      "process_started": true,
+      "thread_started": false,
+      "turn_started": false,
+      "auth_access": false,
+      "model_inference_starts": 0,
+      "process_reaped": true,
+      "return_code": 0,
+      "wrapper_symlinks_observed": 0,
+      "wrapper_classification_gate": "not_proven_under_pre_thread_boundary",
+      "passed": false
+    }
+  },
+  "rendered_ui": {
+    "playwright_cdp_verified": true,
+    "historical_failure_heading": "Filesystem policy violation",
+    "actual_byte_quota_exceeded": false,
+    "scratch_current_bytes": 2274115,
+    "scratch_limit_bytes": 536870912,
+    "safe_relative_label": "app-server-tmp/arg0/apply_patch",
+    "screenshot": "docs/reports/m7-comparison-symlink-policy/historical-second-suite.png",
+    "screenshot_sha256": "f8e5eecc6890cc24f410356d4231a3b97b9d944b761bcead88e8870ce1c8d413"
+  },
+  "status": {
+    "expected_app_server_wrappers_allowed": true,
+    "symlink_targets_not_followed": true,
+    "unexpected_external_symlinks_fail_closed": true,
+    "filesystem_policy_separate_from_byte_quota": true,
+    "false_numeric_quota_messages_prevented": true,
+    "trusted_target_contract_enforced": true,
+    "symlink_race_detected": true,
+    "worker_children_reaped": true,
+    "zombie_worker_prevented": true,
+    "two_fake_arms_complete_with_wrappers": true,
+    "installed_app_server_wrapper_smoke_passed": false,
+    "historical_suites_unchanged": true,
+    "zero_model_inferences": true,
+    "zero_real_auth_access": true,
+    "zero_graph_search_batches": true,
+    "zero_action_dispatches": true,
+    "zero_tool_calls": true,
+    "http_tests_passed": true,
+    "sqlite_schema_version": 13,
+    "sqlite_integrity_check": "ok",
+    "ready_for_fresh_bounded_comparison": false
+  }
+}

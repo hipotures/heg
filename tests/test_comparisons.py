@@ -87,12 +87,12 @@ def suite_payload(**changes):
 
 
 class ComparisonDatabaseTests(unittest.TestCase):
-    def test_schema_v12_tables_foreign_keys_and_integrity(self) -> None:
+    def test_schema_v13_tables_foreign_keys_and_integrity(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             database = Path(directory) / "results.sqlite3"
             connection = connect(database)
-            self.assertEqual(SCHEMA_VERSION, 12)
-            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 12)
+            self.assertEqual(SCHEMA_VERSION, 13)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 13)
             tables = {
                 row[0]
                 for row in connection.execute(
@@ -606,6 +606,19 @@ class ComparisonHttpTests(unittest.TestCase):
         )
         self.assertEqual(status, 409)
         self.assertIn(b"failed preflight", body)
+
+    def test_detail_page_separates_policy_from_byte_quota(self) -> None:
+        status, body = self.request(
+            "POST", "/api/comparisons", suite_payload()
+        )
+        self.assertEqual(status, 201, body)
+        suite_id = json.loads(body)["suite_id"]
+        status, body = self.request("GET", f"/comparisons/{suite_id}")
+        self.assertEqual(status, 200, body)
+        self.assertIn(b"Filesystem policy violation", body)
+        self.assertIn(b"Actual byte quota exceeded", body)
+        self.assertIn(b"Runtime scratch exceeded", body)
+        self.assertIn(b"safeResourceLabel", body)
 
     def test_security_rejects_arbitrary_contracts_paths_and_shell_input(self) -> None:
         valid = suite_payload()

@@ -48,6 +48,50 @@ scratch_path = None
 secondary_scratch_path = None
 
 
+def create_wrapper_symlinks() -> None:
+    wrapper_modes = {
+        "director-screen-wrappers",
+        "director-screen-wrapper-unexpected",
+        "director-screen-wrapper-wrong-directory",
+        "director-screen-wrapper-untrusted",
+        "director-screen-wrapper-broken",
+    }
+    if MODE not in wrapper_modes:
+        return
+    home = os.environ["CODEX_HOME"]
+    expected = os.path.join(
+        home,
+        "tmp",
+        "arg0",
+        f"codex-arg0-fake-{os.getpid()}",
+    )
+    os.makedirs(expected, mode=0o700, exist_ok=True)
+    trusted_target = os.path.realpath(sys.executable)
+    names = (
+        "apply_patch",
+        "applypatch",
+        "codex-execve-wrapper",
+        "codex-linux-sandbox",
+    )
+    if MODE == "director-screen-wrapper-unexpected":
+        names = ("unexpected-wrapper",)
+    if MODE == "director-screen-wrapper-wrong-directory":
+        os.symlink(
+            trusted_target,
+            os.path.join(os.environ["CODEX_SQLITE_HOME"], "apply_patch"),
+        )
+        return
+    if MODE == "director-screen-wrapper-untrusted":
+        trusted_target = "/etc/passwd"
+    if MODE == "director-screen-wrapper-broken":
+        trusted_target = f"/nonexistent/sglab-wrapper-{os.getpid()}"
+    for name in names:
+        os.symlink(trusted_target, os.path.join(expected, name))
+
+
+create_wrapper_symlinks()
+
+
 def screen_snapshot_id(params: dict) -> str:
     inputs = params.get("input", [])
     if not inputs or not isinstance(inputs[0], dict):
@@ -295,6 +339,7 @@ for line in sys.stdin:
         if MODE in {
             "director-screen-scratch-80m",
             "director-screen-scratch-exceed",
+            "director-screen-scratch-total-exceed",
             "director-screen-wal-growth",
             "director-screen-hardlink",
         }:
@@ -312,6 +357,8 @@ for line in sys.stdin:
                 scratch_path,
                 80 * 1024 * 1024
                 if MODE == "director-screen-scratch-80m"
+                else 3 * 1024 * 1024
+                if MODE == "director-screen-scratch-total-exceed"
                 else 4 * 1024 * 1024
                 if MODE == "director-screen-hardlink"
                 else 8 * 1024 * 1024,
@@ -319,6 +366,11 @@ for line in sys.stdin:
             if MODE == "director-screen-hardlink":
                 secondary_scratch_path = scratch_path + ".link"
                 os.link(scratch_path, secondary_scratch_path)
+            elif MODE == "director-screen-scratch-total-exceed":
+                secondary_scratch_path = scratch_path + ".second"
+                with open(secondary_scratch_path, "wb"):
+                    pass
+                os.truncate(secondary_scratch_path, 3 * 1024 * 1024)
         if MODE == "director-screen-symlink-escape":
             scratch_path = os.path.join(
                 os.environ["CODEX_SQLITE_HOME"], "escape-link"

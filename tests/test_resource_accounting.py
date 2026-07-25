@@ -8,6 +8,7 @@ import unittest
 from sglab.resource_accounting import (
     PRESERVED_ARTIFACTS,
     RUNTIME_SCRATCH,
+    TrustedSymlinkRoot,
     account_execution_root,
 )
 
@@ -50,13 +51,168 @@ class ResourceAccountingTests(unittest.TestCase):
             (root / "escape").symlink_to(outside)
             report = account_execution_root(root)
             self.assertEqual(report.symlink_count, 1)
-            self.assertEqual(report.escaping_symlinks, ("escape",))
+            self.assertEqual(
+                report.escaping_symlinks,
+                ("runtime-scratch/escape",),
+            )
+            self.assertEqual(
+                report.symlinks[0].classification,
+                "unexpected_external",
+            )
+            self.assertEqual(
+                report.symlinks[0].policy_violation_code,
+                "unexpected_external_symlink",
+            )
             self.assertEqual(
                 sum(
                     category.apparent_bytes
                     for category in report.categories.values()
                 ),
                 0,
+            )
+
+    def test_expected_app_server_wrappers_are_trusted_and_not_followed(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            root = base / "execution"
+            target_root = base / "codex-install"
+            target = target_root / "wrapper"
+            target.parent.mkdir()
+            target.write_bytes(b"x" * 8192)
+            target.chmod(0o755)
+            wrapper_dir = (
+                root
+                / "runtime-groups"
+                / "group"
+                / "director"
+                / "codex-home"
+                / "tmp"
+                / "arg0"
+                / "codex-arg0-test"
+            )
+            wrapper_dir.mkdir(parents=True)
+            for name in (
+                "apply_patch",
+                "applypatch",
+                "codex-execve-wrapper",
+                "codex-linux-sandbox",
+            ):
+                (wrapper_dir / name).symlink_to(target)
+            report = account_execution_root(
+                root,
+                trusted_symlink_roots=(
+                    TrustedSymlinkRoot(target_root, "test_codex_install"),
+                ),
+            )
+            self.assertEqual(report.symlink_policy_status, "passed")
+            self.assertEqual(
+                {
+                    value.classification for value in report.symlinks
+                },
+                {"expected_runtime_wrapper"},
+            )
+            self.assertTrue(
+                all(
+                    value.relative_path.startswith(
+                        "app-server-tmp/arg0/"
+                    )
+                    for value in report.symlinks
+                )
+            )
+            self.assertEqual(
+                sum(
+                    category.apparent_bytes
+                    for category in report.categories.values()
+                ),
+                0,
+            )
+
+    def test_expected_basename_in_wrong_directory_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            root = base / "execution"
+            root.mkdir()
+            target = base / "trusted" / "wrapper"
+            target.parent.mkdir()
+            target.write_bytes(b"x")
+            target.chmod(0o755)
+            (root / "apply_patch").symlink_to(target)
+            report = account_execution_root(
+                root,
+                trusted_symlink_roots=(
+                    TrustedSymlinkRoot(target.parent, "test_codex_install"),
+                ),
+            )
+            self.assertEqual(report.symlink_policy_status, "failed")
+            self.assertEqual(
+                report.symlinks[0].classification,
+                "unexpected_external",
+            )
+
+    def test_expected_wrapper_with_untrusted_target_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            root = base / "execution"
+            target = base / "untrusted" / "wrapper"
+            target.parent.mkdir()
+            target.write_bytes(b"x")
+            target.chmod(0o755)
+            link = (
+                root
+                / "runtime-groups"
+                / "group"
+                / "director"
+                / "codex-home"
+                / "tmp"
+                / "arg0"
+                / "codex-arg0-test"
+                / "apply_patch"
+            )
+            link.parent.mkdir(parents=True)
+            link.symlink_to(target)
+            report = account_execution_root(root)
+            self.assertEqual(report.symlink_policy_status, "failed")
+            self.assertEqual(
+                report.symlinks[0].target_trust_classification,
+                "untrusted_external",
+            )
+
+    def test_broken_symlink_has_explicit_classification(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "broken").symlink_to(root / "missing")
+            report = account_execution_root(root)
+            self.assertEqual(report.symlinks[0].classification, "broken")
+            self.assertEqual(
+                report.symlinks[0].policy_violation_code,
+                "broken_symlink",
+            )
+
+    def test_symlink_inode_race_is_reported_without_following(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            link = root / "race"
+            link.symlink_to("/etc/passwd")
+
+            def replace(value: Path) -> None:
+                os.replace(value, value.with_name("race-old"))
+                value.symlink_to("/etc/group")
+
+            report = account_execution_root(
+                root,
+                symlink_classification_hook=replace,
+            )
+            observation = next(
+                value
+                for value in report.symlinks
+                if value.relative_path == "runtime-scratch/race"
+            )
+            self.assertEqual(report.accounting_status, "error")
+            self.assertEqual(
+                observation.policy_violation_code,
+                "symlink_metadata_changed",
             )
 
     def test_credential_contents_are_not_opened_or_reported_by_path(self) -> None:
