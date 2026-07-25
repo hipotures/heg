@@ -1,0 +1,288 @@
+{
+  "report_version": 1,
+  "phase": "before",
+  "tested_commit": "dbedf657e0932c2c69e33d01625b95377206437d",
+  "server_url": "http://127.0.0.1:8787",
+  "workspace": "workspace/ui-review-demo",
+  "inspection_tool": "playwright-cdp",
+  "viewports": [
+    [1920, 1080],
+    [1440, 900],
+    [1280, 720],
+    [1024, 768],
+    [390, 844]
+  ],
+  "route_inventory": {
+    "document_routes": [
+      "/",
+      "/comparisons",
+      "/comparisons/new",
+      "/comparisons/<suite-id>",
+      "/comparisons/<suite-id>/blind",
+      "/model-cost-profiles"
+    ],
+    "research_subpages": {
+      "campaign_list": "absent; data is embedded in /",
+      "campaign_detail": "absent; current campaign is embedded in /",
+      "hypotheses": "embedded section on /",
+      "ai_decisions": "embedded section on /",
+      "search_lanes": "embedded section on /",
+      "candidates": "embedded section on /",
+      "logs_events": "embedded section on /"
+    },
+    "states_inspected": [
+      "dashboard running state",
+      "comparison list with all fixture states",
+      "comparison list empty filter result",
+      "new suite",
+      "prepared suite",
+      "authorized state through list coverage",
+      "running suite",
+      "completed suite",
+      "semantic-invalid suite",
+      "timed-out suite",
+      "stopped state through list coverage",
+      "read-only historical suite",
+      "blind pairwise",
+      "cost profiles",
+      "404 error"
+    ]
+  },
+  "global_findings": [
+    {
+      "id": "UI-BEFORE-001",
+      "severity": "blocker",
+      "area": "dashboard responsive layout",
+      "finding": "The dashboard has page-wide horizontal overflow at every inspected width.",
+      "evidence": {
+        "desktop_1920": {
+          "client_width": 1905,
+          "scroll_width": 4408,
+          "widest_table": 4359,
+          "overflow_elements": 260
+        },
+        "mobile_390": {
+          "client_width": 375,
+          "scroll_width": 4392,
+          "widest_table": 4359,
+          "overflow_elements": 1084,
+          "max_row_height": 1090.4
+        }
+      },
+      "remediation": "Replace the monolithic raw tables with bounded semantic cards and compact responsive tables; keep technical tables in local scroll containers."
+    },
+    {
+      "id": "UI-BEFORE-002",
+      "severity": "blocker",
+      "area": "information presentation",
+      "finding": "Raw JSON is the primary representation for decisions, measured outcomes, comparison plans, validity summaries, ratings, blind answers and cost profiles.",
+      "evidence": {
+        "dashboard_raw_json_cells": 165,
+        "completed_comparison_raw_blocks": 13,
+        "completed_comparison_raw_characters": 6728,
+        "cost_profile_raw_characters": 3790,
+        "blind_answers_are_raw_json": true
+      },
+      "remediation": "Add semantic action, outcome, plan, validity, rating and cost-profile renderers; retain JSON only in keyboard-accessible details."
+    },
+    {
+      "id": "UI-BEFORE-003",
+      "severity": "high",
+      "area": "navigation and information architecture",
+      "finding": "All research domains are compressed into a single 10,525–22,719 px dashboard; campaign, hypothesis, decision, lane, candidate and event pages do not exist.",
+      "remediation": "Introduce bounded read-only domain pages or clearly separated views with pagination and stable navigation."
+    },
+    {
+      "id": "UI-BEFORE-004",
+      "severity": "high",
+      "area": "theme",
+      "finding": "The application is dark-only. There is no theme control and no persisted browser preference.",
+      "evidence": {
+        "computed_color_scheme": "dark",
+        "theme_toggle_found": false,
+        "body_font": "ui-monospace, SFMono-Regular, Consolas, monospace"
+      },
+      "remediation": "Provide accessible light and dark themes, a visible toggle, localStorage persistence and a no-flash initial theme script."
+    },
+    {
+      "id": "UI-BEFORE-005",
+      "severity": "high",
+      "area": "comparison lifecycle affordances",
+      "finding": "Prepare, authorize, start and stop controls are shown for completed and historical read-only suites; blind and manual-rating affordances are also shown where there are no valid turns.",
+      "remediation": "Render controls from lifecycle and read-only state, disable impossible operations, and explain why an action is unavailable."
+    },
+    {
+      "id": "UI-BEFORE-006",
+      "severity": "high",
+      "area": "error state",
+      "finding": "Unknown routes use the standard-library server's unstyled default 404 page and lose application navigation.",
+      "remediation": "Render a bounded application error page with status, explanation and recovery links."
+    },
+    {
+      "id": "UI-BEFORE-007",
+      "severity": "medium",
+      "area": "accessibility",
+      "finding": "Form labels and heading hierarchy are generally exposed, but table headers are rendered as ordinary cells, many controls are below 44 px, status depends heavily on text density, and focus treatment is not visibly differentiated.",
+      "evidence": {
+        "dashboard_small_controls": 130,
+        "comparison_list_small_controls": 18,
+        "new_suite_small_controls": 17,
+        "unlabeled_controls_observed": 0
+      },
+      "remediation": "Use th/scope, visible focus rings, compact but adequate targets, explicit status labels and semantic landmarks."
+    },
+    {
+      "id": "UI-BEFORE-008",
+      "severity": "medium",
+      "area": "network behavior",
+      "finding": "The dashboard repeatedly polls six APIs; no request failed, but the cadence produces a long repeated request log while idle.",
+      "remediation": "Use one bounded refresh interval, pause when the page is hidden, and avoid replacing unchanged DOM."
+    }
+  ],
+  "pages": [
+    {
+      "id": "dashboard",
+      "url": "/",
+      "purpose": "Campaign control plus every research data domain.",
+      "data_coverage": "8 runs, 12 hypotheses, 24 actions, 12 lanes, 12 app turns, events, metrics and 40 candidates.",
+      "severity": "blocker",
+      "problems": [
+        "4392 px page width",
+        "raw action/outcome/candidate JSON",
+        "121 table rows rendered at once",
+        "very long IDs",
+        "no pagination",
+        "all-monospace typography",
+        "mobile row height up to 1090 px"
+      ],
+      "screenshots": [
+        "docs/reports/ui-playwright/before/dashboard-1920x1080.png",
+        "docs/reports/ui-playwright/before/dashboard-390x844.png"
+      ]
+    },
+    {
+      "id": "comparisons",
+      "url": "/comparisons",
+      "purpose": "Filter and inspect suites.",
+      "data_coverage": "Nine suites spanning draft, prepared, authorized, running, completed, failed, timed out, stopped and historical.",
+      "severity": "high",
+      "problems": [
+        "eleven-column table is difficult to scan",
+        "mobile depends on unlabeled local horizontal scrolling",
+        "model/effort/mode lists wrap into tall cells",
+        "status has no semantic badge",
+        "filters are free-text rather than configured choices"
+      ],
+      "screenshots": [
+        "docs/reports/ui-playwright/before/comparisons-1440x900.png",
+        "docs/reports/ui-playwright/before/comparisons-390x844.png",
+        "docs/reports/ui-playwright/before/comparisons-empty-filter-1024x768.png"
+      ]
+    },
+    {
+      "id": "comparison_new",
+      "url": "/comparisons/new",
+      "purpose": "Create a measurement-only comparison suite.",
+      "data_coverage": "Presets, fixture, bounds and two-arm matrix.",
+      "severity": "medium",
+      "problems": [
+        "desktop grid crowds and clips the final budget field",
+        "safety-critical inference cap is not visually prominent",
+        "arms lack compact summaries",
+        "mobile is usable but excessively long",
+        "no progressive grouping"
+      ],
+      "screenshots": [
+        "docs/reports/ui-playwright/before/comparisons-new-1440x900.png",
+        "docs/reports/ui-playwright/before/comparisons-new-390x844.png"
+      ]
+    },
+    {
+      "id": "comparison_detail",
+      "url": "/comparisons/<suite-id>",
+      "purpose": "Preflight, lifecycle, turns, usage, validity, cost and ratings.",
+      "data_coverage": "Prepared, running, completed, semantic-invalid, timed-out and historical read-only variants.",
+      "severity": "blocker",
+      "problems": [
+        "immutable plan is primary raw JSON",
+        "auth availability is raw JSON",
+        "validity and ratings are raw JSON",
+        "turn table is dense",
+        "wrong lifecycle controls remain visible",
+        "invalid and timed-out turns show an unusable empty rating form",
+        "historical read-only suite appears mutable"
+      ],
+      "screenshots": [
+        "docs/reports/ui-playwright/before/comparison-completed-1440x900.png",
+        "docs/reports/ui-playwright/before/comparison-completed-390x844.png",
+        "docs/reports/ui-playwright/before/comparison-running-1280x720.png",
+        "docs/reports/ui-playwright/before/comparison-timeout-1280x720.png",
+        "docs/reports/ui-playwright/before/comparison-historical-1280x720.png"
+      ]
+    },
+    {
+      "id": "blind_pairwise",
+      "url": "/comparisons/<suite-id>/blind",
+      "purpose": "Blind human quality comparison.",
+      "data_coverage": "Two valid completed synthetic decisions.",
+      "severity": "blocker",
+      "problems": [
+        "answers are raw JSON strings",
+        "action meaning and rationale are not separated",
+        "technical nesting dominates reading",
+        "no clear rating state or skip explanation"
+      ],
+      "screenshots": [
+        "docs/reports/ui-playwright/before/comparison-blind-1280x720.png",
+        "docs/reports/ui-playwright/before/comparison-blind-390x844.png"
+      ]
+    },
+    {
+      "id": "model_cost_profiles",
+      "url": "/model-cost-profiles",
+      "purpose": "Append versioned relative and optional API-equivalent cost profiles.",
+      "data_coverage": "Seven Luna/Sol profiles including null API rates.",
+      "severity": "high",
+      "problems": [
+        "existing profiles are one raw JSON block",
+        "desktop form labels collide",
+        "floating-point artifacts are shown",
+        "null API rates are not explained semantically",
+        "history and enabled state are not scannable"
+      ],
+      "screenshots": [
+        "docs/reports/ui-playwright/before/model-cost-profiles-1024x768.png",
+        "docs/reports/ui-playwright/before/model-cost-profiles-390x844.png"
+      ]
+    },
+    {
+      "id": "error_404",
+      "url": "/comparisons/does-not-exist",
+      "purpose": "Unknown-resource error.",
+      "data_coverage": "HTTP 404.",
+      "severity": "high",
+      "problems": [
+        "unstyled browser-default page",
+        "no application navigation",
+        "no recovery action",
+        "light page ignores the application's only existing dark theme"
+      ],
+      "screenshots": [
+        "docs/reports/ui-playwright/before/error-404-1024x768.png"
+      ]
+    }
+  ],
+  "console": {
+    "normal_routes_errors": [],
+    "expected_error_route": [
+      "404 resource error for /comparisons/does-not-exist"
+    ]
+  },
+  "network": {
+    "normal_routes_failed_requests": [],
+    "dashboard_api_statuses": "all observed requests returned 200",
+    "error_route_status": 404
+  },
+  "before_audit_complete": true,
+  "implementation_started": false
+}
