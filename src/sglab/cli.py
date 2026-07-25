@@ -7,6 +7,7 @@ from threading import Thread
 from urllib.request import urlopen
 import asyncio
 import json
+import os
 import platform
 import sys
 import tempfile
@@ -15,7 +16,12 @@ from .benchmark import calibrate, hardware_metadata, microbenchmark, soak, write
 from .model import BitGraph
 from .certification import certify, verify_cpp
 from .config import load_config
-from .comparisons import import_m6_context_report, run_replay_dry_run
+from .comparisons import (
+    import_comparison_fixture_bundle,
+    import_m6_context_report,
+    run_replay_dry_run,
+)
+from .comparison_worker import ComparisonWorker
 from .db import connect
 from .external import TOOLS
 from .locations import asset_path, cyclecheck_path
@@ -566,7 +572,60 @@ def cmd_comparisons(args: Namespace) -> int:
     workspace = _workspace(args.workspace)
     workspace.mkdir(parents=True, exist_ok=True)
     database = workspace / "results.sqlite3"
-    if args.comparisons_command == "import-m6-context-report":
+    if args.comparisons_command == "worker":
+        launcher_value = os.environ.get("SGLAB_COMPARISON_CODEX_LAUNCHER_JSON")
+        if launcher_value:
+            launcher_payload = json.loads(launcher_value)
+            if (
+                not isinstance(launcher_payload, list)
+                or not launcher_payload
+                or not all(
+                    isinstance(value, str) and value
+                    for value in launcher_payload
+                )
+            ):
+                raise ValueError(
+                    "SGLAB_COMPARISON_CODEX_LAUNCHER_JSON must be a string array"
+                )
+            launcher = tuple(launcher_payload)
+        else:
+            launcher = ("codex",)
+        auth_value = os.environ.get("SGLAB_CODEX_AUTH_SOURCE")
+        result = ComparisonWorker(
+            workspace=workspace,
+            suite_id=args.suite_id,
+            auth_source=Path(auth_value) if auth_value else None,
+            launcher=launcher,
+            maximum_concurrent_suites=int(
+                os.environ.get("SGLAB_COMPARISON_MAX_CONCURRENT", "1")
+            ),
+        ).run()
+        print(
+            json.dumps(
+                {
+                    "ok": result.ok,
+                    "suite_id": result.suite_id,
+                    "attempt_id": result.attempt_id,
+                    "terminal_status": result.terminal_status,
+                    "terminal_reason": result.terminal_reason,
+                    "inference_starts": result.inference_starts,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0 if result.ok else 1
+    if args.comparisons_command == "install-fixture":
+        fixture_id = import_comparison_fixture_bundle(
+            database, Path(args.fixture).resolve()
+        )
+        report = {
+            "ok": True,
+            "fixture_id": fixture_id,
+            "auth_access": False,
+            "model_inferences": 0,
+        }
+    elif args.comparisons_command == "import-m6-context-report":
         suite_id = import_m6_context_report(database, Path(args.report).resolve())
         report: dict[str, object] = {
             "ok": True,
@@ -801,6 +860,14 @@ def build_parser() -> ArgumentParser:
     comparison_replay = comparison_commands.add_parser("replay-dry-run")
     comparison_replay.add_argument("--workspace", required=True)
     comparison_replay.set_defaults(func=cmd_comparisons)
+    comparison_fixture = comparison_commands.add_parser("install-fixture")
+    comparison_fixture.add_argument("--workspace", required=True)
+    comparison_fixture.add_argument("--fixture", required=True)
+    comparison_fixture.set_defaults(func=cmd_comparisons)
+    comparison_worker = comparison_commands.add_parser("worker")
+    comparison_worker.add_argument("--workspace", required=True)
+    comparison_worker.add_argument("--suite-id", required=True)
+    comparison_worker.set_defaults(func=cmd_comparisons)
 
     ui_fixture = subparsers.add_parser("ui-fixture")
     ui_fixture_commands = ui_fixture.add_subparsers(

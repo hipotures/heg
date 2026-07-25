@@ -5,7 +5,7 @@ from typing import Any, Iterable
 import json
 import sqlite3
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 MAX_METRIC_ROWS = 100_000
 
 BASE_SCHEMA_SQL = """
@@ -712,6 +712,122 @@ CREATE INDEX idx_comparison_authorizations_suite
 PRAGMA user_version=10;
 """
 
+COMPARISON_WORKER_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS comparison_execution_attempts (
+    attempt_id TEXT PRIMARY KEY,
+    suite_id TEXT NOT NULL REFERENCES comparison_suites(suite_id),
+    authorization_id TEXT NOT NULL
+        REFERENCES comparison_authorizations(authorization_id),
+    worker_instance_id TEXT NOT NULL,
+    plan_fingerprint TEXT NOT NULL,
+    plan_verification_artifact TEXT NOT NULL,
+    plan_verification_sha256 TEXT NOT NULL,
+    status TEXT NOT NULL,
+    pid INTEGER,
+    process_group_id INTEGER,
+    host_identifier TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    completed_at TEXT,
+    terminal_reason TEXT,
+    CHECK(status IN (
+        'launching', 'running', 'completed', 'failed', 'stopped',
+        'interrupted', 'authorization_exhausted'
+    ))
+);
+
+CREATE INDEX IF NOT EXISTS idx_comparison_attempts_suite
+    ON comparison_execution_attempts(suite_id, started_at);
+
+CREATE TABLE IF NOT EXISTS comparison_runtime_campaigns (
+    suite_id TEXT PRIMARY KEY REFERENCES comparison_suites(suite_id),
+    campaign_id TEXT NOT NULL UNIQUE REFERENCES research_campaigns(campaign_id),
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS comparison_worker_leases (
+    lease_id TEXT PRIMARY KEY,
+    worker_instance_id TEXT NOT NULL,
+    suite_id TEXT NOT NULL REFERENCES comparison_suites(suite_id),
+    attempt_id TEXT NOT NULL
+        REFERENCES comparison_execution_attempts(attempt_id),
+    pid INTEGER NOT NULL,
+    process_group_id INTEGER NOT NULL,
+    host_identifier TEXT NOT NULL,
+    acquired_at TEXT NOT NULL,
+    heartbeat_at TEXT NOT NULL,
+    lease_expires_at TEXT NOT NULL,
+    released_at TEXT,
+    terminal_reason TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_comparison_worker_leases_active
+    ON comparison_worker_leases(suite_id, released_at, lease_expires_at);
+
+CREATE TABLE IF NOT EXISTS comparison_stop_requests (
+    stop_request_id TEXT PRIMARY KEY,
+    suite_id TEXT NOT NULL REFERENCES comparison_suites(suite_id),
+    attempt_id TEXT REFERENCES comparison_execution_attempts(attempt_id),
+    requested_at TEXT NOT NULL,
+    observed_at TEXT,
+    interrupt_sent_at TEXT,
+    draining_started_at TEXT,
+    completed_at TEXT,
+    state TEXT NOT NULL,
+    forced_termination INTEGER NOT NULL DEFAULT 0,
+    terminal_reason TEXT,
+    CHECK(state IN (
+        'requested', 'observed', 'interrupt_sent', 'shutdown_draining',
+        'stopped', 'forced_termination'
+    )),
+    CHECK(forced_termination IN (0, 1))
+);
+
+CREATE INDEX IF NOT EXISTS idx_comparison_stop_requests_suite
+    ON comparison_stop_requests(suite_id, requested_at);
+
+CREATE TABLE IF NOT EXISTS comparison_inference_reservations (
+    reservation_id TEXT PRIMARY KEY,
+    authorization_id TEXT NOT NULL
+        REFERENCES comparison_authorizations(authorization_id),
+    suite_id TEXT NOT NULL REFERENCES comparison_suites(suite_id),
+    arm_id TEXT NOT NULL REFERENCES comparison_arms(arm_id),
+    attempt_id TEXT NOT NULL
+        REFERENCES comparison_execution_attempts(attempt_id),
+    plan_fingerprint TEXT NOT NULL,
+    reserved_at TEXT NOT NULL,
+    inference_reached_at TEXT,
+    released_at TEXT,
+    terminal_result TEXT,
+    UNIQUE(authorization_id, arm_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_comparison_reservations_authorization
+    ON comparison_inference_reservations(authorization_id, reserved_at);
+
+CREATE TABLE IF NOT EXISTS comparison_arm_transitions (
+    transition_id TEXT PRIMARY KEY,
+    suite_id TEXT NOT NULL REFERENCES comparison_suites(suite_id),
+    arm_id TEXT NOT NULL REFERENCES comparison_arms(arm_id),
+    attempt_id TEXT REFERENCES comparison_execution_attempts(attempt_id),
+    lifecycle_state TEXT NOT NULL,
+    recorded_at TEXT NOT NULL,
+    reason TEXT,
+    sequence_number INTEGER NOT NULL,
+    CHECK(lifecycle_state IN (
+        'planned', 'preflight', 'auth_prepared', 'server_started',
+        'thread_ready', 'inference_reserved', 'inference_started',
+        'completed', 'schema_invalid', 'semantic_invalid', 'timed_out',
+        'aborted', 'failed', 'blocked', 'stopped'
+    )),
+    UNIQUE(arm_id, sequence_number)
+);
+
+CREATE INDEX IF NOT EXISTS idx_comparison_arm_transitions_suite
+    ON comparison_arm_transitions(suite_id, recorded_at);
+
+PRAGMA user_version=11;
+"""
+
 
 def connect(path: str | Path) -> sqlite3.Connection:
     target = Path(path)
@@ -748,6 +864,7 @@ def migrate(connection: sqlite3.Connection) -> None:
     _ensure_app_server_compliance_columns(connection)
     _ensure_app_server_turn_lifecycle_columns(connection)
     _ensure_comparison_schema(connection)
+    _ensure_comparison_worker_schema(connection)
 
 
 def _ensure_m6_lane_columns(connection: sqlite3.Connection) -> None:
@@ -928,7 +1045,80 @@ def _ensure_comparison_schema(connection: sqlite3.Connection) -> None:
     ).fetchone()
     if exists is None:
         connection.executescript(COMPARISON_SCHEMA_SQL)
-    connection.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+    if int(connection.execute("PRAGMA user_version").fetchone()[0]) < 10:
+        connection.execute("PRAGMA user_version=10")
+    connection.commit()
+
+
+def _ensure_comparison_worker_schema(connection: sqlite3.Connection) -> None:
+    suite_columns = {
+        "stop_state": "TEXT",
+        "maximum_stdout_bytes": "INTEGER NOT NULL DEFAULT 1048576",
+        "maximum_stderr_bytes": "INTEGER NOT NULL DEFAULT 262144",
+        "maximum_wire_log_bytes": "INTEGER NOT NULL DEFAULT 8388608",
+        "maximum_artifact_directory_bytes": "INTEGER NOT NULL DEFAULT 67108864",
+        "maximum_worker_wall_seconds": "INTEGER NOT NULL DEFAULT 7200",
+    }
+    arm_columns = {
+        "conversation_group_id": "TEXT",
+        "sequence_index": "INTEGER NOT NULL DEFAULT 0",
+        "depends_on_arm_id": "TEXT",
+        "requires_prior_success": "INTEGER NOT NULL DEFAULT 0",
+        "fresh_thread": "INTEGER NOT NULL DEFAULT 1",
+        "resume_prior_thread": "INTEGER NOT NULL DEFAULT 0",
+        "actual_order": "INTEGER",
+        "runtime_relative_dir": "TEXT",
+        "terminal_reason": "TEXT",
+        "context_contract_matched": "INTEGER",
+        "app_thread_id": "TEXT",
+    }
+    fixture_columns = {
+        "prompt_text": "TEXT",
+        "output_schema_json": "TEXT",
+        "applicable_action_space_json": "TEXT",
+        "evidence_registry_json": "TEXT",
+        "advisory_registry_json": "TEXT",
+        "executable_registry_json": "TEXT",
+        "base_instructions_text": "TEXT",
+        "developer_instructions_text": "TEXT",
+        "campaign_budget_json": "TEXT",
+    }
+    turn_columns = {
+        "request_id": "TEXT",
+        "thread_id": "TEXT",
+        "turn_id": "TEXT",
+        "item_ids_json": "TEXT NOT NULL DEFAULT '[]'",
+        "reasoning_item_ids_json": "TEXT NOT NULL DEFAULT '[]'",
+        "latest_event_sequence": "INTEGER NOT NULL DEFAULT 0",
+        "final_answer_present": "INTEGER",
+        "usage_present": "INTEGER",
+        "terminal_reason": "TEXT",
+        "raw_request_artifact": "TEXT",
+        "raw_response_artifact": "TEXT",
+    }
+    for table, additions in (
+        ("comparison_suites", suite_columns),
+        ("comparison_arms", arm_columns),
+        ("comparison_fixtures", fixture_columns),
+        ("comparison_turns", turn_columns),
+    ):
+        exists = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (table,),
+        ).fetchone()
+        if exists is None:
+            continue
+        present = {
+            str(row[1])
+            for row in connection.execute(f"PRAGMA table_info({table})")
+        }
+        for name, definition in additions.items():
+            if name not in present:
+                connection.execute(
+                    f"ALTER TABLE {table} ADD COLUMN {name} {definition}"
+                )
+    connection.executescript(COMPARISON_WORKER_SCHEMA_SQL)
+    connection.execute("PRAGMA user_version=11")
     connection.commit()
 
 

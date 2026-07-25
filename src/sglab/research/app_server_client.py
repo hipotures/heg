@@ -63,8 +63,10 @@ class AppServerConfig:
     stderr_limit_bytes: int = 256 * 1024
     wire_limit_bytes: int = 8 * 1024 * 1024
     max_jsonl_bytes: int = 2 * 1024 * 1024
+    allow_retrying_errors: bool = True
     disabled_features: tuple[str, ...] = DISABLED_FEATURES
     environment: dict[str, str] = field(default_factory=dict)
+    environment_exclusions: tuple[str, ...] = ()
 
     def validate(self) -> None:
         if not self.launcher:
@@ -222,6 +224,7 @@ class AppServerClient:
         self._active_event_callback: (
             Callable[[AppServerTurnEvent], None] | None
         ) = None
+        self._closing = False
 
     def _command(self) -> list[str]:
         command = [
@@ -245,6 +248,8 @@ class AppServerClient:
         if self.process is not None:
             raise AppServerError("app-server is already started")
         environment = os.environ.copy()
+        for name in self.config.environment_exclusions:
+            environment.pop(name, None)
         environment.update(self.config.environment)
         environment["CODEX_HOME"] = str(self.home)
         environment["CODEX_SQLITE_HOME"] = str(self.sqlite_home)
@@ -650,6 +655,17 @@ class AppServerClient:
             elif method == "error":
                 error = dict(payload.get("error") or {})
                 if payload.get("willRetry") is True:
+                    if not self.config.allow_retrying_errors:
+                        self._emit_turn_event(
+                            "failed",
+                            method=method,
+                            terminal_reason=(
+                                "server retry rejected by one-inference policy"
+                            ),
+                        )
+                        raise AppServerError(
+                            "server retry rejected by one-inference policy"
+                        )
                     retrying_errors.append(error)
                     self._emit_turn_event(
                         "in_progress",
@@ -858,6 +874,27 @@ class AppServerClient:
                 break
             self._process_timeout_notification(session, message)
 
+    async def interrupt_active_turn(self) -> bool:
+        """Request interruption for the authoritative active turn, if known."""
+
+        thread_id = self._active_thread_id
+        turn_id = self._active_turn_id
+        if (
+            thread_id is None
+            or turn_id is None
+            or self.process is None
+            or self.process.returncode is not None
+        ):
+            return False
+        await asyncio.wait_for(
+            self._rpc(
+                "turn/interrupt",
+                {"threadId": thread_id, "turnId": turn_id},
+            ),
+            timeout=self.config.timeout_drain_seconds,
+        )
+        return True
+
     def _drain_queued_timeout_events(
         self, session: AppServerSession
     ) -> None:
@@ -1018,6 +1055,10 @@ class AppServerClient:
                         raise AppServerError(
                             "app-server notification queue overflow"
                         ) from error
+            if not self._closing:
+                raise AppServerError(
+                    "app-server stdout closed before client shutdown"
+                )
             if self.process.returncode not in (0, None):
                 raise AppServerError(
                     f"app-server stdout closed with {self.process.returncode}"
@@ -1038,11 +1079,20 @@ class AppServerClient:
             if not future.done():
                 future.set_exception(AppServerError(str(error)))
         self._pending.clear()
+        try:
+            self._notifications.put_nowait(
+                {"method": "client/fatal", "params": {}}
+            )
+        except asyncio.QueueFull:
+            pass
 
     async def _next_notification(self) -> dict[str, Any]:
         if self._fatal is not None:
             raise AppServerError(f"app-server protocol failed: {self._fatal}")
-        return await self._notifications.get()
+        message = await self._notifications.get()
+        if self._fatal is not None:
+            raise AppServerError(f"app-server protocol failed: {self._fatal}")
+        return message
 
     @property
     def stderr_text(self) -> str:
@@ -1059,6 +1109,7 @@ class AppServerClient:
         process = self.process
         if process is None:
             return
+        self._closing = True
         if process.stdin is not None:
             process.stdin.close()
             try:

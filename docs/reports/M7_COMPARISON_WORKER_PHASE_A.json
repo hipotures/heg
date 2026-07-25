@@ -1,0 +1,144 @@
+{
+  "schema_version": "1.0",
+  "date": "2026-07-25",
+  "repository": {
+    "initial_commit": "45c93e3441a2a8e95733d5cf56848a31d8c2b6c3",
+    "final_commit": null,
+    "planning_untouched": true,
+    "m6_context_tag_target": "110f805e56fac39c241bd33e423ee00324c33caf",
+    "preserved_m6_report_sha256": "a1f01415059494161b5c0d9feb608160e48afff1e3b23404e234eec87f27883c",
+    "preserved_m6_markdown_sha256": "b339e14e959755ba8fec5f475b443cb1df39652a92af22c5249d722ae82ceef8"
+  },
+  "implementation": {
+    "schema_version": 11,
+    "worker_command": "sglab comparisons worker --workspace <workspace> --suite-id <suite-id>",
+    "fixed_process_launch": true,
+    "shell_used": false,
+    "default_maximum_concurrent_suites": 1,
+    "lease_seconds": 15,
+    "heartbeat_seconds": 2.0,
+    "measurement_only": true,
+    "execute_decisions": false,
+    "compaction_supported_for_execution": false,
+    "browser_supplied_auth_path": false,
+    "browser_supplied_executable": false,
+    "browser_supplied_command": false
+  },
+  "deterministic_replay": {
+    "control_plane": "real standard-library HTTP API",
+    "worker_state_machine": "production comparison worker",
+    "runtime_adapter": "hardened AppServerClient with synthetic fake stdio server",
+    "planned_arms": 4,
+    "inference_starts": 3,
+    "completed_turns": 2,
+    "timed_out_turns": 1,
+    "blocked_arms": 1,
+    "stateless_fresh_thread": true,
+    "persistent_fresh_then_resume": true,
+    "manual_ratings": 1,
+    "blind_pairwise_ratings": 1,
+    "model_calls": 0,
+    "real_auth_accesses": 0,
+    "search_batches_created_by_worker": 0,
+    "research_lanes_created_by_worker": 0,
+    "action_dispatches": 0,
+    "candidate_evaluations_created_by_worker": 0,
+    "compaction_operations": 0,
+    "tool_executions": 0
+  },
+  "failure_matrix": [
+    "schema_invalid",
+    "semantic_invalid",
+    "timeout_before_final_answer",
+    "late_abort",
+    "missing_usage",
+    "tool_call_attempt",
+    "model_contract_mismatch",
+    "context_contract_mismatch",
+    "malformed_jsonl",
+    "unsupported_server_request",
+    "retry_notification_rejected",
+    "app_server_process_crash",
+    "graceful_shutdown",
+    "forced_shutdown",
+    "persistent_thread_resume",
+    "stateless_fresh_thread"
+  ],
+  "verification": {
+    "focused_comparison_worker_tests": {
+      "passed": 16,
+      "failed": 0
+    },
+    "full_safe_suite_pass_1": {
+      "passed": 169,
+      "failed": 0
+    },
+    "full_safe_suite_pass_2": {
+      "passed": 169,
+      "failed": 0
+    },
+    "final_make_test": {
+      "passed": 169,
+      "failed": 0
+    },
+    "loopback_http_tests": {
+      "passed": 8,
+      "failed": 0,
+      "bind_host": "127.0.0.1",
+      "clean_shutdown": true
+    },
+    "make_doctor": "pass",
+    "make_check": "pass",
+    "make_benchmark_smoke": "pass",
+    "make_dashboard_smoke": "pass",
+    "sqlite_schema_version": 11,
+    "sqlite_integrity_check": "ok",
+    "sqlite_foreign_key_check": [],
+    "v10_to_v11_online_backup_migration": "pass",
+    "orphan_comparison_processes": 0
+  },
+  "boundaries": {
+    "real_model_inferences": 0,
+    "real_auth_json_reads": 0,
+    "real_auth_json_copies": 0,
+    "authenticated_app_server_turns": 0,
+    "paid_comparisons": 0,
+    "comparison_worker_search_batches": 0,
+    "comparison_worker_action_dispatches": 0,
+    "comparison_worker_tool_calls": 0,
+    "preserved_m6_artifacts_modified": false
+  },
+  "uncertainties": [
+    "No authenticated comparison was executed; the real runtime path remains subject to a separately authorized smoke comparison.",
+    "The public M6 fixture descriptors intentionally omit private executable prompt/state material and remain read-only.",
+    "The default stateless recommendation remains based on one controlled S2/P2 pair and is not a statistical-superiority claim.",
+    "The mandatory full suite and benchmark smoke exercise existing deterministic search code, but the comparison worker and replay demonstration created no graph-search batch, lane, candidate evaluation, or action dispatch."
+  ],
+  "final_status": {
+    "comparison_worker_created": true,
+    "fixed_worker_launch_created": true,
+    "worker_lease_created": true,
+    "worker_heartbeat_created": true,
+    "plan_fingerprint_enforced": true,
+    "authorization_consumption_enforced": true,
+    "inference_cap_enforced": true,
+    "stateless_execution_supported": true,
+    "persistent_sequence_supported": true,
+    "fail_closed_supported": true,
+    "turn_interrupt_supported": true,
+    "nullable_usage_preserved": true,
+    "stop_control_supported": true,
+    "crash_recovery_supported": true,
+    "live_web_progress_created": true,
+    "fake_server_end_to_end_passed": true,
+    "historical_suites_preserved": true,
+    "zero_model_inferences": true,
+    "zero_real_auth_access": true,
+    "zero_graph_search_batches": true,
+    "zero_action_dispatches": true,
+    "zero_tool_calls": true,
+    "http_tests_passed": true,
+    "sqlite_integrity_check": "ok",
+    "ready_for_bounded_authenticated_comparison": true
+  }
+}

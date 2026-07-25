@@ -12,6 +12,7 @@ import mimetypes
 import os
 import re
 import sys
+import time
 
 from .comparison_web import (
     blind_page,
@@ -21,7 +22,17 @@ from .comparison_web import (
     error_page,
     new_comparison_page,
 )
-from .comparisons import ComparisonStore, ModelCatalog, default_context_summary
+from .comparisons import (
+    ComparisonStore,
+    ModelCatalog,
+    canonical_sha256,
+    default_context_summary,
+)
+from .comparison_worker import (
+    process_is_live,
+    recover_stale_workers,
+    request_stop,
+)
 from .resources import recommended_workers
 from .locations import asset_path
 from .research.auth import auth_is_imported
@@ -53,8 +64,136 @@ class DashboardServer(ThreadingHTTPServer):
         self.token = token
         self.runner: Popen[bytes] | None = None
         self.campaign_runner: Popen[bytes] | None = None
+        self.comparison_runners: dict[str, Popen[bytes]] = {}
         self.launch_lock = Lock()
         super().__init__(address, DashboardHandler)
+
+    def start_comparison(
+        self, suite_id: str
+    ) -> tuple[int, dict[str, Any]]:
+        with self.launch_lock:
+            recover_stale_workers(self.workspace / "results.sqlite3")
+            current = self.comparison_runners.get(suite_id)
+            if current is not None and current.poll() is None:
+                return 409, {"error": "comparison worker is already active"}
+            with ComparisonStore(
+                self.workspace / "results.sqlite3"
+            ) as store:
+                try:
+                    suite = store._suite_row(suite_id)
+                except KeyError:
+                    return 404, {"error": "comparison suite not found"}
+                if suite["read_only"]:
+                    return 409, {"error": "historical comparison suite is read-only"}
+                if suite["status"] != "authorized":
+                    return 409, {"error": "comparison suite is not authorized"}
+                current_fingerprint = canonical_sha256(
+                    store.plan_payload(suite_id)
+                )
+                if current_fingerprint != suite["plan_fingerprint"]:
+                    store.invalidate_authorization(suite_id)
+                    return 409, {"error": "plan changed after authorization"}
+                active_leases = list(store.connection.execute(
+                    """
+                    SELECT pid, lease_expires_at FROM comparison_worker_leases
+                    WHERE released_at IS NULL
+                    """,
+                ))
+                active = sum(
+                    str(row["lease_expires_at"]) > utc_now()
+                    or process_is_live(int(row["pid"]))
+                    for row in active_leases
+                )
+                try:
+                    maximum_concurrent = int(
+                        os.environ.get(
+                            "SGLAB_COMPARISON_MAX_CONCURRENT", "1"
+                        )
+                    )
+                except ValueError:
+                    return 500, {
+                        "error": "invalid server comparison concurrency setting"
+                    }
+                if not 1 <= maximum_concurrent <= 8:
+                    return 500, {
+                        "error": "server comparison concurrency is out of bounds"
+                    }
+                if active >= maximum_concurrent:
+                    return 409, {
+                        "error": "maximum concurrent comparison suites reached"
+                    }
+            command = [
+                sys.executable,
+                "-m",
+                "sglab",
+                "comparisons",
+                "worker",
+                "--workspace",
+                str(self.workspace),
+                "--suite-id",
+                suite_id,
+            ]
+            log_dir = self.workspace / "logs" / "comparison-workers"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            worker_log = log_dir / f"{suite_id}.log"
+            if worker_log.is_file() and worker_log.stat().st_size >= 16 * 1024 * 1024:
+                os.replace(worker_log, worker_log.with_suffix(".log.1"))
+            allowed_environment = {
+                key: value
+                for key, value in os.environ.items()
+                if key
+                in {
+                    "PATH",
+                    "PYTHONPATH",
+                    "LANG",
+                    "LC_ALL",
+                    "TZ",
+                    "SGLAB_CODEX_AUTH_SOURCE",
+                    "SGLAB_COMPARISON_CODEX_LAUNCHER_JSON",
+                    "SGLAB_COMPARISON_MAX_CONCURRENT",
+                }
+            }
+            with worker_log.open("ab") as log:
+                process = Popen(
+                    command,
+                    stdin=DEVNULL,
+                    stdout=log,
+                    stderr=log,
+                    start_new_session=True,
+                    env=allowed_environment,
+                )
+            self.comparison_runners[suite_id] = process
+            deadline = time.monotonic() + 2.0
+            lease: Any = None
+            while time.monotonic() < deadline and process.poll() is None:
+                with ComparisonStore(
+                    self.workspace / "results.sqlite3"
+                ) as store:
+                    lease = store.connection.execute(
+                        """
+                        SELECT lease_id, pid, process_group_id, acquired_at
+                        FROM comparison_worker_leases
+                        WHERE suite_id=? AND released_at IS NULL
+                        ORDER BY acquired_at DESC LIMIT 1
+                        """,
+                        (suite_id,),
+                    ).fetchone()
+                if lease is not None:
+                    break
+                time.sleep(0.02)
+            if lease is None:
+                return 409, {
+                    "error": (
+                        "comparison worker exited or failed preflight before "
+                        "acquiring its lease"
+                    )
+                }
+            return 202, {
+                "accepted": True,
+                "state": "running",
+                "pid": process.pid,
+                "lease_id": lease["lease_id"],
+            }
 
     def current_run_dir(self) -> Path | None:
         state = read_json(self.workspace / "state.json", default={})
@@ -375,6 +514,35 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 },
             )
             return
+        progress_match = re.fullmatch(
+            r"/api/comparisons/([A-Za-z0-9][A-Za-z0-9._:-]{0,127})/"
+            r"(progress|turns)",
+            parsed.path,
+        )
+        if progress_match:
+            suite_id, view = progress_match.groups()
+            recover_stale_workers(self.server.workspace / "results.sqlite3")
+            with ComparisonStore(
+                self.server.workspace / "results.sqlite3"
+            ) as store:
+                try:
+                    detail = store.suite_detail(suite_id)
+                except KeyError:
+                    self._json(404, {"error": "comparison suite not found"})
+                    return
+            if view == "turns":
+                self._json(200, {"turns": detail["turns"]})
+            else:
+                self._json(
+                    200,
+                    {
+                        "suite": detail["suite"],
+                        "worker": detail["worker"],
+                        "arms": detail["arms"],
+                        "turns": detail["turns"],
+                    },
+                )
+            return
         api_match = re.fullmatch(
             r"/api/comparisons/([A-Za-z0-9][A-Za-z0-9._:-]{0,127})",
             parsed.path,
@@ -562,21 +730,34 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     elif action == "start":
                         if payload:
                             raise ValueError("start accepts no browser parameters")
-                        configured = os.environ.get("SGLAB_CODEX_AUTH_SOURCE")
-                        auth_available = bool(
-                            configured and Path(configured).is_file()
+                        status, response = self.server.start_comparison(
+                            suite_id
                         )
-                        store.start(suite_id, auth_available=auth_available)
-                        response = {
-                            "accepted": True,
-                            "state": "running",
-                            "executor": "external_bounded_worker_required",
-                        }
+                        self._json(status, response)
+                        return
                     elif action == "stop":
                         if payload:
                             raise ValueError("stop accepts no browser parameters")
-                        store.stop(suite_id)
-                        response = {"accepted": True, "state": "stopped"}
+                        stop_request_id = request_stop(
+                            self.server.workspace / "results.sqlite3",
+                            suite_id,
+                        )
+                        stop_row = store.connection.execute(
+                            """
+                            SELECT state FROM comparison_stop_requests
+                            WHERE stop_request_id=?
+                            """,
+                            (stop_request_id,),
+                        ).fetchone()
+                        response = {
+                            "accepted": True,
+                            "state": (
+                                str(stop_row["state"])
+                                if stop_row is not None
+                                else "stop_requested"
+                            ),
+                            "stop_request_id": stop_request_id,
+                        }
                     elif action == "ratings":
                         response = {
                             "rating_id": store.add_manual_rating(

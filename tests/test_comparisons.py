@@ -87,12 +87,12 @@ def suite_payload(**changes):
 
 
 class ComparisonDatabaseTests(unittest.TestCase):
-    def test_schema_v10_tables_foreign_keys_and_integrity(self) -> None:
+    def test_schema_v11_tables_foreign_keys_and_integrity(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             database = Path(directory) / "results.sqlite3"
             connection = connect(database)
-            self.assertEqual(SCHEMA_VERSION, 10)
-            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 10)
+            self.assertEqual(SCHEMA_VERSION, 11)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 11)
             tables = {
                 row[0]
                 for row in connection.execute(
@@ -107,6 +107,11 @@ class ComparisonDatabaseTests(unittest.TestCase):
                 "pairwise_ratings",
                 "model_cost_profiles",
                 "comparison_authorizations",
+                "comparison_execution_attempts",
+                "comparison_worker_leases",
+                "comparison_stop_requests",
+                "comparison_inference_reservations",
+                "comparison_arm_transitions",
             ):
                 self.assertIn(table, tables)
             self.assertTrue(
@@ -564,8 +569,8 @@ class ComparisonHttpTests(unittest.TestCase):
         status, body = self.request(
             "POST", f"/api/comparisons/{suite_id}/start", {}
         )
-        self.assertEqual(status, 400)
-        self.assertIn(b"auth source is unavailable", body)
+        self.assertEqual(status, 409)
+        self.assertIn(b"failed preflight", body)
 
     def test_security_rejects_arbitrary_contracts_paths_and_shell_input(self) -> None:
         invalid = suite_payload()

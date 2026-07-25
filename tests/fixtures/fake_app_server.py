@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 
@@ -24,6 +25,8 @@ DIRECTOR_SCREEN = MODE.startswith("director-screen")
 thread_id = (
     "019f953e-5817-7c21-ae03-79c0ad6942eb"
     if P2_SHAPE
+    else f"thread-screen-{os.getpid()}"
+    if DIRECTOR_SCREEN
     else "thread-test"
 )
 turn_id = (
@@ -66,7 +69,7 @@ def screen_decision(snapshot_id: str) -> dict:
         "candidate_delta": 1000,
         "events": ["stagnation"],
     }
-    return {
+    decision = {
         "schema_version": "1.0",
         "snapshot_id": snapshot_id,
         "campaign_assessment": (
@@ -94,6 +97,11 @@ def screen_decision(snapshot_id: str) -> dict:
         ],
         "next_review": review,
     }
+    if MODE == "director-screen-schema-invalid":
+        decision.pop("next_review")
+    if MODE == "director-screen-semantic-invalid":
+        decision["actions"][0]["evidence_ids"] = ["unknown-evidence"]
+    return decision
 
 
 def usage_notification(
@@ -212,6 +220,11 @@ for line in sys.stdin:
                         "id": thread_id,
                         "sessionId": "session-test",
                         "path": "/fake/rollout.jsonl",
+                        **(
+                            {"effectiveContextMode": "compacted_thread"}
+                            if MODE == "director-screen-context-mismatch"
+                            else {}
+                        ),
                     },
                 },
             }
@@ -303,8 +316,12 @@ for line in sys.stdin:
         if MODE == "malformed":
             print("{bad", flush=True)
             continue
+        if MODE == "director-screen-malformed-jsonl":
+            print("{bad", flush=True)
+            continue
         screen_timeout = (
             MODE == "director-screen-timeout-first"
+            or MODE == "director-screen-forced-shutdown"
             or (
                 MODE == "director-screen-timeout-a1"
                 and snapshot_id == "snapshot-a1"
@@ -348,6 +365,26 @@ for line in sys.stdin:
                     total_tokens=1,
                 )
             )
+        if MODE == "director-screen-unsupported-request":
+            send(
+                {
+                    "id": "server-comparison-1",
+                    "method": "unknown/request",
+                    "params": {},
+                }
+            )
+        if MODE == "director-screen-retrying-error":
+            send(
+                {
+                    "method": "error",
+                    "params": {
+                        "threadId": thread_id,
+                        "turnId": turn_id,
+                        "willRetry": True,
+                        "error": {"message": "synthetic retry"},
+                    },
+                }
+            )
         if not DIRECTOR_SCREEN:
             send({"id": "server-1", "method": "unknown/request", "params": {}})
         final_text = json.dumps(
@@ -358,6 +395,13 @@ for line in sys.stdin:
             ),
             separators=(",", ":"),
         )
+        item_type = (
+            "dynamicToolCall"
+            if MODE == "director-screen-tool-call"
+            else "agentMessage"
+        )
+        if MODE == "director-screen-process-crash":
+            raise SystemExit(17)
         send(
             {
                 "method": "item/started",
@@ -367,7 +411,7 @@ for line in sys.stdin:
                     "startedAtMs": 1,
                     "item": {
                         "id": "item-1",
-                        "type": "agentMessage",
+                        "type": item_type,
                         "phase": "final_answer",
                         "text": "",
                     },
@@ -398,7 +442,7 @@ for line in sys.stdin:
                     "completedAtMs": 1,
                     "item": {
                         "id": "item-1",
-                        "type": "agentMessage",
+                        "type": item_type,
                         "phase": "final_answer",
                         "text": final_text,
                     },
@@ -425,7 +469,7 @@ for line in sys.stdin:
                 },
             }
         )
-        if MODE != "no-usage":
+        if MODE not in {"no-usage", "director-screen-no-usage"}:
             time.sleep(0.02)
             send(usage_notification())
         if MODE == "duplicate-usage":
@@ -437,3 +481,7 @@ for line in sys.stdin:
                     total_tokens=16,
                 )
             )
+
+if MODE == "director-screen-forced-shutdown":
+    while True:
+        time.sleep(1)
