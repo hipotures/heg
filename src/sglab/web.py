@@ -936,7 +936,12 @@ def create_server(
         (host, port),
         workspace=workspace,
         static_dir=static_dir,
-        token=token if token is not None else os.environ.get("SGLAB_WEB_TOKEN"),
+        token=(
+            token
+            if token is not None
+            else os.environ.get("SGLAB_DASHBOARD_TOKEN")
+            or os.environ.get("SGLAB_WEB_TOKEN")
+        ),
     )
 
 

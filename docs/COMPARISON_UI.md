@@ -11,7 +11,7 @@ Initialize and serve a workspace:
 
 ```bash
 sglab init --workspace ./workspace
-SGLAB_WEB_TOKEN='choose-a-local-token' \
+SGLAB_DASHBOARD_TOKEN='choose-a-local-token' \
   sglab serve --workspace ./workspace --host 127.0.0.1 --port 8080
 ```
 

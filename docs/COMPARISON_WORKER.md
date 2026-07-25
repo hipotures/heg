@@ -41,7 +41,7 @@ stores every hash. The browser never accepts this path.
 Start the local dashboard:
 
 ```bash
-SGLAB_WEB_TOKEN='choose-a-local-token' \
+SGLAB_DASHBOARD_TOKEN='choose-a-local-token' \
 SGLAB_CODEX_AUTH_SOURCE='/server/configured/auth.json' \
 sglab serve --workspace ./workspace --host 127.0.0.1 --port 8080
 ```

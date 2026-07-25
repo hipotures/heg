@@ -4,6 +4,7 @@ import tempfile
 from http.client import HTTPConnection
 from pathlib import Path
 from threading import Thread
+from unittest.mock import patch
 
 from sglab.state import atomic_write_json
 from sglab.web import create_server
@@ -111,6 +112,26 @@ class WebAssetsTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join(timeout=2)
+
+    def test_dashboard_token_environment_alias_is_protected(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.dict(
+                "os.environ",
+                {"SGLAB_DASHBOARD_TOKEN": "dashboard-secret"},
+                clear=False,
+            ),
+        ):
+            server = create_server(Path(directory), "127.0.0.1", 0)
+            self.assertEqual(server.token, "dashboard-secret")
+            server.server_close()
+
+    def test_dashboard_stores_fragment_token_only_for_browser_session(self) -> None:
+        dashboard = (Path(__file__).parents[1] / "web" / "index.html").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("sessionStorage.setItem('sglab-dashboard-token'", dashboard)
+        self.assertIn("history.replaceState", dashboard)
 
     def test_campaign_api_has_only_stop_contract_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -548,6 +548,8 @@ class ComparisonHttpTests(unittest.TestCase):
             status, body = self.request("GET", path)
             self.assertEqual(status, 200)
             self.assertIn(b"Comparisons", body)
+            self.assertIn(b"sessionStorage.setItem('sglab-dashboard-token'", body)
+            self.assertIn(b"history.replaceState", body)
         status, _ = self.request("GET", "/api/comparisons", authorized=False)
         self.assertEqual(status, 401)
 
@@ -573,6 +575,14 @@ class ComparisonHttpTests(unittest.TestCase):
         self.assertIn(b"failed preflight", body)
 
     def test_security_rejects_arbitrary_contracts_paths_and_shell_input(self) -> None:
+        valid = suite_payload()
+        valid["description"] = (
+            "Compare reasoning effort on an identical bounded A4 Director "
+            "decision using the authenticated M7 comparison worker. "
+            "Measurement only; no returned action is executed."
+        )
+        status, _ = self.request("POST", "/api/comparisons", valid)
+        self.assertEqual(status, 201)
         invalid = suite_payload()
         invalid["arms"][0]["model"] = "arbitrary-model"
         status, body = self.request("POST", "/api/comparisons", invalid)

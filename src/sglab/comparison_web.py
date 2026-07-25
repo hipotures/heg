@@ -135,7 +135,12 @@ THEME_HEAD = """
 
 
 COMMON_JS = r"""
-const token=new URLSearchParams(location.hash.slice(1)).get('token');
+const fragmentToken=new URLSearchParams(location.hash.slice(1)).get('token');
+if(fragmentToken){
+  sessionStorage.setItem('sglab-dashboard-token',fragmentToken);
+  history.replaceState(null,'',location.pathname+location.search);
+}
+const token=fragmentToken||sessionStorage.getItem('sglab-dashboard-token');
 const headers={'Content-Type':'application/json',...(token?{'Authorization':`Bearer ${token}`}:{})};
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=v=>v===null||v===undefined?'Unavailable':Number(v).toLocaleString();

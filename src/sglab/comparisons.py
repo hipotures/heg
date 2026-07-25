@@ -203,7 +203,7 @@ def _safe_text(value: Any, field: str, maximum: int) -> str:
     text = value.strip()
     if not text or len(text) > maximum:
         raise ValueError(f"{field} must contain 1-{maximum} characters")
-    if any(char in text for char in ("\x00", "`", "$(", ";", "|", "&&", "../", "..\\")):
+    if any(char in text for char in ("\x00", "`", "$(", "|", "&&", "../", "..\\")):
         raise ValueError(f"{field} contains forbidden shell or path syntax")
     return text
 
