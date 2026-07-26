@@ -2,6 +2,21 @@
 
 Last implementation audit: **2026-07-26**.
 
+## Browser-local timestamps across the UI
+
+Every primary timestamp on the dashboard, scientific observatory, and
+comparison pages now uses one browser-local formatter with Polish/European
+day-month-year order, a 24-hour clock, and the browser's configured timezone.
+Attempts, actions, events, hypotheses, revisions, runs, live-frontier
+publication, retained-candidate history, and comparison creation no longer
+show raw `...Z` values as their main text.
+
+The original UTC timestamp remains in each semantic `time` element and tooltip,
+and raw technical JSON, APIs, SQLite values, and ordering are unchanged.
+Static renderer regressions and desktop/mobile browser checks cover the shared
+formatter and the observatory integration. See
+`docs/reports/M6_BROWSER_LOCAL_TIMESTAMPS.md`.
+
 ## Director client-context hard gate raised to 32,000
 
 The complete client-owned Director request now fails closed at 32,000 estimated

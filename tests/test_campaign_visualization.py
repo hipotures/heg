@@ -43,6 +43,18 @@ class CampaignVisualizationTests(unittest.TestCase):
         self.assertNotIn("root.addEventListener('click', async event => {", script)
         self.assertNotIn("root.addEventListener('dblclick'", script)
         self.assertIn("`${name}: ${clipboardValue}`", script)
+        self.assertIn(
+            "localTimeHtml(selection.published_at || selection.created_at)",
+            script,
+        )
+        self.assertIn("localTimeHtml(item.created_at)", script)
+        self.assertIn("const localClockTime = () =>", script)
+        self.assertIn("setStatus(`Updated · ${localClockTime()}`)", script)
+        self.assertNotIn("toLocaleTimeString()", script)
+        self.assertIn(
+            "selectionIntersects,localTimeHtml",
+            dashboard,
+        )
         self.assertIn("document.execCommand('copy')", dashboard)
         self.assertIn("navigator.clipboard.writeText(value)", dashboard)
         self.assertIn("target.classList.add('is-copied')", dashboard)

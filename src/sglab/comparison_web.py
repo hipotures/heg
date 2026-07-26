@@ -147,12 +147,31 @@ const fmt=v=>v===null||v===undefined?'Unavailable':Number(v).toLocaleString();
 const fmtSeconds=v=>v===null||v===undefined?'Unavailable':`${Number(v).toLocaleString(undefined,{maximumFractionDigits:2})} s`;
 const label=v=>String(v??'').replaceAll('_',' ').replace(/\b\w/g,c=>c.toUpperCase());
 const shortId=v=>{const s=String(v??'');return s.length>20?`${s.slice(0,11)}…${s.slice(-6)}`:s};
+const localDateTime=value=>{
+  if(!value)return'Unavailable';
+  const date=new Date(value);
+  if(Number.isNaN(date.getTime()))return String(value);
+  return new Intl.DateTimeFormat('pl-PL',{
+    year:'numeric',month:'2-digit',day:'2-digit',
+    hour:'2-digit',minute:'2-digit',second:'2-digit',
+    hourCycle:'h23',timeZoneName:'short',
+  }).format(date);
+};
+const isTimestamp=value=>typeof value==='string'
+  &&/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value)
+  &&!Number.isNaN(new Date(value).getTime());
+const localTimeHtml=value=>{
+  if(!value)return'Unavailable';
+  if(!isTimestamp(value))return esc(value);
+  const sourceLabel=String(value).endsWith('Z')?'Stored UTC':'Stored timestamp';
+  return `<time datetime="${esc(value)}" title="${esc(`${sourceLabel}: ${value}`)}">${esc(localDateTime(value))}</time>`;
+};
 const safeJson=v=>{if(v===null||v===undefined||v==='')return null;if(typeof v==='object')return v;try{return JSON.parse(v)}catch{return null}};
 const actionSpaceLabels=v=>{const parsed=safeJson(v);const actions=Array.isArray(parsed)?parsed:parsed?.actions;return Array.isArray(actions)?actions.map(label).join(', '):''};
 const statusTone=v=>{const s=String(v??'').toLowerCase();if(/complete|valid|pass|applied|authorized|prepared/.test(s))return'good';if(/fail|invalid|reject|abort/.test(s))return'bad';if(/time|stop|block|pause|unknown/.test(s))return'warn';return'neutral'};
 const badge=v=>`<span class="badge ${statusTone(v)}">${esc(label(v??'unknown'))}</span>`;
 const idHtml=v=>v?`<span class="id-value"><span class="id" title="${esc(v)}">${esc(shortId(v))}</span><button type="button" class="copy-id" data-copy="${esc(v)}" aria-label="Copy full identifier">Copy</button></span>`:'—';
-const field=(k,v)=>{const technicalKey=/(^|[\s_-])(id|ids|hash|sha-?256|fingerprint)($|[\s_-])|prompt|director state|output schema/i.test(k);return v===null||v===undefined||v===''?'':`<div class="semantic-field"><dt>${esc(label(k))}</dt><dd>${typeof v==='string'&&technicalKey?idHtml(v):esc(v)}</dd></div>`};
+const field=(k,v)=>{const technicalKey=/(^|[\s_-])(id|ids|hash|sha-?256|fingerprint)($|[\s_-])|prompt|director state|output schema/i.test(k);return v===null||v===undefined||v===''?'':`<div class="semantic-field"><dt>${esc(label(k))}</dt><dd>${isTimestamp(v)?localTimeHtml(v):typeof v==='string'&&technicalKey?idHtml(v):esc(v)}</dd></div>`};
 const technical=(title,value)=>value===null||value===undefined||value===''?'':`<details><summary>${esc(title)}</summary><pre>${esc(typeof value==='string'?value:JSON.stringify(value,null,2))}</pre></details>`;
 async function api(path,options={}){const r=await fetch(path,{...options,headers:{...headers,...(options.headers||{})},cache:'no-store'});let b;try{b=await r.json()}catch{b={error:`HTTP ${r.status}`}}if(!r.ok)throw new Error(b.error||`HTTP ${r.status}`);return b}
 function themeLabel(){const dark=document.documentElement.dataset.theme==='dark';const b=document.getElementById('theme-toggle');if(b){b.textContent=dark?'☀ Light theme':'☾ Dark theme';b.setAttribute('aria-pressed',String(dark))}}
@@ -171,7 +190,7 @@ function semanticValue(value,key=''){
     return `<div class="chips">${value.map(x=>`<span class="chip" title="${esc(x)}">${esc(shortId(x))}</span>`).join('')}</div>`;
   }
   if(typeof value==='object')return semanticFields(value);
-  return esc(value);
+  return isTimestamp(value)?localTimeHtml(value):esc(value);
 }
 function semanticFields(obj){
   if(!obj||typeof obj!=='object')return '';
@@ -239,7 +258,7 @@ def comparisons_page() -> bytes:
 <section><div class="section-heading"><div><h2>Comparison suites</h2><p id="suite-count">Loading suites…</p></div><a href="/comparisons/new">Create suite →</a></div><div id="suite-list" class="stack"></div></section>
 """
     script = """
-function suiteCard(s){return `<article class="suite-card"><div class="card-head"><div><div class="chips">${badge(s.status)}${s.measurement_only?badge('measurement only'):badge('execution')}</div><h3><a href="/comparisons/${esc(s.suite_id)}#${location.hash.slice(1)}">${esc(s.name)}</a></h3><div class="meta">${idHtml(s.suite_id)} · created ${esc(s.created_at)}</div></div><div class="metric emphasis"><small>Completed turns</small><strong>${s.completion_count} / ${s.planned_inference_count}</strong></div></div><div class="grid">${field('Fixture',s.fixture_reference)}${field('Models',s.models.join(', '))}${field('Efforts',s.efforts.join(', '))}${field('Context modes',s.context_modes.join(', '))}${field('Inference starts',`${s.consumed_inference_starts||0} / ${s.maximum_inference_starts}`)}${field('Total server tokens',fmt(s.total_server_tokens))}${field('Relative cost units',Number(s.relative_cost_units||0).toFixed(2))}${field('Timeouts / invalid',`${s.timeout_count} / ${s.invalid_decision_count}`)}</div></article>`}
+function suiteCard(s){return `<article class="suite-card"><div class="card-head"><div><div class="chips">${badge(s.status)}${s.measurement_only?badge('measurement only'):badge('execution')}</div><h3><a href="/comparisons/${esc(s.suite_id)}#${location.hash.slice(1)}">${esc(s.name)}</a></h3><div class="meta">${idHtml(s.suite_id)} · created ${localTimeHtml(s.created_at)}</div></div><div class="metric emphasis"><small>Completed turns</small><strong>${s.completion_count} / ${s.planned_inference_count}</strong></div></div><div class="grid">${field('Fixture',s.fixture_reference)}${field('Models',s.models.join(', '))}${field('Efforts',s.efforts.join(', '))}${field('Context modes',s.context_modes.join(', '))}${field('Inference starts',`${s.consumed_inference_starts||0} / ${s.maximum_inference_starts}`)}${field('Total server tokens',fmt(s.total_server_tokens))}${field('Relative cost units',Number(s.relative_cost_units||0).toFixed(2))}${field('Timeouts / invalid',`${s.timeout_count} / ${s.invalid_decision_count}`)}</div></article>`}
 async function load(){try{const q=new URLSearchParams(new FormData(document.getElementById('filters')));const d=await api('/api/comparisons?'+q);document.getElementById('suite-count').textContent=`${d.suites.length} suite${d.suites.length===1?'':'s'}`;document.getElementById('suite-list').innerHTML=d.suites.map(suiteCard).join('')||'<div class="empty-state"><strong>No comparison suites match these filters.</strong><p>Clear a filter or create a new measurement-only suite.</p></div>'}catch(e){notice.textContent=e.message}}
 document.getElementById('filters').addEventListener('submit',e=>{e.preventDefault();load()});load();
 """

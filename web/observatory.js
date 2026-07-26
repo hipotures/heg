@@ -14,10 +14,17 @@
     typeof value === 'number' && Number.isFinite(value) ? value : null;
   const LIVE_FRONTIER_INTERVAL_SECONDS = [1, 2, 3, 4, 5];
   const DEFAULT_LIVE_FRONTIER_INTERVAL_SECONDS = 5;
+  const localClockTime = () => new Intl.DateTimeFormat('pl-PL', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).format(new Date());
 
   window.createScientificObservatory = options => {
     const {root, api, esc, fmt, label, shortId, badge} = options;
     const selectionIntersects = options.selectionIntersects || (() => false);
+    const localTimeHtml = options.localTimeHtml || (value => esc(value || 'Unavailable'));
     const setHtml = (element, html) => {
       if (selectionIntersects(element)) return false;
       element.innerHTML = html;
@@ -270,7 +277,7 @@
             ? `Live frontier · ${fmt(state.liveFrontierIntervalSeconds)} s sampling`
             : `Frontier paused · ${label(state.campaignState || 'not running')}${state.campaignFault ? ` · ${label(state.campaignFault)}` : ''}`);
         } else {
-          setStatus(`Updated · ${new Date().toLocaleTimeString()}`);
+          setStatus(`Updated · ${localClockTime()}`);
         }
       } catch (error) {
         setStatus(error.message);
@@ -566,7 +573,7 @@
             ${selection.verification_status ? badge(selection.verification_status) : ''}
           </div>
           <h3 title="${esc(selection.candidate_id)}">${esc(shortId(selection.candidate_id))}</h3>
-          <p class="meta">From ${esc(shortId(selection.lane_id))} · ${esc(selection.published_at || selection.created_at)}</p>
+          <p class="meta">From ${esc(shortId(selection.lane_id))} · ${localTimeHtml(selection.published_at || selection.created_at)}</p>
         </div>
         <dl class="semantic">
           ${metricCard('Order / edges', `${fmt(data.graph.order)} / ${fmt(data.graph.size)}`)}
@@ -758,7 +765,7 @@
       setHtml(panel, history.length
         ? `<div class="history-viz-list">${history.map(item =>
             `<div class="history-viz-row">
-              <div class="viz-value"><span>${badge(item.state)}</span><strong title="${esc(item.candidate_id)}">${esc(shortId(item.candidate_id))}</strong><span>${esc(item.created_at)}</span></div>
+              <div class="viz-value"><span>${badge(item.state)}</span><strong title="${esc(item.candidate_id)}">${esc(shortId(item.candidate_id))}</strong><span>${localTimeHtml(item.created_at)}</span></div>
               <div class="viz-value"><span>Weighted penalty</span><strong>${fmt(item.weighted_penalty)}</strong></div>
               <div class="viz-value"><span>Lane</span><strong title="${esc(item.lane_id)}">${esc(shortId(item.lane_id))}</strong></div>
               <button type="button" data-show-candidate="${esc(item.candidate_id)}">Show graph</button>
