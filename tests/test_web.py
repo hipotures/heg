@@ -403,7 +403,13 @@ class WebAssetsTests(unittest.TestCase):
             )
             auth.parent.mkdir(parents=True)
             auth.write_text("{}\n", encoding="utf-8")
-            with patch("sglab.web.Popen") as launch:
+            with (
+                patch("sglab.web.Popen") as launch,
+                patch(
+                    "sglab.web._campaign_attempt_is_persisted",
+                    return_value=True,
+                ),
+            ):
                 launch.return_value.pid = 4312
                 launch.return_value.poll.return_value = None
                 status, started = server.resume_campaign(
@@ -411,6 +417,7 @@ class WebAssetsTests(unittest.TestCase):
                 )
                 self.assertEqual(status, 202)
                 self.assertEqual(started["campaign_id"], campaign_id)
+                self.assertTrue(started["startup_confirmed"])
                 command = launch.call_args.args[0]
                 self.assertIn("resume", command)
                 self.assertIn("--additional-time", command)

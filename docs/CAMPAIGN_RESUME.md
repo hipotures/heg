@@ -80,9 +80,9 @@ duplicate batches and actions.
 Pre-Resume snapshots summarize persisted lane telemetry through the same
 bounded projection used for live lanes. Full mutation ancestry and evaluation
 details remain in `lane_metric_windows` and retained artifacts; they are not
-copied wholesale into the bounded Director snapshot. If the Resume subprocess
-exits before startup, the protected HTTP endpoint reports the launch failure
-instead of returning a misleading started PID.
+copied wholesale into the bounded Director snapshot. The protected HTTP
+endpoint waits for the immutable attempt row; if the subprocess exits first,
+it reports the launch failure instead of returning a misleading started PID.
 
 Candidate-target actions acquire durable candidate pins and immutable graph
 snapshots before execution. M4 reads the immutable snapshot. Pins release only

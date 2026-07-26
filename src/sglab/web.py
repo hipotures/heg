@@ -82,6 +82,31 @@ def _read_campaign_turn_artifact(
     return json.loads(body)
 
 
+def _campaign_attempt_is_persisted(
+    workspace: Path, attempt_id: str
+) -> bool:
+    database = (workspace / "results.sqlite3").resolve()
+    try:
+        connection = sqlite3.connect(
+            f"{database.as_uri()}?mode=ro", uri=True, timeout=0.1
+        )
+        try:
+            return (
+                connection.execute(
+                    """
+                    SELECT 1 FROM campaign_execution_attempts
+                    WHERE attempt_id=?
+                    """,
+                    (attempt_id,),
+                ).fetchone()
+                is not None
+            )
+        finally:
+            connection.close()
+    except sqlite3.OperationalError:
+        return False
+
+
 class DashboardServer(ThreadingHTTPServer):
     def __init__(
         self,
@@ -549,22 +574,32 @@ class DashboardServer(ThreadingHTTPServer):
                     env=os.environ.copy(),
                 )
             self.campaign_runner = process
-            time.sleep(0.1)
-            return_code = process.poll()
-            if return_code is not None:
-                self.campaign_runner = None
-                return 500, {
-                    "error": (
-                        "campaign resume process exited before startup "
-                        f"(return code {return_code}); inspect "
-                        "logs/research-campaign-runner.log"
-                    )
-                }
+            attempt_id = str(preview["proposed_attempt_id"])
+            startup_deadline = time.monotonic() + 5.0
+            startup_confirmed = False
+            while time.monotonic() < startup_deadline:
+                if _campaign_attempt_is_persisted(
+                    self.workspace, attempt_id
+                ):
+                    startup_confirmed = True
+                    break
+                return_code = process.poll()
+                if return_code is not None:
+                    self.campaign_runner = None
+                    return 500, {
+                        "error": (
+                            "campaign resume process exited before startup "
+                            f"(return code {return_code}); inspect "
+                            "logs/research-campaign-runner.log"
+                        )
+                    }
+                time.sleep(0.05)
             return 202, {
                 "accepted": True,
                 "pid": process.pid,
                 "campaign_id": campaign_id,
-                "attempt_id": preview["proposed_attempt_id"],
+                "attempt_id": attempt_id,
+                "startup_confirmed": startup_confirmed,
             }
 
 

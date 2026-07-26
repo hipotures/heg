@@ -48,8 +48,9 @@ pre-Resume snapshot 368,573 bytes, above its 256 KiB artifact contract.
 Snapshot construction now derives the same bounded telemetry summary used for
 live lanes while leaving every raw metric row unchanged. The exact preserved
 campaign shape now produces a 69,803-byte snapshot and a 15,861-byte
-scientific-memory projection. The dashboard also checks for immediate
-subprocess exit before claiming that a new attempt started, and Resume
+scientific-memory projection. The dashboard now waits for the immutable
+execution-attempt row before claiming that Resume started and reports a
+pre-attempt subprocess exit instead of returning a misleading PID. Resume
 previews continue to report historical stale actions after they are already
 terminalized.
 
