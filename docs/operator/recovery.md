@@ -29,6 +29,8 @@ Review:
 - restore graph, RNG, tabu/search state, counters, and high-water;
 - preserve the checkpoint's `duplicate_key_scheme`; do not rewrite a legacy
   visited/tabu set during Resume or a trajectory-preserving fork;
+- for `random_restart` with `independent_sample`, do not load legacy
+  `accepted_ancestry` or `best_ancestry` into live telemetry;
 - start a new process generation;
 - do not advance SQLite telemetry beyond a durable checkpoint boundary;
 - report missing/corrupt checkpoint per lane.

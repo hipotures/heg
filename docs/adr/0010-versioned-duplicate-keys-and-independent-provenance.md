@@ -31,6 +31,11 @@ records and periodic checkpoints, not for every accepted sample. SQLite
 schema v16 stores this provenance on retained candidates and immutable M4
 snapshots.
 
+Legacy random-restart checkpoint ancestry remains historical evidence but is
+not restored into an `independent_sample` lane's live tracker. This is a
+representation migration only: executable generator, RNG, graph, score,
+counter and duplicate state are preserved.
+
 ## Consequences
 
 - Existing resumed trajectories preserve duplicate membership semantics.

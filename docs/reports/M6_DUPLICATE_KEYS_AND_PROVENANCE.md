@@ -91,3 +91,26 @@ PYTHONPATH=src python -m sglab benchmark micro \
 
 The full score-kernel JSON produced during acceptance had SHA-256
 `60a0121d6590e6de3b74284d31bdb02957a1f7472355963ef180d6b56c32ea4c`.
+
+## Production Resume follow-up
+
+Attempt 12 confirmed that new random-restart candidates used
+`independent_sample`, constructed no new ancestry (`ancestry_construction=0`)
+and sustained roughly 660–830 candidates/s with zero scorer fallbacks or
+parity mismatches. It also exposed a compatibility leak: 64 mutation-era
+records restored from the old checkpoint were still serialized into each
+telemetry window.
+
+The restore path now ignores `accepted_ancestry` and `best_ancestry` only for
+`random_restart` lanes with independent-sample provenance. It does not rewrite
+the source artifact. A deterministic legacy-shaped checkpoint test proves
+that graph, score, best graph, best score, RNG state, high-water counters,
+candidate IDs and provenance continue identically while live and newly
+checkpointed mutation ancestry are empty.
+
+A read-only shadow-mode smoke used the exact paused production checkpoint
+`checkpoint-aa1dd31204b47c383a24a701`. Both legacy lists contained 64 records;
+the restored tracker, telemetry payload and new in-memory checkpoint each
+contained zero. All 100 candidate evaluations agreed between C++ and Python,
+with zero fallbacks and zero parity mismatches, and the source checkpoint file
+hash was unchanged.

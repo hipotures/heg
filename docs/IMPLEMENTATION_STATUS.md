@@ -34,6 +34,15 @@ checkpoints instead use schema-v2 `independent_sample` provenance. SQLite
 schema v16 adds this provenance to retained candidates and copies it into
 immutable M4 snapshots; historical rows remain `{}`.
 
+Production Resume exposed one legacy boundary after this change: an
+independent-sample lane correctly stopped constructing new mutation records
+but restored 64 old ancestry entries from its pre-migration checkpoint and
+re-serialized them in every telemetry window. Resume now treats those fields
+as non-executable historical evidence and starts the live random-restart
+ancestry tracker empty. Deterministic continuation tests preserve graph, score,
+RNG, high-water counters and provenance while asserting empty mutation
+ancestry.
+
 Seven alternating benchmark pairs preserved every logical trajectory. The
 legacy encoder reduced duplicate time by 48.1% and improved total throughput
 14.6%; independent provenance reduced ancestry time by 99.68% and improved

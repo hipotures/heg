@@ -106,6 +106,10 @@ Resume never assumes old worker processes survived. Resumable lanes are
 reconstructed from hash-verified checkpoints. A missing or corrupt checkpoint
 affects only the relevant lane and is reported to the Director.
 
+For an older random-restart checkpoint, historical mutation ancestry remains
+in the old artifact but is not carried into new independent-sample telemetry.
+The graph sequence, RNG state and scores still continue from the checkpoint.
+
 ## Stale candidate behavior
 
 A historical candidate action is not retried if its target is no longer

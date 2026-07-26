@@ -100,6 +100,12 @@ provenance is materialized for global records, retained candidates, M4
 snapshots and periodic checkpoints. Mutation-based lanes retain bounded
 `mutation_chain` ancestry.
 
+When an older random-restart checkpoint still contains mutation-era
+`accepted_ancestry` or `best_ancestry`, those fields remain immutable
+historical evidence but are not restored into the live independent-sample
+tracker. Graph, RNG, score, evaluation counters and duplicate state resume
+unchanged; subsequent checkpoints write empty mutation-ancestry lists.
+
 Long-running batches may also publish a transient live-frontier sample at most
 once per second. The worker copies the already accepted graph, its existing
 score, candidate ID, lane version, and high-water counter into a size-bounded

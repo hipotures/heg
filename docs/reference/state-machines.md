@@ -62,6 +62,10 @@ Resume and trajectory-preserving fork keep the checkpoint's
 `duplicate_key_scheme`. A reviewed algorithmic restart is the explicit
 transition that may clear local duplicate state and select a newer scheme.
 
+For a `random_restart` lane using `independent_sample`, legacy checkpoint
+mutation-ancestry fields are non-executable history. Resume restores generator
+and search state but initializes the live mutation-ancestry tracker empty.
+
 ## Candidate
 
 Representative states:

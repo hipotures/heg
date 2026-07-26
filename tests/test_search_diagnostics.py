@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 from random import Random
+import copy
 import unittest
 
 from sglab.model import find_cycles_of_length_bounded
@@ -119,9 +120,12 @@ class SearchDiagnosticsTests(unittest.TestCase):
             expected = original.checkpoint(0)
         finally:
             original.close()
-        restored = _LaneKernel(spec, midpoint, None)
+        legacy_midpoint = copy.deepcopy(midpoint)
+        legacy_midpoint["accepted_ancestry"] = [{"legacy": "accepted"}]
+        legacy_midpoint["best_ancestry"] = [{"legacy": "best"}]
+        restored = _LaneKernel(spec, legacy_midpoint, None)
         try:
-            restored.run_batch(
+            restored_metrics = restored.run_batch(
                 _NeverStop(),
                 max_evaluations=200,
                 source_checkpoint_id=midpoint["checkpoint_id"],
@@ -143,6 +147,14 @@ class SearchDiagnosticsTests(unittest.TestCase):
             "best_provenance",
         ):
             self.assertEqual(actual[field], expected[field], field)
+        self.assertEqual(actual["accepted_ancestry"], [])
+        self.assertEqual(actual["best_ancestry"], [])
+        self.assertEqual(
+            restored_metrics["mutation_ancestry"][
+                "final_best_ancestry"
+            ],
+            [],
+        )
 
     def test_ancestry_is_bounded_and_parent_child_ids_correlate(self) -> None:
         result = run_bounded_lane_batch(

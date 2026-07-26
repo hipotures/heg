@@ -402,17 +402,26 @@ class _LaneKernel:
             if not self.tabu:
                 self.tabu.append(self._full_search_key(self.graph))
             self.current_graph_key = self._full_search_key(self.graph)
-            self.accepted_ancestry = deque(
-                (
+            if (
+                self.algorithm == "random_restart"
+                and self.independent_sample_provenance
+            ):
+                self.accepted_ancestry.clear()
+                self.best_ancestry = []
+            else:
+                self.accepted_ancestry = deque(
+                    (
+                        dict(value)
+                        for value in checkpoint.get(
+                            "accepted_ancestry", []
+                        )
+                    ),
+                    maxlen=ANCESTRY_LIMIT,
+                )
+                self.best_ancestry = [
                     dict(value)
-                    for value in checkpoint.get("accepted_ancestry", [])
-                ),
-                maxlen=ANCESTRY_LIMIT,
-            )
-            self.best_ancestry = [
-                dict(value)
-                for value in checkpoint.get("best_ancestry", [])
-            ][-ANCESTRY_LIMIT:]
+                    for value in checkpoint.get("best_ancestry", [])
+                ][-ANCESTRY_LIMIT:]
             restored_current_id = checkpoint.get("current_candidate_id")
             self.current_candidate_id = (
                 str(restored_current_id)
@@ -516,16 +525,26 @@ class _LaneKernel:
         self.best_score = _score_from_payload(
             checkpoint.get("best_score", checkpoint["score"])
         )
-        self.accepted_ancestry = deque(
-            (
+        if (
+            self.algorithm == "random_restart"
+            and self.independent_sample_provenance
+        ):
+            self.accepted_ancestry.clear()
+            self.best_ancestry = []
+        else:
+            self.accepted_ancestry = deque(
+                (
+                    dict(value)
+                    for value in checkpoint.get(
+                        "accepted_ancestry", []
+                    )
+                ),
+                maxlen=ANCESTRY_LIMIT,
+            )
+            self.best_ancestry = [
                 dict(value)
-                for value in checkpoint.get("accepted_ancestry", [])
-            ),
-            maxlen=ANCESTRY_LIMIT,
-        )
-        self.best_ancestry = [
-            dict(value) for value in checkpoint.get("best_ancestry", [])
-        ][-ANCESTRY_LIMIT:]
+                for value in checkpoint.get("best_ancestry", [])
+            ][-ANCESTRY_LIMIT:]
         restored_current_id = checkpoint.get("current_candidate_id")
         self.current_candidate_id = (
             str(restored_current_id)
