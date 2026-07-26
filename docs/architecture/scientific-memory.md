@@ -42,13 +42,21 @@ Bounded/aggregated:
 
 ```mermaid
 flowchart LR
-    DB[(Raw durable records)] --> P[Deterministic projection]
+    DB[(Raw durable records)] --> P[Section-bounded Director state]
     P --> B{Above soft/hard limit?}
     B -->|No| S[Immutable snapshot]
     B -->|Yes| R[Secondary deterministic reduction]
-    R --> S
+    R --> F{Final hard-limit check}
+    F -->|Fits| S
+    F -->|Non-droppable overflow| X[Fail before inference]
     S --> T[DirectorStateV2 + recent deltas]
 ```
+
+The total 32,768-byte Director limit is enforced only after the secondary
+reduction has had an opportunity to remove bounded historical detail.
+Section-specific ancestry and outcome limits are applied before that reduction.
+The final submitted state is then rebuilt from the reduced projection and
+checked again before registries, prompt material, or inference are created.
 
 ## High-water marks
 
@@ -66,6 +74,10 @@ This avoids replaying all prompts and events.
 If non-droppable facts cannot fit below the hard limit, the runtime fails before
 inference with `scientific_state_overflow`. It never silently drops exact facts
 or sends an invalid truncated state.
+
+A reducible pre-projection state is not an overflow. In particular, growth in
+historical questions, explored regions, candidate detail, lane parameters, or
+hypothesis prose must reach secondary reduction before the hard-limit decision.
 
 ## Resume
 

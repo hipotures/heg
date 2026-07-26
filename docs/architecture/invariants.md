@@ -15,7 +15,7 @@ This is the authoritative engineering-invariant matrix.
 | Cumulative counters never reset | attempt accounting | continuation demo | integrity failure |
 | Terminal actions/jobs are not repeated | recovery/idempotency | recovery tests | duplicate/no-op or reject |
 | Raw history survives compaction | memory store | compaction tests | overflow before inference |
-| Exact facts/current executable IDs are non-droppable | memory projection | forced-compaction tests | `scientific_state_overflow` |
+| Exact facts/current executable IDs are non-droppable | memory projection before final Director limit | forced-compaction and SnapshotBuilder ordering tests | `scientific_state_overflow` |
 | Distinct fresh campaigns remain independent | workspace/campaign creation | isolation tests | no implicit import |
 | Evidence visibility does not imply executability | registries/action schema | applicability tests | validation rejection |
 | Action IDs are workspace-unique | schema + transaction | collision tests | batch rejected before insert |

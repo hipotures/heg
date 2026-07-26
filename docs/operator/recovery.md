@@ -51,6 +51,14 @@ A fault Resume requires:
 - one current executable registry;
 - no replay of terminal actions or completed verifier jobs.
 
+For `DirectorContextBudgetExceeded: DirectorStateV2 remains oversized after
+deterministic compaction`, confirm that the running code applies secondary
+scientific-memory reduction before the final Director hard-limit check. Test
+the repair against an SQLite Online Backup of the affected workspace, run
+`PRAGMA integrity_check` and `PRAGMA foreign_key_check`, and verify that the
+rebuilt projection is at most the campaign's recorded hard limit before
+resuming the original campaign.
+
 ## Scientific invalidation
 
 If a bug invalidated prior scientific results, do not Resume. Mark the

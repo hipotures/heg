@@ -55,6 +55,16 @@ started.
 
 Inspect the latest scientific-memory snapshot and source counts.
 
+## `DirectorContextBudgetExceeded`
+
+No Director action or exact-verification job was started after this fault.
+Upgrade to a build that compacts scientific memory before enforcing the total
+Director-state limit, then preview Resume with a repair acknowledgement.
+
+If the fault remains on the repaired build, inspect the saved context-budget
+report. A final reduced `DirectorStateV2` above 32,768 bytes, or total
+client-owned context above its token gate, is a real fail-closed condition.
+
 ## Checkpoint mismatch
 
 A checkpoint hash failed. The affected lane is not restored. Other lanes and

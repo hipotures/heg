@@ -63,3 +63,8 @@ actually greater than limit.
 
 `scientific_state_overflow` means no safe bounded state could be produced
 without losing non-droppable facts. No inference should occur.
+
+`DirectorContextBudgetExceeded` means the final reduced Director state or the
+complete client-owned request context exceeded its configured gate. Historical
+detail that the scientific-memory policy permits dropping is reduced before
+this final decision; a pre-reduction size alone is not grounds for the fault.

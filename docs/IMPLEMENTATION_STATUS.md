@@ -2,6 +2,25 @@
 
 Last implementation audit: **2026-07-26**.
 
+## Director scientific-memory compaction ordering repair
+
+The first real graph campaign reached a 31,593-byte scientific-memory snapshot,
+then added another search lane and stopped fail-closed with
+`DirectorContextBudgetExceeded: DirectorStateV2 remains oversized after
+deterministic compaction`. The state was reducible, but `SnapshotBuilder`
+enforced the 32,768-byte Director limit before invoking the secondary
+`ScientificMemoryCompactor`.
+
+Snapshot construction now builds a section-bounded intermediate Director state,
+runs deterministic scientific-memory reduction, and only then enforces the
+final Director limit and constructs executable registries. A focused regression
+test proves that reducible continuity is compacted while exact-verifier facts
+remain present. An SQLite Online Backup of the affected production database
+reconstructed 12 lanes, 11 candidates, 11 hypotheses, and 25 executable
+checkpoint IDs into a 32,699-byte projection; `PRAGMA integrity_check` passed
+and `PRAGMA foreign_key_check` returned no violations. No original campaign
+data or model turn was used during the repair test.
+
 ## Audience-oriented documentation migration
 
 The repository documentation now has user, operator, architecture, reference,

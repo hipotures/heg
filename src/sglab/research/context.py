@@ -180,39 +180,8 @@ def prepare_director_state_v2(
 ) -> PreparedDirectorState:
     """Build and deterministically compact model-facing scientific state."""
 
-    projected = snapshot.get("scientific_memory_projection")
-    if isinstance(projected, dict):
-        pre = json.loads(json.dumps(projected))
-        state = json.loads(json.dumps(projected))
-    else:
-        pre = _unbounded_state(snapshot)
-        state = json.loads(json.dumps(pre))
-        outcomes = list(state.pop("_all_outcomes", []))
-        state["latest_batch_outcome"] = outcomes[0] if outcomes else None
-        state["previous_outcomes"] = outcomes[1:MAX_OUTCOMES]
+    pre, state = _director_state_before_total_compaction(snapshot)
     ancestry = state["ancestry"]
-    ancestry["global_record_summaries"] = ancestry[
-        "global_record_summaries"
-    ][-MAX_GLOBAL_RECORD_SUMMARIES:]
-    ancestry["final_best_accepted_ancestors"] = ancestry[
-        "final_best_accepted_ancestors"
-    ][-MAX_FINAL_BEST_ANCESTORS:]
-
-    while _json_size(ancestry) > ANCESTRY_MAX_BYTES:
-        if ancestry["final_best_accepted_ancestors"]:
-            ancestry["final_best_accepted_ancestors"].pop(0)
-        elif ancestry["global_record_summaries"]:
-            ancestry["global_record_summaries"].pop(0)
-        else:
-            break
-    while _json_size(state["previous_outcomes"]) > HISTORICAL_OUTCOMES_MAX_BYTES:
-        if state["previous_outcomes"]:
-            state["previous_outcomes"].pop()
-        else:
-            break
-    state["allowed_action_space"] = _applicable_action_space(
-        snapshot, state, action_catalog()
-    )
     while _json_size(state) > hard_limit_bytes:
         if ancestry["final_best_accepted_ancestors"]:
             ancestry["final_best_accepted_ancestors"].pop(0)
@@ -298,6 +267,54 @@ def prepare_director_state_v2(
             )
         ).hexdigest(),
     )
+
+
+def director_state_v2_memory_input(
+    snapshot: dict[str, Any],
+) -> dict[str, Any]:
+    """Build section-bounded state before scientific-memory compaction."""
+
+    _, state = _director_state_before_total_compaction(snapshot)
+    return state
+
+
+def _director_state_before_total_compaction(
+    snapshot: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    projected = snapshot.get("scientific_memory_projection")
+    if isinstance(projected, dict):
+        pre = json.loads(json.dumps(projected))
+        state = json.loads(json.dumps(projected))
+    else:
+        pre = _unbounded_state(snapshot)
+        state = json.loads(json.dumps(pre))
+        outcomes = list(state.pop("_all_outcomes", []))
+        state["latest_batch_outcome"] = outcomes[0] if outcomes else None
+        state["previous_outcomes"] = outcomes[1:MAX_OUTCOMES]
+    ancestry = state["ancestry"]
+    ancestry["global_record_summaries"] = ancestry[
+        "global_record_summaries"
+    ][-MAX_GLOBAL_RECORD_SUMMARIES:]
+    ancestry["final_best_accepted_ancestors"] = ancestry[
+        "final_best_accepted_ancestors"
+    ][-MAX_FINAL_BEST_ANCESTORS:]
+
+    while _json_size(ancestry) > ANCESTRY_MAX_BYTES:
+        if ancestry["final_best_accepted_ancestors"]:
+            ancestry["final_best_accepted_ancestors"].pop(0)
+        elif ancestry["global_record_summaries"]:
+            ancestry["global_record_summaries"].pop(0)
+        else:
+            break
+    while _json_size(state["previous_outcomes"]) > HISTORICAL_OUTCOMES_MAX_BYTES:
+        if state["previous_outcomes"]:
+            state["previous_outcomes"].pop()
+        else:
+            break
+    state["allowed_action_space"] = _applicable_action_space(
+        snapshot, state, action_catalog()
+    )
+    return pre, state
 
 
 def build_evidence_registry(

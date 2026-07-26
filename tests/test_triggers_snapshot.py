@@ -136,6 +136,81 @@ class SnapshotBuilderTests(unittest.TestCase):
                 manager.shutdown()
                 store.close()
 
+    def test_scientific_memory_compacts_before_total_director_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = ResearchStore(root / "campaign.sqlite3")
+            manager = LaneManager(root)
+            try:
+                store.create_campaign(
+                    campaign_id="campaign-1",
+                    target="erdos_gyarfas",
+                    target_definition_sha256="a" * 64,
+                    stop_mode="time_limit",
+                    deadline_at="2026-07-25T00:00:00Z",
+                )
+                builder = SnapshotBuilder(
+                    store=store,
+                    manager=manager,
+                    campaign_id="campaign-1",
+                    campaign_dir=root,
+                )
+                oversized_questions = [
+                    f"question-{index}-" + ("x" * 900)
+                    for index in range(40)
+                ]
+                builder._continuity = lambda campaign: {
+                    "hypothesis_ledger": [],
+                    "latest_valid_assessment": None,
+                    "exact_verifier_outcomes": [
+                        {
+                            "candidate_id": "candidate-exact",
+                            "state": "completed",
+                            "certification_status": "INVALID_CANDIDATE",
+                            "certification_artifact_ref": (
+                                "verifications/exact/manifest.json"
+                            ),
+                        }
+                    ],
+                    "candidate_ledger": [],
+                    "current_executable_candidate_ids": [],
+                    "current_executable_checkpoint_ids": [],
+                    "lane_and_checkpoint_ledger": [],
+                    "explored_regions": [],
+                    "unresolved_scientific_questions": oversized_questions,
+                    "validation_feedback": [],
+                    "infrastructure_fault": None,
+                    "execution_attempt": {
+                        "attempt_id": None,
+                        "effective_resources": {},
+                    },
+                }
+
+                snapshot, _ = builder.publish()
+
+                projection = snapshot["scientific_memory_projection"]
+                self.assertLessEqual(
+                    snapshot["scientific_memory"]["byte_size"],
+                    32 * 1024,
+                )
+                self.assertLess(
+                    len(
+                        projection["continuity"][
+                            "unresolved_scientific_questions"
+                        ]
+                    ),
+                    len(oversized_questions),
+                )
+                self.assertEqual(
+                    projection["continuity"]["exact_verifier_outcomes"][0][
+                        "candidate_id"
+                    ],
+                    "candidate-exact",
+                )
+            finally:
+                manager.shutdown()
+                store.close()
+
     def test_stored_lane_metrics_are_summarized_before_resume_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

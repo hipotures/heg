@@ -13,7 +13,11 @@ from ..state import utc_now
 from ..targets import target_summary
 from .lanes import LaneManager
 from .catalog import action_catalog
-from .context import evidence_registry_ids, prepare_director_state_v2
+from .context import (
+    director_state_v2_memory_input,
+    evidence_registry_ids,
+    prepare_director_state_v2,
+)
 from .continuity import (
     ScientificMemoryCompactor,
     ScientificMemoryPolicy,
@@ -115,12 +119,8 @@ class SnapshotBuilder:
             if previous is not None
             else None
         )
-        prepared_current = prepare_director_state_v2(
-            snapshot,
-            hard_limit_bytes=self.memory_policy.hard_limit_bytes,
-        )
         projection = self.memory.project(
-            prepared_current.state,
+            director_state_v2_memory_input(snapshot),
             previous=previous_projection,
         )
         projection_bytes = self.memory.encode(projection)
