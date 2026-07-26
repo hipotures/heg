@@ -317,8 +317,8 @@
       const viewport = svg.querySelector('[data-graph-viewport]');
       if (!viewport) return;
       const {scale} = state.transform;
-      const maximumX = 500 * Math.max(0, scale - 1);
-      const maximumY = 340 * Math.max(0, scale - 1);
+      const maximumX = 360 + 500 * Math.max(0, scale - 1);
+      const maximumY = 240 + 340 * Math.max(0, scale - 1);
       state.transform.x = clamp(state.transform.x, -maximumX, maximumX);
       state.transform.y = clamp(state.transform.y, -maximumY, maximumY);
       viewport.setAttribute(
