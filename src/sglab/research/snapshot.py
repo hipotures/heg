@@ -7,7 +7,7 @@ import hashlib
 import json
 import os
 
-from ..resources import current_rss_bytes
+from ..resources import current_rss_bytes, process_tree_rss_bytes
 from ..model import BitGraph
 from ..state import utc_now
 from ..targets import target_summary
@@ -746,7 +746,7 @@ class SnapshotBuilder:
             "memory_available_bytes": _memory_available_bytes(),
             "coordinator_rss_bytes": current_rss_bytes(),
             "lane_rss_bytes": sum(
-                current_rss_bytes(runtime.process.pid)
+                process_tree_rss_bytes(runtime.process.pid)
                 for runtime in self.manager.active_lanes()
             ),
             "verifier_queue_depth": verification["queue_depth"],

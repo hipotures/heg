@@ -14,7 +14,14 @@ from ..model import (
     find_cycles_of_length_bounded,
 )
 from ..external import canonical_graph6
-from .base import ScoreResult, ValidationResult, VerifyResult, Witness
+from ..score_worker import CycleCountResult
+from .base import (
+    MutationResult,
+    ScoreResult,
+    ValidationResult,
+    VerifyResult,
+    Witness,
+)
 
 
 def forbidden_lengths(n: int) -> tuple[int, ...]:
@@ -42,6 +49,15 @@ class ScoreProfileAccumulator:
     cycle_nodes: list[int] = field(
         default_factory=lambda: [0] * len(PROFILED_CYCLE_LENGTHS)
     )
+    cycle_evaluations: list[int] = field(
+        default_factory=lambda: [0] * len(PROFILED_CYCLE_LENGTHS)
+    )
+    cycle_complete: list[int] = field(
+        default_factory=lambda: [0] * len(PROFILED_CYCLE_LENGTHS)
+    )
+    cycle_cutoff: list[int] = field(
+        default_factory=lambda: [0] * len(PROFILED_CYCLE_LENGTHS)
+    )
 
     def reset(self) -> None:
         self.graph_validation_ns = 0
@@ -50,12 +66,22 @@ class ScoreProfileAccumulator:
         for index in range(len(PROFILED_CYCLE_LENGTHS)):
             self.cycle_ns[index] = 0
             self.cycle_nodes[index] = 0
+            self.cycle_evaluations[index] = 0
+            self.cycle_complete[index] = 0
+            self.cycle_cutoff[index] = 0
 
     def payload(self) -> dict[str, int]:
         result: dict[str, int] = {}
         for index, length in enumerate(PROFILED_CYCLE_LENGTHS):
             result[f"cycle_{length}_ns"] = self.cycle_ns[index]
             result[f"cycle_{length}_nodes"] = self.cycle_nodes[index]
+            result[f"cycle_{length}_evaluations"] = (
+                self.cycle_evaluations[index]
+            )
+            result[f"cycle_{length}_complete"] = (
+                self.cycle_complete[index]
+            )
+            result[f"cycle_{length}_cutoff"] = self.cycle_cutoff[index]
         return result
 
 
@@ -223,6 +249,14 @@ class ErdosGyarfasPlugin:
         raise RuntimeError("failed to generate a cubic seed within retry budget")
 
     def mutate(self, graph: BitGraph, rng: Random, config: dict[str, Any]) -> BitGraph:
+        return self.mutate_with_delta(graph, rng, config).graph
+
+    def mutate_with_delta(
+        self,
+        graph: BitGraph,
+        rng: Random,
+        config: dict[str, Any],
+    ) -> MutationResult:
         mode = str(config.get("mode", "cubic_first"))
         operator = str(
             config.get("mutation_operator", "uniform_two_edge_switch")
@@ -241,7 +275,11 @@ class ErdosGyarfasPlugin:
                     if not graph.has_edge(u, v)
                 ]
                 if missing:
-                    return graph.with_edges(add=(rng.choice(missing),))
+                    addition = rng.choice(missing)
+                    return MutationResult(
+                        graph.with_edges(add=(addition,)),
+                        added_edges=(addition,),
+                    )
             removable = [
                 edge
                 for edge in graph.edges()
@@ -250,14 +288,22 @@ class ErdosGyarfasPlugin:
             if removable:
                 candidate = graph.with_edges(remove=(rng.choice(removable),))
                 if candidate.is_connected():
-                    return candidate
+                    removed = tuple(
+                        edge
+                        for edge in graph.edges()
+                        if not candidate.has_edge(*edge)
+                    )
+                    return MutationResult(
+                        candidate,
+                        removed_edges=removed,
+                    )
         edges = tuple(graph.edges())
         if len(edges) < 2:
-            return graph
+            return MutationResult(graph)
         if operator == "forbidden_cycle_break_switch":
             witness_edges = self._forbidden_witness_edges(graph, rng)
             if not witness_edges:
-                return graph
+                return MutationResult(graph)
             for _ in range(64):
                 first = rng.choice(witness_edges)
                 remote = rng.choice(edges)
@@ -266,7 +312,7 @@ class ErdosGyarfasPlugin:
                 )
                 if candidate is not None:
                     return candidate
-            return graph
+            return MutationResult(graph)
         for _ in range(64):
             first, second = rng.sample(edges, 2)
             candidate = self._two_edge_switch(
@@ -274,7 +320,7 @@ class ErdosGyarfasPlugin:
             )
             if candidate is not None:
                 return candidate
-        return graph
+        return MutationResult(graph)
 
     def _forbidden_witness_edges(
         self, graph: BitGraph, rng: Random
@@ -301,7 +347,7 @@ class ErdosGyarfasPlugin:
         second: tuple[int, int],
         rng: Random,
         mode: str,
-    ) -> BitGraph | None:
+    ) -> MutationResult | None:
         (a, b), (c, d) = first, second
         if len({a, b, c, d}) != 4:
             return None
@@ -323,7 +369,11 @@ class ErdosGyarfasPlugin:
                 mode != "minimal_structure_mixed_degree"
                 or self._minimal_structure_valid(candidate)
             ):
-                return candidate
+                return MutationResult(
+                    candidate,
+                    removed_edges=(first, second),
+                    added_edges=additions,
+                )
         return None
 
     def cheap_score(self, graph: BitGraph, cap: int) -> ScoreResult:
@@ -387,6 +437,10 @@ class ErdosGyarfasPlugin:
                 profile.witness_counting_ns += elapsed
                 profile.cycle_ns[index] += elapsed
                 profile.cycle_nodes[index] += workspace.visited_nodes
+                profile.cycle_evaluations[index] += 1
+                profile.cycle_complete[index] += int(
+                    workspace.complete and workspace.count <= cap
+                )
 
             score_started = perf_counter_ns() if profile is not None else 0
             count = min(workspace.count, cap)
@@ -412,6 +466,168 @@ class ErdosGyarfasPlugin:
                 perf_counter_ns() - score_started
             )
         return score
+
+    def cheap_score_with_cutoff(
+        self,
+        graph: BitGraph,
+        cap: int,
+        workspace: CycleCountWorkspace,
+        profile: ScoreProfileAccumulator | None,
+        cutoff_key: tuple[int, int, int, int, int],
+        *,
+        inclusive: bool,
+    ) -> ScoreResult | None:
+        """Return None once a monotone partial score is dominated."""
+
+        if profile is None:
+            validation = self.validate_graph(graph)
+        else:
+            started = perf_counter_ns()
+            validation = self.validate_graph(graph)
+            profile.graph_validation_ns += perf_counter_ns() - started
+        if not validation.valid:
+            return ScoreResult(
+                False, (), 10**9, True, simplicity=graph.size()
+            )
+        counts: list[tuple[int, int]] = []
+        weighted = 0
+        total = 0
+        complete = True
+        simplicity = graph.size()
+        node_budget = max(4_096, min(50_000, cap * 1_024))
+        for index, length in enumerate(self.forbidden_lengths(graph.n)):
+            lower_bound = (0, total, weighted, 0, simplicity)
+            if lower_bound > cutoff_key or (
+                inclusive and lower_bound == cutoff_key
+            ):
+                return None
+            weight = max(1, 64 // length)
+            stop_at_count = None
+            for possible_count in range(1, cap + 2):
+                bounded = min(possible_count, cap)
+                possible_key = (
+                    0,
+                    total + bounded,
+                    weighted + bounded * weight,
+                    0,
+                    simplicity,
+                )
+                if possible_key > cutoff_key or (
+                    inclusive and possible_key == cutoff_key
+                ):
+                    stop_at_count = possible_count
+                    break
+            witness_started = (
+                perf_counter_ns() if profile is not None else 0
+            )
+            count_cycles_of_length_bounded_into(
+                graph,
+                length,
+                cap + 1,
+                node_budget,
+                workspace,
+                stop_at_count,
+            )
+            if profile is not None:
+                elapsed = perf_counter_ns() - witness_started
+                profile.witness_counting_ns += elapsed
+                profile.cycle_ns[index] += elapsed
+                profile.cycle_nodes[index] += workspace.visited_nodes
+                profile.cycle_evaluations[index] += 1
+                profile.cycle_cutoff[index] += int(
+                    workspace.cutoff_reached
+                )
+                profile.cycle_complete[index] += int(
+                    not workspace.cutoff_reached
+                    and workspace.complete
+                    and workspace.count <= cap
+                )
+            if workspace.cutoff_reached:
+                return None
+            count = min(workspace.count, cap)
+            counts.append((length, count))
+            total += count
+            weighted += count * weight
+            if workspace.count > cap or not workspace.complete:
+                complete = False
+        return ScoreResult(
+            True,
+            tuple(counts),
+            weighted,
+            complete,
+            simplicity=simplicity,
+        )
+
+    def score_from_cycle_counts(
+        self,
+        graph: BitGraph,
+        cap: int,
+        results: tuple[CycleCountResult, ...],
+        profile: ScoreProfileAccumulator | None,
+    ) -> ScoreResult:
+        """Assemble the ordinary score from a parity-checked count backend."""
+
+        if profile is None:
+            validation = self.validate_graph(graph)
+        else:
+            started = perf_counter_ns()
+            validation = self.validate_graph(graph)
+            profile.graph_validation_ns += perf_counter_ns() - started
+        if not validation.valid:
+            return ScoreResult(
+                False, (), 10**9, True, simplicity=graph.size()
+            )
+        score_started = perf_counter_ns() if profile is not None else 0
+        lengths = self.forbidden_lengths(graph.n)
+        if tuple(result.length for result in results) != lengths:
+            raise ValueError("cycle-count backend returned unexpected lengths")
+        counts: list[tuple[int, int]] = []
+        weighted = 0
+        complete = True
+        for result in results:
+            count = min(result.count, cap)
+            counts.append((result.length, count))
+            weighted += count * max(1, 64 // result.length)
+            complete = (
+                complete
+                and result.count <= cap
+                and result.complete
+            )
+            if profile is not None:
+                self.record_cycle_count_profile(
+                    (result,), profile, cutoff=False
+                )
+        score = ScoreResult(
+            True,
+            tuple(counts),
+            weighted,
+            complete,
+            simplicity=graph.size(),
+        )
+        if profile is not None:
+            profile.score_calculation_ns += (
+                perf_counter_ns() - score_started
+            )
+        return score
+
+    @staticmethod
+    def record_cycle_count_profile(
+        results: tuple[CycleCountResult, ...],
+        profile: ScoreProfileAccumulator,
+        *,
+        cutoff: bool,
+    ) -> None:
+        for index_in_results, result in enumerate(results):
+            index = PROFILED_CYCLE_LENGTHS.index(result.length)
+            profile.witness_counting_ns += result.elapsed_ns
+            profile.cycle_ns[index] += result.elapsed_ns
+            profile.cycle_nodes[index] += result.nodes
+            profile.cycle_evaluations[index] += 1
+            is_cutoff = cutoff and index_in_results == len(results) - 1
+            profile.cycle_cutoff[index] += int(is_cutoff)
+            profile.cycle_complete[index] += int(
+                not is_cutoff and result.complete
+            )
 
     def exact_verify(self, graph: BitGraph) -> VerifyResult:
         return verify_reference(graph)

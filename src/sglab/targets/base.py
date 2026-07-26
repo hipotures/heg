@@ -31,6 +31,13 @@ class ValidationResult:
 
 
 @dataclass(frozen=True, slots=True)
+class MutationResult:
+    graph: BitGraph
+    removed_edges: tuple[tuple[int, int], ...] = ()
+    added_edges: tuple[tuple[int, int], ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class ScoreResult:
     valid: bool
     witness_counts: tuple[tuple[int, int], ...]

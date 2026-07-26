@@ -13,11 +13,17 @@ import dataclasses
 import hashlib
 import json
 import math
+import os
 import resource
 import time
 
 from ..model import BitGraph
 from ..resources import set_address_space_limit
+from ..score_worker import (
+    DEFAULT_WORKER_MEMORY_BYTES,
+    PersistentScoreWorker,
+    ScoreWorkerError,
+)
 from ..state import atomic_write_json, utc_now
 from ..targets import TARGETS
 from ..targets.base import ScoreResult
@@ -48,6 +54,51 @@ TIMING_COUNTER_NAMES = (
 )
 LIVE_FRONTIER_INTERVAL_SECONDS = 1.0
 LIVE_FRONTIER_PAYLOAD_LIMIT_BYTES = 64 * 1024
+SCORE_BACKENDS = frozenset({"python", "shadow", "cpp"})
+LEGACY_GRAPH_KEY_SCHEME = "sha256_graph6_v1"
+FAST_GRAPH_KEY_SCHEME = "zobrist256_v1"
+_UINT64_MASK = (1 << 64) - 1
+
+
+def _splitmix64(value: int) -> int:
+    value = (value + 0x9E3779B97F4A7C15) & _UINT64_MASK
+    value = (
+        (value ^ (value >> 30)) * 0xBF58476D1CE4E5B9
+    ) & _UINT64_MASK
+    value = (
+        (value ^ (value >> 27)) * 0x94D049BB133111EB
+    ) & _UINT64_MASK
+    return value ^ (value >> 31)
+
+
+def _zobrist_token(value: int) -> int:
+    result = 0
+    for domain in range(4):
+        word = _splitmix64(
+            value ^ (0xD6E8FEB86659FD93 * (domain + 1))
+        )
+        result |= word << (domain * 64)
+    return result
+
+
+def _zobrist_graph_key(graph: BitGraph) -> str:
+    value = _zobrist_token(0x8000000000000000 | graph.n)
+    for u, v in graph.edges():
+        value ^= _zobrist_token((u << 32) | v)
+    return f"{value:064x}"
+
+
+def _zobrist_update_key(
+    key: str,
+    *,
+    removed_edges: tuple[tuple[int, int], ...],
+    added_edges: tuple[tuple[int, int], ...],
+) -> str:
+    value = int(key, 16)
+    for edge in (*removed_edges, *added_edges):
+        u, v = sorted(edge)
+        value ^= _zobrist_token((u << 32) | v)
+    return f"{value:064x}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,6 +202,8 @@ class _LaneKernel:
         *,
         instrumentation_enabled: bool = True,
         score_profiling_enabled: bool = True,
+        score_worker_memory_bytes: int = DEFAULT_WORKER_MEMORY_BYTES,
+        score_worker_enabled: bool = True,
     ):
         self.spec = spec
         self.plugin = TARGETS[spec.target]
@@ -186,6 +239,66 @@ class _LaneKernel:
         self._profiled_score = getattr(
             self.plugin, "cheap_score_profiled", None
         )
+        self._count_result_score = getattr(
+            self.plugin, "score_from_cycle_counts", None
+        )
+        self._cutoff_score = getattr(
+            self.plugin, "cheap_score_with_cutoff", None
+        )
+        self._record_count_profile = getattr(
+            self.plugin, "record_cycle_count_profile", None
+        )
+        requested_backend = os.environ.get(
+            "SGLAB_SCORE_BACKEND", "python"
+        ).strip()
+        if requested_backend not in SCORE_BACKENDS:
+            raise ValueError(
+                "SGLAB_SCORE_BACKEND must be python, shadow or cpp"
+            )
+        self.score_backend_requested = requested_backend
+        self.score_backend_effective = "python"
+        early_exit_value = os.environ.get(
+            "SGLAB_SCORE_EARLY_EXIT", "0"
+        ).strip()
+        if early_exit_value not in {"0", "1"}:
+            raise ValueError(
+                "SGLAB_SCORE_EARLY_EXIT must be 0 or 1"
+            )
+        self.score_early_exit_enabled = early_exit_value == "1"
+        fast_key_value = os.environ.get(
+            "SGLAB_FAST_DUPLICATE_KEY", "0"
+        ).strip()
+        if fast_key_value not in {"0", "1"}:
+            raise ValueError(
+                "SGLAB_FAST_DUPLICATE_KEY must be 0 or 1"
+            )
+        self.fast_duplicate_key_enabled = fast_key_value == "1"
+        self.score_worker: PersistentScoreWorker | None = None
+        self.score_backend_batch = {
+            "cpp_requests": 0,
+            "python_audits": 0,
+            "worker_restarts": 0,
+            "fallbacks": 0,
+            "parity_mismatches": 0,
+        }
+        self.score_evaluations = 0
+        if (
+            requested_backend != "python"
+            and score_worker_enabled
+            and self.spec.target == "erdos_gyarfas"
+            and self._count_result_score is not None
+        ):
+            worker = PersistentScoreWorker(
+                memory_limit_bytes=score_worker_memory_bytes
+            )
+            try:
+                worker.start()
+            except ScoreWorkerError:
+                self.score_backend_batch["fallbacks"] += 1
+                worker.close()
+            else:
+                self.score_worker = worker
+                self.score_backend_effective = requested_backend
         self.accepted_ancestry: deque[dict[str, Any]] = deque(
             maxlen=ANCESTRY_LIMIT
         )
@@ -202,6 +315,22 @@ class _LaneKernel:
         self.actual_restarts = 0
         self.recent_hashes: deque[str] = deque(maxlen=4096)
         self.recent_hash_set: set[str] = set()
+        checkpoint_key_scheme = (
+            str(checkpoint.get("tabu_key_scheme"))
+            if checkpoint is not None
+            and checkpoint.get("tabu_key_scheme") is not None
+            else LEGACY_GRAPH_KEY_SCHEME
+        )
+        self.tabu_key_scheme = (
+            FAST_GRAPH_KEY_SCHEME
+            if self.fast_duplicate_key_enabled
+            and (
+                checkpoint is None
+                or fork_seed is not None
+                or self.algorithm == "random_restart"
+            )
+            else checkpoint_key_scheme
+        )
         if checkpoint is None:
             self._new_seed(spec.seed)
         else:
@@ -225,14 +354,15 @@ class _LaneKernel:
             restored_tabu = (
                 checkpoint.get("tabu", [])
                 if fork_seed is None
-                else [self.graph.stable_hash()]
+                else [self._full_search_key(self.graph)]
             )
             self.tabu = deque(
                 (str(value) for value in restored_tabu),
                 maxlen=int(self.parameters.get("tabu_tenure", 128)),
             )
             if not self.tabu:
-                self.tabu.append(self.graph.stable_hash())
+                self.tabu.append(self._full_search_key(self.graph))
+            self.current_graph_key = self._full_search_key(self.graph)
             self.accepted_ancestry = deque(
                 (
                     dict(value)
@@ -265,6 +395,11 @@ class _LaneKernel:
 
     def _new_seed(self, seed: int) -> None:
         self.rng = Random(seed)
+        self.tabu_key_scheme = (
+            FAST_GRAPH_KEY_SCHEME
+            if self.fast_duplicate_key_enabled
+            else LEGACY_GRAPH_KEY_SCHEME
+        )
         self.graph = self.plugin.generate_seed(
             self.rng,
             {"order": int(self.parameters["order"]), "mode": self.mode},
@@ -281,7 +416,8 @@ class _LaneKernel:
         self.algorithm_evaluated = 0
         self.stagnation = 0
         self.tabu.clear()
-        self.tabu.append(self.graph.stable_hash())
+        self.current_graph_key = self._full_search_key(self.graph)
+        self.tabu.append(self.current_graph_key)
         self.recent_hashes.clear()
         self.recent_hash_set.clear()
         self.live_frontier_state = (
@@ -298,6 +434,12 @@ class _LaneKernel:
         self, checkpoint: dict[str, Any], seed: int
     ) -> None:
         self.graph = BitGraph.from_graph6(str(checkpoint["graph6"]))
+        self.tabu_key_scheme = str(
+            checkpoint.get(
+                "tabu_key_scheme", LEGACY_GRAPH_KEY_SCHEME
+            )
+        )
+        self.current_graph_key = self._full_search_key(self.graph)
         self.score = _score_from_payload(checkpoint["score"])
         self.best_graph = BitGraph.from_graph6(
             str(checkpoint.get("best_graph6", checkpoint["graph6"]))
@@ -331,7 +473,7 @@ class _LaneKernel:
         self.algorithm_evaluated = 0
         self.stagnation = 0
         self.tabu.clear()
-        self.tabu.append(self.graph.stable_hash())
+        self.tabu.append(self.current_graph_key)
         self.recent_hashes.clear()
         self.recent_hash_set.clear()
         self.live_frontier_state = (
@@ -372,6 +514,8 @@ class _LaneKernel:
                 self.timing_ns[name] = 0
         if self.score_profile is not None:
             self.score_profile.reset()
+        for name in self.score_backend_batch:
+            self.score_backend_batch[name] = 0
         started = time.perf_counter()
         deadline = (
             started + max_wall_seconds
@@ -384,6 +528,7 @@ class _LaneKernel:
         global_records: list[dict[str, Any]] = []
         ancestry_operator_statistics: dict[str, dict[str, int]] = {}
         evaluated = accepted = legal = improvements = duplicates = 0
+        early_rejected = 0
         accepted_at_last_record = 0
         for _ in range(target):
             if stop_event.is_set():
@@ -414,24 +559,36 @@ class _LaneKernel:
                 {"uses": 0, "accepted": 0, "global_records": 0},
             )
             operator_counts["uses"] += 1
-            candidate = (
-                self.plugin.generate_seed(
+            mutation_delta = None
+            if self.algorithm == "random_restart":
+                candidate = self.plugin.generate_seed(
                     self.rng,
                     {
                         "order": int(self.parameters["order"]),
                         "mode": self.mode,
                     },
                 )
-                if self.algorithm == "random_restart"
-                else self.plugin.mutate(
-                    self.graph,
-                    self.rng,
-                    {
-                        "mode": self.mode,
-                        "mutation_operator": mutation_operator,
-                    },
+            else:
+                mutation_config = {
+                    "mode": self.mode,
+                    "mutation_operator": mutation_operator,
+                }
+                mutate_with_delta = getattr(
+                    self.plugin, "mutate_with_delta", None
                 )
-            )
+                if mutate_with_delta is None:
+                    candidate = self.plugin.mutate(
+                        self.graph,
+                        self.rng,
+                        mutation_config,
+                    )
+                else:
+                    mutation_delta = mutate_with_delta(
+                        self.graph,
+                        self.rng,
+                        mutation_config,
+                    )
+                    candidate = mutation_delta.graph
             if self.timing_ns is not None:
                 self.timing_ns["mutation_generation"] += (
                     time.perf_counter_ns() - mutation_started
@@ -452,7 +609,7 @@ class _LaneKernel:
                 if self.timing_ns is not None
                 else 0
             )
-            key = candidate.stable_hash()
+            key = self._candidate_search_key(candidate, mutation_delta)
             if key in self.recent_hash_set:
                 duplicates += 1
             self._remember_hash(key)
@@ -460,10 +617,37 @@ class _LaneKernel:
                 self.timing_ns["duplicate_detection"] += (
                     time.perf_counter_ns() - duplicate_started
                 )
-            candidate_score = self._score(candidate)
+            score_cutoff = self._score_cutoff(key)
+            candidate_score = self._score(candidate, score_cutoff)
+            if candidate_score is None:
+                early_rejected += 1
+                self.stagnation += 1
+                self.live_frontier_state = (
+                    self.graph,
+                    self.score,
+                    self.current_candidate_id,
+                    self.high_water + evaluated,
+                )
+                continue
             score_counts_truncated = (
                 score_counts_truncated or not candidate_score.complete
             )
+            global_record = (
+                candidate_score.ordering_key
+                < self.best_score.ordering_key
+            )
+            if (
+                global_record
+                and self.score_backend_effective == "cpp"
+            ):
+                candidate_score = self._audit_cpp_global_record(
+                    candidate,
+                    candidate_score,
+                )
+                global_record = (
+                    candidate_score.ordering_key
+                    < self.best_score.ordering_key
+                )
             tabu_started = (
                 time.perf_counter_ns()
                 if self.timing_ns is not None
@@ -480,10 +664,6 @@ class _LaneKernel:
                 self.timing_ns["tabu_bookkeeping"] += (
                     time.perf_counter_ns() - tabu_started
                 )
-            global_record = (
-                candidate_score.ordering_key
-                < self.best_score.ordering_key
-            )
             mutation_record: dict[str, Any] | None = None
             if self.instrumentation_enabled and (accept or global_record):
                 ancestry_started = time.perf_counter_ns()
@@ -508,6 +688,7 @@ class _LaneKernel:
             if accept:
                 self.graph = candidate
                 self.score = candidate_score
+                self.current_graph_key = key
                 if mutation_record is not None:
                     self.accepted_ancestry.append(mutation_record)
                     self.current_candidate_id = str(
@@ -607,6 +788,7 @@ class _LaneKernel:
             "legal": legal,
             "improvements": improvements,
             "duplicates": duplicates,
+            "early_rejected": early_rejected,
             "elapsed_seconds": elapsed,
             "candidates_per_second": evaluated / elapsed,
             "acceptance_rate": accepted / max(1, legal),
@@ -652,6 +834,19 @@ class _LaneKernel:
             ),
             "termination_reason": termination_reason,
             "end_high_water": self.high_water,
+            "score_backend": {
+                "requested": self.score_backend_requested,
+                "effective": self.score_backend_effective,
+                "early_exit_enabled": self.score_early_exit_enabled,
+                "duplicate_key_scheme": self.tabu_key_scheme,
+                "score_worker_protocol_version": 1,
+                "score_worker_sha256": (
+                    self.score_worker.binary_sha256
+                    if self.score_worker is not None
+                    else None
+                ),
+                **self.score_backend_batch,
+            },
         }
         if self.timing_ns is not None:
             if self.score_profile is not None:
@@ -719,6 +914,33 @@ class _LaneKernel:
             self.tabu.append(key)
         return accept
 
+    def _full_search_key(self, graph: BitGraph) -> str:
+        if self.tabu_key_scheme == FAST_GRAPH_KEY_SCHEME:
+            return _zobrist_graph_key(graph)
+        return graph.stable_hash()
+
+    def _candidate_search_key(
+        self,
+        graph: BitGraph,
+        mutation_delta: Any | None,
+    ) -> str:
+        if self.tabu_key_scheme != FAST_GRAPH_KEY_SCHEME:
+            return graph.stable_hash()
+        if (
+            mutation_delta is not None
+            and mutation_delta.graph == graph
+            and (
+                mutation_delta.removed_edges
+                or mutation_delta.added_edges
+            )
+        ):
+            return _zobrist_update_key(
+                self.current_graph_key,
+                removed_edges=mutation_delta.removed_edges,
+                added_edges=mutation_delta.added_edges,
+            )
+        return _zobrist_graph_key(graph)
+
     def _remember_hash(self, key: str) -> None:
         if len(self.recent_hashes) == self.recent_hashes.maxlen:
             removed = self.recent_hashes.popleft()
@@ -727,10 +949,182 @@ class _LaneKernel:
         self.recent_hashes.append(key)
         self.recent_hash_set.add(key)
 
-    def _score(self, graph: BitGraph) -> ScoreResult:
+    def _score_cutoff(
+        self, key: str
+    ) -> tuple[tuple[int, int, int, int, int], bool] | None:
+        if (
+            not self.score_early_exit_enabled
+            or self.algorithm not in {
+                "iterated_local_search",
+                "iterated_local_search_tabu",
+            }
+        ):
+            return None
+        perturb = int(self.parameters.get("perturbation_interval", 64))
+        if self.algorithm_evaluated % perturb == 0:
+            return None
+        if key in self.tabu:
+            return self.best_score.ordering_key, True
+        return self.score.ordering_key, False
+
+    def _score(
+        self,
+        graph: BitGraph,
+        cutoff: (
+            tuple[tuple[int, int, int, int, int], bool] | None
+        ) = None,
+    ) -> ScoreResult | None:
+        self.score_evaluations += 1
+        if (
+            self.score_backend_effective in {"cpp", "shadow"}
+            and self.score_worker is not None
+        ):
+            cpp_score = self._cpp_score_with_fallback(graph, cutoff)
+            if self.score_backend_effective == "python":
+                return cpp_score
+            if self.score_backend_effective == "shadow":
+                python_score = self._python_score(graph, cutoff=cutoff)
+                self.score_backend_batch["python_audits"] += 1
+                if cpp_score != python_score:
+                    self.score_backend_batch["parity_mismatches"] += 1
+                    raise RuntimeError(
+                        "persistent C++ score differs from Python oracle"
+                    )
+                return python_score
+            if self.score_backend_effective == "cpp":
+                if self.score_evaluations % 4096 == 0:
+                    python_score = self._python_score(
+                        graph,
+                        record_profile=False,
+                        cutoff=cutoff,
+                    )
+                    self.score_backend_batch["python_audits"] += 1
+                    if cpp_score != python_score:
+                        self.score_backend_batch[
+                            "parity_mismatches"
+                        ] += 1
+                        self._disable_score_worker()
+                        return python_score
+                return cpp_score
+            return self._python_score(graph, cutoff=cutoff)
+        return self._python_score(graph, cutoff=cutoff)
+
+    def _audit_cpp_global_record(
+        self,
+        graph: BitGraph,
+        cpp_score: ScoreResult,
+    ) -> ScoreResult:
+        python_score = self._python_score(
+            graph,
+            record_profile=False,
+            cutoff=None,
+        )
+        if python_score is None:
+            raise RuntimeError("full Python score unexpectedly returned no result")
+        self.score_backend_batch["python_audits"] += 1
+        if cpp_score != python_score:
+            self.score_backend_batch["parity_mismatches"] += 1
+            self._disable_score_worker()
+            return python_score
+        return cpp_score
+
+    def _cpp_score_with_fallback(
+        self,
+        graph: BitGraph,
+        cutoff: (
+            tuple[tuple[int, int, int, int, int], bool] | None
+        ),
+    ) -> ScoreResult | None:
+        worker = self.score_worker
+        if worker is None or self._count_result_score is None:
+            return self._python_score(graph, cutoff=cutoff)
+        cap = int(self.parameters["witness_cap"])
+        node_budget = max(4_096, min(50_000, cap * 1_024))
+        for attempt in range(2):
+            try:
+                response = worker.score(
+                    graph,
+                    limit=cap + 1,
+                    node_budget=node_budget,
+                    cutoff=(
+                        (
+                            cutoff[0][1],
+                            cutoff[0][2],
+                            cutoff[0][4],
+                        )
+                        if cutoff is not None
+                        else None
+                    ),
+                    cutoff_inclusive=(
+                        cutoff[1] if cutoff is not None else False
+                    ),
+                )
+                self.score_backend_batch["cpp_requests"] += 1
+                if response.dominated:
+                    if (
+                        self.score_profile is not None
+                        and self.score_backend_effective == "cpp"
+                        and self._record_count_profile is not None
+                    ):
+                        self._record_count_profile(
+                            response.results,
+                            self.score_profile,
+                            cutoff=True,
+                        )
+                    return None
+                return self._count_result_score(
+                    graph,
+                    cap,
+                    response.results,
+                    (
+                        self.score_profile
+                        if self.score_backend_effective == "cpp"
+                        else None
+                    ),
+                )
+            except (OSError, ScoreWorkerError, ValueError):
+                if attempt == 0:
+                    self.score_backend_batch["worker_restarts"] += 1
+                    try:
+                        worker.restart()
+                    except ScoreWorkerError:
+                        break
+        self.score_backend_batch["fallbacks"] += 1
+        self._disable_score_worker()
+        return self._python_score(graph, cutoff=cutoff)
+
+    def _disable_score_worker(self) -> None:
+        if self.score_worker is not None:
+            self.score_worker.close()
+            self.score_worker = None
+        self.score_backend_effective = "python"
+
+    def _python_score(
+        self,
+        graph: BitGraph,
+        *,
+        record_profile: bool = True,
+        cutoff: (
+            tuple[tuple[int, int, int, int, int], bool] | None
+        ) = None,
+    ) -> ScoreResult | None:
         cap = int(self.parameters["witness_cap"])
         if (
-            self.score_profile is not None
+            cutoff is not None
+            and self._cutoff_score is not None
+            and self.score_workspace is not None
+        ):
+            return self._cutoff_score(
+                graph,
+                cap,
+                self.score_workspace,
+                self.score_profile if record_profile else None,
+                cutoff[0],
+                inclusive=cutoff[1],
+            )
+        if (
+            record_profile
+            and self.score_profile is not None
             and self._profiled_score is not None
             and self.score_workspace is not None
         ):
@@ -750,6 +1144,11 @@ class _LaneKernel:
             return score
         return self.plugin.cheap_score(graph, cap)
 
+    def close(self) -> None:
+        if self.score_worker is not None:
+            self.score_worker.close()
+            self.score_worker = None
+
     def checkpoint(self, lane_version: int) -> dict[str, Any]:
         payload = {
             "lane_id": self.spec.lane_id,
@@ -762,6 +1161,7 @@ class _LaneKernel:
             "algorithm_evaluated": self.algorithm_evaluated,
             "stagnation": self.stagnation,
             "tabu": list(self.tabu),
+            "tabu_key_scheme": self.tabu_key_scheme,
             "parameters": dict(self.parameters),
             "high_water": self.high_water,
             "accepted_ancestry": list(self.accepted_ancestry),
@@ -851,13 +1251,31 @@ def _lane_worker(
 ) -> None:
     preview_stop: Event | None = None
     preview_thread: Thread | None = None
+    kernel: _LaneKernel | None = None
     try:
-        set_address_space_limit(memory_limit_bytes)
+        requested_backend = os.environ.get(
+            "SGLAB_SCORE_BACKEND", "python"
+        ).strip()
+        worker_enabled = (
+            requested_backend in {"shadow", "cpp"}
+            and (
+                memory_limit_bytes is None
+                or memory_limit_bytes >= 128 * 1024 * 1024
+            )
+        )
+        parent_memory_limit = memory_limit_bytes
+        if worker_enabled and memory_limit_bytes is not None:
+            parent_memory_limit = (
+                memory_limit_bytes - DEFAULT_WORKER_MEMORY_BYTES
+            )
+        set_address_space_limit(parent_memory_limit)
         kernel = _LaneKernel(
             spec,
             checkpoint,
             fork_seed,
             score_profiling_enabled=score_profiling_enabled,
+            score_worker_memory_bytes=DEFAULT_WORKER_MEMORY_BYTES,
+            score_worker_enabled=worker_enabled,
         )
         lane_version = spec.lane_version
         resource_share = spec.resource_share
@@ -987,6 +1405,8 @@ def _lane_worker(
             preview_stop.set()
         if preview_thread is not None:
             preview_thread.join(timeout=1)
+        if kernel is not None:
+            kernel.close()
 
 
 def _apply_commands(
@@ -1737,12 +2157,15 @@ def replay_micro_batches(
     kernel = _LaneKernel(spec, checkpoint, fork_seed=None)
     metrics = []
     stop = _NeverStop()
-    for _ in range(batches):
-        metrics.append(kernel.run_batch(stop))
-    return {
-        "metrics": metrics,
-        "checkpoint": kernel.checkpoint(spec.lane_version),
-    }
+    try:
+        for _ in range(batches):
+            metrics.append(kernel.run_batch(stop))
+        return {
+            "metrics": metrics,
+            "checkpoint": kernel.checkpoint(spec.lane_version),
+        }
+    finally:
+        kernel.close()
 
 
 def run_bounded_lane_batch(
@@ -1767,51 +2190,58 @@ def run_bounded_lane_batch(
         instrumentation_enabled=instrumentation_enabled,
         score_profiling_enabled=score_profiling_enabled,
     )
-    metrics = kernel.run_batch(
-        _NeverStop(),
-        max_evaluations=max_evaluations,
-        max_wall_seconds=max_wall_seconds,
-    )
-    checkpoint = kernel.checkpoint(spec.lane_version)
-    graph6 = kernel.best_graph.to_graph6()
-    graph_sha256 = hashlib.sha256(graph6.encode("ascii")).hexdigest()
-    verification_started = (
-        time.perf_counter()
-        if instrumentation_enabled
-        else 0.0
-    )
-    verification = kernel.plugin.exact_verify(kernel.best_graph)
-    if instrumentation_enabled:
-        add_external_timing(
-            metrics,
-            "exact_final_verification",
-            time.perf_counter() - verification_started,
+    try:
+        metrics = kernel.run_batch(
+            _NeverStop(),
+            max_evaluations=max_evaluations,
+            max_wall_seconds=max_wall_seconds,
         )
-    return {
-        "algorithm": spec.algorithm,
-        "parameters": dict(spec.parameters),
-        "seed": spec.seed,
-        "graph_family": spec.graph_family,
-        "graph_order": kernel.best_graph.n,
-        "evaluation_count": int(metrics["evaluated"]),
-        "throughput": float(metrics["candidates_per_second"]),
-        "elapsed_seconds": float(metrics["elapsed_seconds"]),
-        "peak_rss_bytes": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-        * 1024,
-        "initial_score": metrics["initial_score"],
-        "best_score": _score_payload(kernel.best_score),
-        "score_trajectory_summary": metrics["score_trajectory_summary"],
-        "operator_statistics": metrics["operator_statistics"],
-        "mutation_ancestry": metrics["mutation_ancestry"],
-        "timing": metrics.get(
-            "timing",
-            {"enabled": False, "counters_seconds": {}},
-        ),
-        "best_candidate_identifier": kernel.best_candidate_id,
-        "best_graph6": graph6,
-        "best_graph_sha256": graph_sha256,
-        "verifier_result": dataclasses.asdict(verification),
-        "termination_reason": metrics["termination_reason"],
-        "metrics": metrics,
-        "checkpoint": checkpoint,
-    }
+        checkpoint = kernel.checkpoint(spec.lane_version)
+        graph6 = kernel.best_graph.to_graph6()
+        graph_sha256 = hashlib.sha256(graph6.encode("ascii")).hexdigest()
+        verification_started = (
+            time.perf_counter()
+            if instrumentation_enabled
+            else 0.0
+        )
+        verification = kernel.plugin.exact_verify(kernel.best_graph)
+        if instrumentation_enabled:
+            add_external_timing(
+                metrics,
+                "exact_final_verification",
+                time.perf_counter() - verification_started,
+            )
+        return {
+            "algorithm": spec.algorithm,
+            "parameters": dict(spec.parameters),
+            "seed": spec.seed,
+            "graph_family": spec.graph_family,
+            "graph_order": kernel.best_graph.n,
+            "evaluation_count": int(metrics["evaluated"]),
+            "throughput": float(metrics["candidates_per_second"]),
+            "elapsed_seconds": float(metrics["elapsed_seconds"]),
+            "peak_rss_bytes": resource.getrusage(
+                resource.RUSAGE_SELF
+            ).ru_maxrss
+            * 1024,
+            "initial_score": metrics["initial_score"],
+            "best_score": _score_payload(kernel.best_score),
+            "score_trajectory_summary": metrics[
+                "score_trajectory_summary"
+            ],
+            "operator_statistics": metrics["operator_statistics"],
+            "mutation_ancestry": metrics["mutation_ancestry"],
+            "timing": metrics.get(
+                "timing",
+                {"enabled": False, "counters_seconds": {}},
+            ),
+            "best_candidate_identifier": kernel.best_candidate_id,
+            "best_graph6": graph6,
+            "best_graph_sha256": graph_sha256,
+            "verifier_result": dataclasses.asdict(verification),
+            "termination_reason": metrics["termination_reason"],
+            "metrics": metrics,
+            "checkpoint": checkpoint,
+        }
+    finally:
+        kernel.close()

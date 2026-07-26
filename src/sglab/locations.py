@@ -29,3 +29,17 @@ def cyclecheck_path() -> Path:
             return source_binary
     installed = which("sglab-cyclecheck")
     return Path(installed) if installed is not None else Path("sglab-cyclecheck")
+
+
+def score_worker_path() -> Path:
+    root = source_root()
+    if root is not None:
+        source_binary = root / "_build" / "sglab-score-worker"
+        if source_binary.is_file():
+            return source_binary
+    installed = which("sglab-score-worker")
+    return (
+        Path(installed)
+        if installed is not None
+        else Path("sglab-score-worker")
+    )

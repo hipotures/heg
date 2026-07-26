@@ -43,6 +43,33 @@ def current_rss_bytes(pid: int | None = None) -> int:
     return 0
 
 
+def process_tree_rss_bytes(pid: int) -> int:
+    """Return RSS for one process and its current Linux descendants."""
+
+    pending = [pid]
+    seen: set[int] = set()
+    total = 0
+    while pending:
+        current = pending.pop()
+        if current in seen or current <= 0:
+            continue
+        seen.add(current)
+        total += current_rss_bytes(current)
+        children_path = Path(
+            f"/proc/{current}/task/{current}/children"
+        )
+        try:
+            pending.extend(
+                int(value)
+                for value in children_path.read_text(
+                    encoding="ascii"
+                ).split()
+            )
+        except (FileNotFoundError, PermissionError, ValueError):
+            continue
+    return total
+
+
 def disk_free_bytes(path: str | Path) -> int:
     return shutil.disk_usage(Path(path)).free
 

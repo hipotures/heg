@@ -12,7 +12,14 @@ import platform
 import sys
 import tempfile
 
-from .benchmark import calibrate, hardware_metadata, microbenchmark, soak, write_report
+from .benchmark import (
+    calibrate,
+    hardware_metadata,
+    microbenchmark,
+    score_kernel_benchmark,
+    soak,
+    write_report,
+)
 from .model import BitGraph
 from .certification import certify, verify_cpp
 from .config import load_config
@@ -25,7 +32,7 @@ from .comparisons import (
 from .comparison_worker import ComparisonWorker
 from .db import connect
 from .external import TOOLS
-from .locations import asset_path, cyclecheck_path
+from .locations import asset_path, cyclecheck_path, score_worker_path
 from .resources import run_bounded
 from .research.app_server_protocol import generate_protocol_preflight
 from .research.auth import (
@@ -101,6 +108,16 @@ def cmd_doctor(_: Namespace) -> int:
         if cyclecheck.is_file()
         else None
     )
+    score_worker = score_worker_path()
+    score_worker_version = (
+        run_bounded(
+            [str(score_worker), "--version"],
+            timeout_seconds=5,
+            output_limit_bytes=4096,
+        )
+        if score_worker.is_file()
+        else None
+    )
     report = {
         "python": platform.python_version(),
         "python_supported": tuple(map(int, platform.python_version_tuple()[:2]))
@@ -114,6 +131,18 @@ def cmd_doctor(_: Namespace) -> int:
             "version": (
                 cycle_version.stdout.decode("utf-8", errors="replace").strip()
                 if cycle_version is not None and cycle_version.status == "OK"
+                else None
+            ),
+        },
+        "score_worker": {
+            "path": str(score_worker),
+            "available": score_worker.is_file(),
+            "version": (
+                score_worker_version.stdout.decode(
+                    "utf-8", errors="replace"
+                ).strip()
+                if score_worker_version is not None
+                and score_worker_version.status == "OK"
                 else None
             ),
         },
@@ -383,6 +412,12 @@ def cmd_benchmark(args: Namespace) -> int:
         return 0
     if args.benchmark_command == "calibrate":
         report = calibrate(args.minutes, seeds=args.seeds, jobs=args.jobs)
+    elif args.benchmark_command == "score-kernel":
+        report = score_kernel_benchmark(
+            iterations=args.iterations,
+            backend_evaluations=args.backend_evaluations,
+            search_evaluations=args.search_evaluations,
+        )
     elif args.benchmark_command == "soak":
         report = soak(
             _workspace(args.workspace),
@@ -859,6 +894,12 @@ def build_parser() -> ArgumentParser:
     micro.add_argument("--iterations", type=int, default=10)
     micro.add_argument("--output", required=True)
     micro.set_defaults(func=cmd_benchmark)
+    score_kernel = benchmark_commands.add_parser("score-kernel")
+    score_kernel.add_argument("--iterations", type=int, default=7)
+    score_kernel.add_argument("--backend-evaluations", type=int, default=100)
+    score_kernel.add_argument("--search-evaluations", type=int, default=1000)
+    score_kernel.add_argument("--output", required=True)
+    score_kernel.set_defaults(func=cmd_benchmark)
     soak_parser = benchmark_commands.add_parser("soak")
     soak_parser.add_argument("--hours", type=float, default=2)
     soak_parser.add_argument("--order", type=int, default=32)

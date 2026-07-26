@@ -194,6 +194,7 @@ class CycleCountWorkspace:
     count: int = 0
     complete: bool = True
     visited_nodes: int = 0
+    cutoff_reached: bool = False
 
     @classmethod
     def for_order(cls, order: int) -> "CycleCountWorkspace":
@@ -332,6 +333,7 @@ def count_cycles_of_length_bounded_into(
     limit: int,
     node_budget: int | None,
     workspace: CycleCountWorkspace,
+    stop_at_count: int | None = None,
 ) -> None:
     if len(workspace.seen_at) < length or len(workspace.available_at) < length:
         raise ValueError("cycle-count workspace is smaller than the cycle length")
@@ -339,6 +341,7 @@ def count_cycles_of_length_bounded_into(
     count = 0
     visited_nodes = 0
     budget_exhausted = False
+    cutoff_reached = False
     rows = graph.rows
     seen_at = workspace.seen_at
     available_at = workspace.available_at
@@ -378,6 +381,12 @@ def count_cycles_of_length_bounded_into(
             if child_depth == length:
                 if rows[nxt] & start_bit and first_neighbor < nxt:
                     count += 1
+                    if (
+                        stop_at_count is not None
+                        and count >= stop_at_count
+                    ):
+                        cutoff_reached = True
+                        break
                     if count >= limit:
                         break
                 continue
@@ -385,9 +394,14 @@ def count_cycles_of_length_bounded_into(
             available_at[depth] = rows[nxt] & ~seen & greater_mask
             depth = child_depth
 
-        if count >= limit or budget_exhausted:
+        if count >= limit or budget_exhausted or cutoff_reached:
             break
 
     workspace.count = count
-    workspace.complete = not budget_exhausted and count < limit
+    workspace.complete = (
+        not budget_exhausted
+        and not cutoff_reached
+        and count < limit
+    )
     workspace.visited_nodes = visited_nodes
+    workspace.cutoff_reached = cutoff_reached

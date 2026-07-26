@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import replace
 from http.client import HTTPConnection
 from pathlib import Path
@@ -311,6 +312,7 @@ def microbenchmark(
             ),
             iterations,
         )
+        pipeline_kernel.close()
     operations["tiny_cegar_n4"] = _measure(lambda: tiny_cegar(4), iterations)
     return {
         "benchmark_id": f"micro-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}",
@@ -325,6 +327,311 @@ def microbenchmark(
         },
         "peak_rss_bytes": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024,
         "peak_rss_source": "resource.getrusage fallback before CLI hardware audit",
+    }
+
+
+@contextmanager
+def _score_environment(**values: str) -> Iterable[None]:
+    previous = {name: os.environ.get(name) for name in values}
+    os.environ.update(values)
+    try:
+        yield
+    finally:
+        for name, value in previous.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+
+def _score_benchmark_spec(
+    *,
+    order: int,
+    evaluations: int,
+    algorithm: str,
+) -> LaneSpec:
+    return LaneSpec(
+        lane_id=f"lane-score-benchmark-{order}-{algorithm}",
+        campaign_id="campaign-score-benchmark",
+        target="erdos_gyarfas",
+        algorithm=algorithm,
+        graph_family="unrestricted_min_degree_3",
+        seed=20260726 + order,
+        parameters={
+            "order": order,
+            "batch_candidates": evaluations,
+            "witness_cap": 2000,
+            "tabu_tenure": 128,
+            "perturbation_interval": 64,
+        },
+        resource_share=1.0,
+    )
+
+
+def _logical_score_state(kernel: _LaneKernel) -> tuple[Any, ...]:
+    checkpoint = kernel.checkpoint(0)
+    return (
+        checkpoint["graph6"],
+        checkpoint["score"],
+        checkpoint["best_graph6"],
+        checkpoint["best_score"],
+        checkpoint["rng_state"],
+        kernel.total_accepted,
+        kernel.total_improvements,
+    )
+
+
+def _run_score_case(
+    *,
+    order: int,
+    evaluations: int,
+    algorithm: str,
+    backend: str,
+    early_exit: bool,
+    fast_duplicate_key: bool,
+    profiling: bool,
+) -> dict[str, Any]:
+    with _score_environment(
+        SGLAB_SCORE_BACKEND=backend,
+        SGLAB_SCORE_EARLY_EXIT="1" if early_exit else "0",
+        SGLAB_FAST_DUPLICATE_KEY="1" if fast_duplicate_key else "0",
+    ):
+        kernel = _LaneKernel(
+            _score_benchmark_spec(
+                order=order,
+                evaluations=evaluations,
+                algorithm=algorithm,
+            ),
+            checkpoint=None,
+            fork_seed=None,
+            instrumentation_enabled=True,
+            score_profiling_enabled=profiling,
+        )
+        try:
+            metrics = kernel.run_batch(
+                type(
+                    "_ScoreBenchmarkStop",
+                    (),
+                    {"is_set": lambda self: False},
+                )(),
+                max_evaluations=evaluations,
+            )
+            return {
+                "candidates_per_second": metrics["candidates_per_second"],
+                "elapsed_seconds": metrics["elapsed_seconds"],
+                "accepted": metrics["accepted"],
+                "improvements": metrics["improvements"],
+                "early_rejected": metrics["early_rejected"],
+                "score_backend": metrics["score_backend"],
+                "timing": metrics.get("timing"),
+                "logical_state": _logical_score_state(kernel),
+            }
+        finally:
+            kernel.close()
+
+
+def _alternating_score_comparison(
+    *,
+    iterations: int,
+    left: dict[str, Any],
+    right: dict[str, Any],
+) -> dict[str, Any]:
+    left_runs: list[dict[str, Any]] = []
+    right_runs: list[dict[str, Any]] = []
+    for iteration in range(iterations):
+        sequence = (
+            (("left", left), ("right", right))
+            if iteration % 2 == 0
+            else (("right", right), ("left", left))
+        )
+        pair: dict[str, dict[str, Any]] = {}
+        for name, arguments in sequence:
+            pair[name] = _run_score_case(**arguments)
+        left_runs.append(pair["left"])
+        right_runs.append(pair["right"])
+    left_rates = [run["candidates_per_second"] for run in left_runs]
+    right_rates = [run["candidates_per_second"] for run in right_runs]
+    return {
+        "left": {
+            "settings": left,
+            "throughput_samples": left_rates,
+            "median_candidates_per_second": median(left_rates),
+        },
+        "right": {
+            "settings": right,
+            "throughput_samples": right_rates,
+            "median_candidates_per_second": median(right_rates),
+        },
+        "right_over_left": median(right_rates) / median(left_rates),
+        "logical_trajectory_equal": all(
+            left_run["logical_state"] == right_run["logical_state"]
+            for left_run, right_run in zip(left_runs, right_runs, strict=True)
+        ),
+        "left_runs": left_runs,
+        "right_runs": right_runs,
+    }
+
+
+def score_kernel_benchmark(
+    *,
+    iterations: int = 7,
+    backend_evaluations: int = 100,
+    search_evaluations: int = 1000,
+) -> dict[str, Any]:
+    if iterations < 1:
+        raise ValueError("iterations must be positive")
+    if backend_evaluations < 1 or search_evaluations < 1:
+        raise ValueError("evaluation counts must be positive")
+
+    backend: dict[str, Any] = {}
+    for order in (64, 96):
+        common = {
+            "order": order,
+            "evaluations": backend_evaluations,
+            "algorithm": "random_restart",
+            "early_exit": False,
+            "fast_duplicate_key": False,
+            "profiling": False,
+        }
+        backend[str(order)] = _alternating_score_comparison(
+            iterations=iterations,
+            left={**common, "backend": "python"},
+            right={**common, "backend": "cpp"},
+        )
+
+    search_common = {
+        "order": 96,
+        "evaluations": search_evaluations,
+        "algorithm": "iterated_local_search_tabu",
+        "backend": "cpp",
+        "profiling": True,
+    }
+    early_exit = _alternating_score_comparison(
+        iterations=iterations,
+        left={
+            **search_common,
+            "early_exit": False,
+            "fast_duplicate_key": False,
+        },
+        right={
+            **search_common,
+            "early_exit": True,
+            "fast_duplicate_key": False,
+        },
+    )
+    duplicate_key = _alternating_score_comparison(
+        iterations=iterations,
+        left={
+            **search_common,
+            "early_exit": True,
+            "fast_duplicate_key": False,
+        },
+        right={
+            **search_common,
+            "early_exit": True,
+            "fast_duplicate_key": True,
+        },
+    )
+    profiling_common = {
+        "order": 96,
+        "evaluations": search_evaluations,
+        "algorithm": "iterated_local_search_tabu",
+        "backend": "cpp",
+        "early_exit": True,
+        "fast_duplicate_key": True,
+    }
+    profiling = _alternating_score_comparison(
+        iterations=iterations,
+        left={**profiling_common, "profiling": False},
+        right={**profiling_common, "profiling": True},
+    )
+    profiling_overhead = 1.0 - profiling["right_over_left"]
+    completeness_run = profiling["right_runs"][-1]
+    timing = completeness_run.get("timing") or {}
+    raw_score_profile = timing.get("score_profile") or {}
+    cycle_profile = {
+        str(length): {
+            "nanoseconds": int(
+                raw_score_profile.get(f"cycle_{length}_ns", 0)
+            ),
+            "dfs_nodes": int(
+                raw_score_profile.get(f"cycle_{length}_nodes", 0)
+            ),
+            "evaluations": int(
+                raw_score_profile.get(f"cycle_{length}_evaluations", 0)
+            ),
+            "complete_evaluations": int(
+                raw_score_profile.get(f"cycle_{length}_complete", 0)
+            ),
+            "cutoff_evaluations": int(
+                raw_score_profile.get(f"cycle_{length}_cutoff", 0)
+            ),
+        }
+        for length in (4, 8, 16, 32, 64, 128)
+    }
+    dominant_lengths = ("16", "32", "64")
+    complete_evaluations = sum(
+        int((cycle_profile.get(length) or {}).get("complete_evaluations", 0))
+        for length in dominant_lengths
+    )
+    total_evaluations = sum(
+        int((cycle_profile.get(length) or {}).get("evaluations", 0))
+        for length in dominant_lengths
+    )
+    complete_fraction = complete_evaluations / max(1, total_evaluations)
+
+    return {
+        "benchmark_id": (
+            f"score-kernel-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}"
+        ),
+        "created_at": utc_now(),
+        "kind": "score_kernel",
+        "iterations": iterations,
+        "backend_comparison": backend,
+        "early_exit_comparison": early_exit,
+        "duplicate_key_comparison": duplicate_key,
+        "profiling_comparison": {
+            **profiling,
+            "overhead_fraction": profiling_overhead,
+            "overhead_gate_below_2_percent": profiling_overhead < 0.02,
+        },
+        "incremental_scoring_gate": {
+            "dominant_lengths": list(dominant_lengths),
+            "complete_evaluations": complete_evaluations,
+            "total_evaluations": total_evaluations,
+            "complete_fraction": complete_fraction,
+            "required_fraction": 0.20,
+            "passed": complete_fraction >= 0.20,
+            "decision": (
+                "eligible_for_design"
+                if complete_fraction >= 0.20
+                else "deferred_no_go"
+            ),
+            "cycle_length_profile": cycle_profile,
+        },
+        "acceptance": {
+            "cpp_at_least_2x": all(
+                comparison["right_over_left"] >= 2.0
+                for comparison in backend.values()
+            ),
+            "backend_trajectories_equal": all(
+                comparison["logical_trajectory_equal"]
+                for comparison in backend.values()
+            ),
+            "early_exit_trajectory_equal": early_exit[
+                "logical_trajectory_equal"
+            ],
+            "duplicate_key_trajectory_equal": duplicate_key[
+                "logical_trajectory_equal"
+            ],
+            "profiling_trajectory_equal": profiling[
+                "logical_trajectory_equal"
+            ],
+            "profiling_overhead_below_2_percent": profiling_overhead < 0.02,
+        },
+        "peak_rss_bytes": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        * 1024,
+        "peak_rss_source": "resource.getrusage",
     }
 
 

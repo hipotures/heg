@@ -6,21 +6,28 @@ PORT ?= 8080
 CXX ?= c++
 CXXFLAGS ?= -O3 -std=c++17 -Wall -Wextra -Wpedantic
 CYCLECHECK := _build/sglab-cyclecheck
+SCORE_WORKER := _build/sglab-score-worker
 
-.PHONY: doctor test check init serve dashboard-smoke benchmark-smoke cyclecheck clean
+.PHONY: doctor test check init serve dashboard-smoke benchmark-smoke cyclecheck score-worker clean
 
 doctor:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m sglab doctor
 
-test: cyclecheck
+test: cyclecheck score-worker
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m unittest discover -s tests -v
 
-check: cyclecheck
+check: cyclecheck score-worker
 	$(PYTHON) -m compileall -q src tests
 
 cyclecheck: $(CYCLECHECK)
 
 $(CYCLECHECK): cpp/sglab_cyclecheck.cpp
+	mkdir -p _build
+	$(CXX) $(CXXFLAGS) $< -o $@
+
+score-worker: $(SCORE_WORKER)
+
+$(SCORE_WORKER): cpp/sglab_score_worker.cpp
 	mkdir -p _build
 	$(CXX) $(CXXFLAGS) $< -o $@
 

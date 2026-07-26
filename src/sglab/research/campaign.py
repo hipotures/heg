@@ -13,7 +13,8 @@ import os
 import sqlite3
 import warnings
 
-from ..locations import asset_path
+from ..artifacts import hash_file
+from ..locations import asset_path, score_worker_path
 from ..model import BitGraph
 from ..resources import (
     current_rss_bytes,
@@ -92,6 +93,29 @@ CONTROLLER_MODES = {
     "random",
     "continuity_demo",
 }
+
+
+def _score_backend_runtime_provenance() -> dict[str, Any]:
+    binary = score_worker_path().resolve()
+    return {
+        "score_backend_requested": os.environ.get(
+            "SGLAB_SCORE_BACKEND", "python"
+        ),
+        "score_early_exit_requested": (
+            os.environ.get("SGLAB_SCORE_EARLY_EXIT", "0") == "1"
+        ),
+        "fast_duplicate_key_requested": (
+            os.environ.get("SGLAB_FAST_DUPLICATE_KEY", "0") == "1"
+        ),
+        "score_worker": {
+            "path": str(binary),
+            "available": binary.is_file(),
+            "sha256": hash_file(binary) if binary.is_file() else None,
+            "protocol_version": 1,
+        },
+    }
+
+
 CAMPAIGN_PLAN_SCHEMA_VERSION = "1.1"
 PRODUCTION_DIRECTOR_MODEL = "gpt-5.6-luna"
 PRODUCTION_DIRECTOR_EFFORT = "high"
@@ -1313,6 +1337,7 @@ class ResearchCampaignRunner:
                 runtime_provenance={
                     "fresh_process": True,
                     "historical_stale_actions_terminalized": stale_actions,
+                    **_score_backend_runtime_provenance(),
                 },
                 process_id=os.getpid(),
             )
@@ -1341,6 +1366,7 @@ class ResearchCampaignRunner:
                 starting_memory_snapshot_id=None,
                 starting_memory_sha256=None,
                 starting_checkpoint_refs=[],
+                runtime_provenance=_score_backend_runtime_provenance(),
                 process_id=os.getpid(),
             )
         application_data = campaign_attempt_application_data(

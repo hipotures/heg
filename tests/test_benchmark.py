@@ -6,6 +6,7 @@ from sglab.benchmark import (
     calibrate,
     microbenchmark,
     quantiles,
+    score_kernel_benchmark,
     soak,
     write_report,
 )
@@ -42,6 +43,18 @@ class BenchmarkTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             paths = write_report(report, Path(directory))
             self.assertTrue(all(path.is_file() for path in paths))
+
+    def test_score_kernel_benchmark_reports_all_acceptance_gates(self) -> None:
+        report = score_kernel_benchmark(
+            iterations=1,
+            backend_evaluations=2,
+            search_evaluations=2,
+        )
+        self.assertEqual(report["kind"], "score_kernel")
+        self.assertEqual(set(report["backend_comparison"]), {"64", "96"})
+        self.assertIn("overhead_gate_below_2_percent", report["profiling_comparison"])
+        self.assertIn("decision", report["incremental_scoring_gate"])
+        self.assertTrue(report["acceptance"]["backend_trajectories_equal"])
 
     def test_short_soak_exercises_controls_and_dashboard(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
