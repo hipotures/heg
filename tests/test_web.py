@@ -419,6 +419,18 @@ class WebAssetsTests(unittest.TestCase):
                 self.assertIn("16", command)
                 self.assertIn("--max-active-lanes", command)
                 self.assertIn("8", command)
+            server.campaign_runner = None
+            with patch("sglab.web.Popen") as failed_launch:
+                failed_launch.return_value.pid = 4313
+                failed_launch.return_value.poll.return_value = 1
+                status, failure = server.resume_campaign(
+                    json.loads(body)
+                )
+                self.assertEqual(status, 500)
+                self.assertIn(
+                    "exited before startup", failure["error"]
+                )
+                self.assertIsNone(server.campaign_runner)
             server.shutdown()
             server.server_close()
             thread.join(timeout=2)

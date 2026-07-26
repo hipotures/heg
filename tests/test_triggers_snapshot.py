@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from sglab.research.lanes import LaneManager
+from sglab.research.protocol import MAX_SNAPSHOT_BYTES, canonical_json
 from sglab.research.snapshot import SnapshotBuilder, _compact_observed_effect
 from sglab.research.store import ResearchStore
 from sglab.research.triggers import TriggerEngine
@@ -130,6 +131,102 @@ class SnapshotBuilderTests(unittest.TestCase):
                 self.assertEqual(
                     json.loads(payload)["snapshot_id"],
                     snapshot["snapshot_id"],
+                )
+            finally:
+                manager.shutdown()
+                store.close()
+
+    def test_stored_lane_metrics_are_summarized_before_resume_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = ResearchStore(root / "campaign.sqlite3")
+            manager = LaneManager(root)
+            ancestry = [
+                {
+                    "evaluation": index,
+                    "candidate_id": f"candidate-{index:04d}",
+                    "graph_sha256": f"{index:064x}",
+                }
+                for index in range(800)
+            ]
+            try:
+                store.create_campaign(
+                    campaign_id="campaign-1",
+                    target="erdos_gyarfas",
+                    target_definition_sha256="a" * 64,
+                    stop_mode="time_limit",
+                    deadline_at="2026-07-25T00:00:00Z",
+                )
+                for index in range(6):
+                    lane_id = f"lane-{index}"
+                    store.create_lane(
+                        lane_id=lane_id,
+                        campaign_id="campaign-1",
+                        target="erdos_gyarfas",
+                        parent_lane_id=None,
+                        parent_checkpoint_ref=None,
+                        action_id=f"bootstrap-{index}",
+                        algorithm="simulated_annealing",
+                        graph_family="connected_cubic",
+                        parameters={"order": 64},
+                        seed_lineage=[index],
+                        resource_share=1 / 6,
+                        lease_expires_at=None,
+                    )
+                    store.record_lane_metric_window(
+                        metric_window_id=f"window-{index}",
+                        lane_id=lane_id,
+                        campaign_id="campaign-1",
+                        lane_version=0,
+                        start_high_water=0,
+                        end_high_water=1000 + index,
+                        started_at="2026-07-24T00:00:00Z",
+                        ended_at="2026-07-24T00:01:00Z",
+                        metrics={
+                            "best_scalar": 1.0,
+                            "best_score": [0, 1, 2],
+                            "candidates_per_second": 20.0,
+                            "duplicate_rate": 0.01,
+                            "diversity": 0.99,
+                            "operator_yield": 0.02,
+                            "end_high_water": 1000 + index,
+                            "mutation_ancestry": {
+                                "global_record_improvements": ancestry,
+                                "final_best_ancestry": ancestry,
+                            },
+                        },
+                    )
+                snapshot, _ = SnapshotBuilder(
+                    store=store,
+                    manager=manager,
+                    campaign_id="campaign-1",
+                    campaign_dir=root,
+                ).publish(memory_trigger="resume")
+                self.assertLessEqual(
+                    len(canonical_json(snapshot, max_bytes=MAX_SNAPSHOT_BYTES)),
+                    MAX_SNAPSHOT_BYTES,
+                )
+                self.assertTrue(
+                    all(
+                        "mutation_ancestry" not in lane["metrics"]
+                        for lane in snapshot["lanes"]
+                    )
+                )
+                raw = json.loads(
+                    store.connection.execute(
+                        """
+                        SELECT metrics_json FROM lane_metric_windows
+                        WHERE metric_window_id='window-0'
+                        """
+                    ).fetchone()[0]
+                )
+                self.assertEqual(
+                    len(
+                        raw["mutation_ancestry"][
+                            "global_record_improvements"
+                        ]
+                    ),
+                    800,
                 )
             finally:
                 manager.shutdown()

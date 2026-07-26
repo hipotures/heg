@@ -540,7 +540,7 @@ class DashboardServer(ThreadingHTTPServer):
             logs.mkdir(parents=True, exist_ok=True)
             runner_log = logs / "research-campaign-runner.log"
             with runner_log.open("ab") as log:
-                self.campaign_runner = Popen(
+                process = Popen(
                     command,
                     stdin=DEVNULL,
                     stdout=log,
@@ -548,9 +548,21 @@ class DashboardServer(ThreadingHTTPServer):
                     start_new_session=True,
                     env=os.environ.copy(),
                 )
+            self.campaign_runner = process
+            time.sleep(0.1)
+            return_code = process.poll()
+            if return_code is not None:
+                self.campaign_runner = None
+                return 500, {
+                    "error": (
+                        "campaign resume process exited before startup "
+                        f"(return code {return_code}); inspect "
+                        "logs/research-campaign-runner.log"
+                    )
+                }
             return 202, {
                 "accepted": True,
-                "pid": self.campaign_runner.pid,
+                "pid": process.pid,
                 "campaign_id": campaign_id,
                 "attempt_id": preview["proposed_attempt_id"],
             }

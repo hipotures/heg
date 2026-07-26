@@ -77,6 +77,13 @@ remain history. A bad checkpoint affects only its lane and is reported to the
 next Director state. Existing lease recovery and action idempotency prevent
 duplicate batches and actions.
 
+Pre-Resume snapshots summarize persisted lane telemetry through the same
+bounded projection used for live lanes. Full mutation ancestry and evaluation
+details remain in `lane_metric_windows` and retained artifacts; they are not
+copied wholesale into the bounded Director snapshot. If the Resume subprocess
+exits before startup, the protected HTTP endpoint reports the launch failure
+instead of returning a misleading started PID.
+
 Candidate-target actions acquire durable candidate pins and immutable graph
 snapshots before execution. M4 reads the immutable snapshot. Pins release only
 after all referencing actions/jobs are terminal. A candidate that becomes

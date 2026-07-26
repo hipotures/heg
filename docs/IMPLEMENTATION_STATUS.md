@@ -42,6 +42,17 @@ model or auth access occurred. See `docs/CAMPAIGN_RESUME.md`,
 `docs/CAMPAIGN_SCIENTIFIC_MEMORY.md`, and
 `docs/reports/CAMPAIGN_RESUME_AND_MEMORY_PHASE_A.md`.
 
+The first production Resume exposed a legacy-shape boundary missed by the
+fake/replay demonstrations: raw stored lane mutation ancestry made the
+pre-Resume snapshot 368,573 bytes, above its 256 KiB artifact contract.
+Snapshot construction now derives the same bounded telemetry summary used for
+live lanes while leaving every raw metric row unchanged. The exact preserved
+campaign shape now produces a 69,803-byte snapshot and a 15,861-byte
+scientific-memory projection. The dashboard also checks for immediate
+subprocess exit before claiming that a new attempt started, and Resume
+previews continue to report historical stale actions after they are already
+terminalized.
+
 ## First real graph campaign authorization gate
 
 The production campaign CLI now has a deterministic `prepare` boundary for a

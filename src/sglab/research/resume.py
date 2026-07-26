@@ -454,12 +454,13 @@ def _stale_pending_actions(
 ) -> list[dict[str, Any]]:
     rows = connection.execute(
         """
-        SELECT a.action_id, a.action_type, a.parameters_json
+        SELECT a.action_id, a.action_type, a.parameters_json,
+               o.application_status
         FROM director_actions a
         LEFT JOIN director_action_outcomes o ON o.action_id=a.action_id
         WHERE a.campaign_id=? AND a.validation_status='accepted'
           AND a.action_type IN ('promote_candidate','schedule_verification')
-          AND o.action_id IS NULL
+          AND (o.action_id IS NULL OR o.application_status='stale_target')
         ORDER BY a.created_at, a.action_id
         """,
         (campaign_id,),
@@ -478,7 +479,14 @@ def _stale_pending_actions(
                 {
                     "action_id": row["action_id"],
                     "stale_candidate_ids": stale,
-                    "will_be_terminalized_as": "stale_target",
+                    "already_terminalized": (
+                        row["application_status"] == "stale_target"
+                    ),
+                    "will_be_terminalized_as": (
+                        None
+                        if row["application_status"] == "stale_target"
+                        else "stale_target"
+                    ),
                     "will_not_be_reexecuted": True,
                 }
             )

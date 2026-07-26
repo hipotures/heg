@@ -21,6 +21,7 @@ from .continuity import (
 )
 from .protocol import MAX_SNAPSHOT_BYTES, canonical_json
 from .store import ResearchStore, new_id
+from .telemetry import TelemetrySeries
 from .validation import DecisionContext
 
 
@@ -314,14 +315,17 @@ class SnapshotBuilder:
         return values
 
     def _stored_metrics(self, lane_id: str) -> dict[str, Any]:
-        row = self.store.connection.execute(
+        rows = self.store.connection.execute(
             """
             SELECT metrics_json FROM lane_metric_windows
-            WHERE lane_id=? ORDER BY end_high_water DESC LIMIT 1
+            WHERE lane_id=? ORDER BY end_high_water DESC LIMIT 8
             """,
             (lane_id,),
-        ).fetchone()
-        return json.loads(row[0]) if row is not None else {"windows": 0}
+        ).fetchall()
+        telemetry = TelemetrySeries(maximum=8)
+        for row in reversed(rows):
+            telemetry.append(json.loads(row[0]))
+        return telemetry.recent()
 
     def _recent_actions(self, evidence: set[str]) -> list[dict[str, Any]]:
         rows = self.store.connection.execute(
