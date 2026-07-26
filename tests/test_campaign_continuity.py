@@ -253,7 +253,9 @@ class CampaignContinuityTests(unittest.TestCase):
                 repair_acknowledgement="fixed in commit-b",
             )
             campaign = store.campaign("campaign-1")
-            self.assertEqual(campaign["fault_detail"], "historical fault")
+            self.assertEqual(campaign["state"], "running")
+            self.assertIsNone(campaign["fault_kind"])
+            self.assertIsNone(campaign["fault_detail"])
             store.create_execution_attempt(
                 attempt_id="repair-attempt",
                 campaign_id="campaign-1",

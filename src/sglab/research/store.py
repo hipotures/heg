@@ -487,7 +487,8 @@ class ResearchStore:
                 """
                 UPDATE research_campaigns
                 SET state='running', state_version=state_version+1,
-                    deadline_at=?, updated_at=?
+                    deadline_at=?, updated_at=?,
+                    fault_kind=NULL, fault_detail=NULL
                 WHERE campaign_id=? AND state_version=?
                 """,
                 (

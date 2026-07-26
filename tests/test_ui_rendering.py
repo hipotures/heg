@@ -163,6 +163,12 @@ class SemanticUiRenderingTests(unittest.TestCase):
         self.assertIn("Campaign candidates", dashboard)
         self.assertIn("campaign.candidates||[]", dashboard)
         self.assertIn("Campaign stopped fail-closed", dashboard)
+        self.assertIn(
+            "const currentFault=campaign.state==='paused_fault'"
+            "||campaign.state==='infrastructure_failure'",
+            dashboard,
+        )
+        self.assertIn("['Current fault',currentFault?", dashboard)
         self.assertIn("campaign.fault_detail", dashboard)
         self.assertIn("resume-campaign", dashboard)
         self.assertIn("campaign.resume_supported", dashboard)
