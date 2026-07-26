@@ -2,6 +2,13 @@
 
 Last implementation audit: **2026-07-26**.
 
+## Zero current throughput outside running state
+
+The live-frontier aggregate and per-lane cards now show `0/s` whenever the
+campaign is paused or otherwise not running. Completed metric windows remain
+available for trends and evidence, but are no longer presented as current
+work after Pause.
+
 ## Consistent per-lane and aggregate throughput
 
 The main campaign lane cards now use each lane's latest completed metric

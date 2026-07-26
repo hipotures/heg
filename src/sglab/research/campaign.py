@@ -525,6 +525,7 @@ def campaign_status(workspace: Path, campaign_id: str | None = None) -> dict[str
         ).fetchone()
         if campaign is None:
             return {"campaign_id": selected, "state": "NOT_FOUND"}
+        campaign_state = str(campaign["state"])
         lanes = []
         for row in connection.execute(
             """
@@ -554,7 +555,9 @@ def campaign_status(workspace: Path, campaign_id: str | None = None) -> dict[str
                     "metrics": series.recent(),
                     "latest_throughput": (
                         metric_payloads[0].get("candidates_per_second")
-                        if metric_payloads
+                        if campaign_state == "running" and metric_payloads
+                        else 0.0
+                        if campaign_state != "running"
                         else None
                     ),
                 }
@@ -824,7 +827,6 @@ def campaign_status(workspace: Path, campaign_id: str | None = None) -> dict[str
             pid = int(process.get("pid", 0))
         except (TypeError, ValueError):
             pid = 0
-        campaign_state = str(campaign["state"])
         host_restart_resume = (
             campaign_state == "running"
             and not active_campaign_process(root, str(selected))

@@ -189,6 +189,22 @@ class CampaignVisualizationTests(unittest.TestCase):
         self.assertEqual(lane["latest_throughput"], 20.0)
         self.assertEqual(lane["metrics"]["candidates_per_second"], 15.0)
 
+        with ResearchStore(self.workspace / "results.sqlite3") as store:
+            store.set_campaign_coordination_state(
+                CAMPAIGN_ID,
+                expected_version=status["state_version"],
+                state="paused_by_operator",
+            )
+        paused = campaign_status(self.workspace, CAMPAIGN_ID)
+        paused_lane = next(
+            item for item in paused["lanes"] if item["lane_id"] == "lane-1"
+        )
+        self.assertEqual(paused_lane["latest_throughput"], 0.0)
+        self.assertEqual(
+            paused_lane["metrics"]["candidates_per_second"],
+            15.0,
+        )
+
     def _retain(
         self,
         store: ResearchStore,
@@ -728,6 +744,14 @@ class CampaignVisualizationTests(unittest.TestCase):
             )
             self.assertIn(
                 b"Math.round(aggregateThroughput)",
+                javascript,
+            )
+            self.assertIn(
+                b"const aggregateThroughput = !campaignRunning",
+                javascript,
+            )
+            self.assertIn(
+                b"current throughput is zero",
                 javascript,
             )
             self.assertIn(

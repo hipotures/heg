@@ -68,6 +68,9 @@ versus running-lane coverage in the value tooltip. Per-lane throughput remains
 available in the lane view and uses the same latest-completed-window semantic,
 while rolling telemetry remains available for trend fields. The main campaign
 lane panel shows up to eight lane cards without requiring expansion.
+When the campaign is not running, both the aggregate and per-lane current
+throughput render as `0/s`; completed metric windows remain intact as
+historical telemetry.
 
 ## Graph visualization
 

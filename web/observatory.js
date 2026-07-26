@@ -508,18 +508,23 @@
       }
       const activeLanes = (state.series?.lanes || [])
         .filter(lane => lane.state === 'running');
-      const measuredLaneRates = activeLanes
+      const campaignRunning = state.campaignState === 'running';
+      const measuredLaneRates = campaignRunning ? activeLanes
         .map(lane => numeric(
           latestLaneWindows.get(lane.lane_id)?.candidates_per_second
         ))
-        .filter(rate => rate !== null);
-      const aggregateThroughput = measuredLaneRates.length
+        .filter(rate => rate !== null) : [];
+      const aggregateThroughput = !campaignRunning
+        ? 0
+        : measuredLaneRates.length
         ? measuredLaneRates.reduce((total, rate) => total + rate, 0)
         : null;
       const throughputLabel = aggregateThroughput === null
         ? 'Unavailable'
         : `${Math.round(aggregateThroughput).toLocaleString()}/s`;
-      const throughputTitle = measuredLaneRates.length
+      const throughputTitle = !campaignRunning
+        ? `Campaign is ${label(state.campaignState || 'not running')}; current throughput is zero`
+        : measuredLaneRates.length
         ? `Sum of latest completed measurements from ${measuredLaneRates.length} of ${activeLanes.length} running lanes`
         : 'No completed throughput measurement is available for a running lane';
       const scoreCoverage = score.complete === false
