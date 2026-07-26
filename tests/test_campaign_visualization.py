@@ -2,6 +2,7 @@ import hashlib
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from http.client import HTTPConnection
 from pathlib import Path
 from threading import Thread
@@ -101,6 +102,22 @@ class CampaignVisualizationTests(unittest.TestCase):
                 stop_mode="until_success",
                 deadline_at=None,
             )
+            with patch(
+                "sglab.research.store.utc_now",
+                return_value="2026-07-26T00:00:00Z",
+            ):
+                store.create_execution_attempt(
+                    attempt_id="attempt-1",
+                    campaign_id=CAMPAIGN_ID,
+                    reason="initial_start",
+                    code_commit="test-commit",
+                    requested_resources={},
+                    effective_resources={},
+                    additional_wall_seconds=3600,
+                    starting_memory_snapshot_id=None,
+                    starting_memory_sha256=None,
+                    starting_checkpoint_refs=[],
+                )
             for index in (1, 2):
                 store.create_lane(
                     lane_id=f"lane-{index}",
@@ -190,9 +207,41 @@ class CampaignVisualizationTests(unittest.TestCase):
         self.assertEqual(lane["metrics"]["candidates_per_second"], 15.0)
 
         with ResearchStore(self.workspace / "results.sqlite3") as store:
+            store.finish_execution_attempt(
+                "attempt-1",
+                terminal_status="interrupted",
+                terminal_reason="test Resume boundary",
+            )
+            with patch(
+                "sglab.research.store.utc_now",
+                return_value="2026-07-26T00:00:30Z",
+            ):
+                store.create_execution_attempt(
+                    attempt_id="attempt-2",
+                    campaign_id=CAMPAIGN_ID,
+                    reason="infrastructure_recovery",
+                    code_commit="test-commit",
+                    requested_resources={},
+                    effective_resources={},
+                    additional_wall_seconds=3600,
+                    starting_memory_snapshot_id=None,
+                    starting_memory_sha256=None,
+                    starting_checkpoint_refs=[],
+                )
+        resumed = campaign_status(self.workspace, CAMPAIGN_ID)
+        resumed_lane = next(
+            item for item in resumed["lanes"] if item["lane_id"] == "lane-1"
+        )
+        self.assertEqual(resumed_lane["latest_throughput"], 0.0)
+        self.assertEqual(
+            resumed_lane["metrics"]["candidates_per_second"],
+            15.0,
+        )
+
+        with ResearchStore(self.workspace / "results.sqlite3") as store:
             store.set_campaign_coordination_state(
                 CAMPAIGN_ID,
-                expected_version=status["state_version"],
+                expected_version=resumed["state_version"],
                 state="paused_by_operator",
             )
         paused = campaign_status(self.workspace, CAMPAIGN_ID)
@@ -595,6 +644,10 @@ class CampaignVisualizationTests(unittest.TestCase):
 
     def test_series_are_bounded_and_separate_scientific_semantics(self) -> None:
         series = campaign_visualization_series(self.workspace)
+        self.assertEqual(
+            series["current_attempt_started_at"],
+            "2026-07-26T00:00:00Z",
+        )
         self.assertEqual(len(series["candidate_history"]), 2)
         self.assertEqual(len(series["lane_windows"]), 1)
         self.assertEqual(len(series["verifications"]), 2)
@@ -752,6 +805,14 @@ class CampaignVisualizationTests(unittest.TestCase):
             )
             self.assertIn(
                 b"current throughput is zero",
+                javascript,
+            )
+            self.assertIn(
+                b"windowEndedAt >= attemptStartedAt",
+                javascript,
+            )
+            self.assertIn(
+                b"Waiting for the first completed measurement in this execution attempt",
                 javascript,
             )
             self.assertIn(

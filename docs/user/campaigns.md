@@ -108,6 +108,8 @@ Up to eight lane cards are visible in the main lane panel before expansion.
 After Pause or another non-running transition, current aggregate and per-lane
 throughput show `0/s`. The last completed measurement is retained as history,
 but is not presented as current work.
+After Resume, throughput starts at `0/s` again and includes only measurements
+completed during the new execution attempt.
 
 [screenshot: ID=USR-CAMPAIGN-01; save as docs/assets/screenshots/user/campaigns/director-assessment.png; crop the “Director assessment & hypotheses” section from a running or stopped campaign, include the latest campaign assessment, at least two hypothesis cards with confidence/evidence, and the adjacent current Director decision summary; exclude raw JSON technical details.]
 

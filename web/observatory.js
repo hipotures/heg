@@ -503,8 +503,18 @@
       const score = data.score || {};
       const exact = data.exact_verification;
       const latestLaneWindows = new Map();
+      const attemptStartedAt = Date.parse(
+        state.series?.current_attempt_started_at || '',
+      );
       for (const window of state.series?.lane_windows || []) {
-        latestLaneWindows.set(window.lane_id, window);
+        const windowEndedAt = Date.parse(window.end_at || '');
+        if (
+          Number.isFinite(attemptStartedAt)
+          && Number.isFinite(windowEndedAt)
+          && windowEndedAt >= attemptStartedAt
+        ) {
+          latestLaneWindows.set(window.lane_id, window);
+        }
       }
       const activeLanes = (state.series?.lanes || [])
         .filter(lane => lane.state === 'running');
@@ -518,15 +528,14 @@
         ? 0
         : measuredLaneRates.length
         ? measuredLaneRates.reduce((total, rate) => total + rate, 0)
-        : null;
-      const throughputLabel = aggregateThroughput === null
-        ? 'Unavailable'
-        : `${Math.round(aggregateThroughput).toLocaleString()}/s`;
+        : 0;
+      const throughputLabel =
+        `${Math.round(aggregateThroughput).toLocaleString()}/s`;
       const throughputTitle = !campaignRunning
         ? `Campaign is ${label(state.campaignState || 'not running')}; current throughput is zero`
         : measuredLaneRates.length
         ? `Sum of latest completed measurements from ${measuredLaneRates.length} of ${activeLanes.length} running lanes`
-        : 'No completed throughput measurement is available for a running lane';
+        : 'Waiting for the first completed measurement in this execution attempt';
       const scoreCoverage = score.complete === false
         ? 'Approximate / truncated'
         : score.complete === true

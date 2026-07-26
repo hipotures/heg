@@ -1,6 +1,13 @@
 # Implementation Status
 
-Last implementation audit: **2026-07-26**.
+Last implementation audit: **2026-07-27**.
+
+## Attempt-scoped throughput after Resume
+
+Current per-lane and aggregate throughput now ignore metric windows completed
+before the active execution attempt's `started_at`. Resume therefore starts at
+`0/s` until a lane completes its first new measurement window; historical
+windows remain available for rolling telemetry and evidence.
 
 ## Bounded continuity ledgers across Resume
 

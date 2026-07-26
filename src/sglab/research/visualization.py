@@ -205,6 +205,17 @@ def campaign_graph_visualization(
 def campaign_visualization_series(workspace: Path) -> dict[str, Any]:
     _root, campaign_id, connection = _campaign_connection(workspace)
     try:
+        attempt = connection.execute(
+            """
+            SELECT started_at FROM campaign_execution_attempts
+            WHERE campaign_id=? AND terminal_at IS NULL
+            ORDER BY attempt_index DESC LIMIT 1
+            """,
+            (campaign_id,),
+        ).fetchone()
+        current_attempt_started_at = (
+            str(attempt["started_at"]) if attempt is not None else None
+        )
         candidates = []
         rows = connection.execute(
             """
@@ -308,6 +319,7 @@ def campaign_visualization_series(workspace: Path) -> dict[str, Any]:
         ]
         return {
             "campaign_id": campaign_id,
+            "current_attempt_started_at": current_attempt_started_at,
             "candidate_history": candidates,
             "lane_windows": windows,
             "verifications": verifications,

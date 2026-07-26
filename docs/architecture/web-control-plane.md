@@ -71,6 +71,10 @@ lane panel shows up to eight lane cards without requiring expansion.
 When the campaign is not running, both the aggregate and per-lane current
 throughput render as `0/s`; completed metric windows remain intact as
 historical telemetry.
+Resume also establishes a new measurement boundary. Metric windows completed
+before the current execution attempt's `started_at` remain historical and do
+not contribute to current per-lane or aggregate throughput. The UI shows
+`0/s` until the first new window completes.
 
 ## Graph visualization
 

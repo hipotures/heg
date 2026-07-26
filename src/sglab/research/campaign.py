@@ -526,6 +526,26 @@ def campaign_status(workspace: Path, campaign_id: str | None = None) -> dict[str
         if campaign is None:
             return {"campaign_id": selected, "state": "NOT_FOUND"}
         campaign_state = str(campaign["state"])
+        tables = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        active_attempt_started_at = None
+        if "campaign_execution_attempts" in tables:
+            active_attempt_row = connection.execute(
+                """
+                SELECT started_at FROM campaign_execution_attempts
+                WHERE campaign_id=? AND terminal_at IS NULL
+                ORDER BY attempt_index DESC LIMIT 1
+                """,
+                (selected,),
+            ).fetchone()
+            if active_attempt_row is not None:
+                active_attempt_started_at = str(
+                    active_attempt_row["started_at"]
+                )
         lanes = []
         for row in connection.execute(
             """
@@ -536,7 +556,7 @@ def campaign_status(workspace: Path, campaign_id: str | None = None) -> dict[str
         ):
             metric_rows = connection.execute(
                 """
-                SELECT metrics_json FROM lane_metric_windows
+                SELECT metrics_json, end_at FROM lane_metric_windows
                 WHERE lane_id=? ORDER BY end_at DESC, rowid DESC LIMIT 8
                 """,
                 (row["lane_id"],),
@@ -555,10 +575,14 @@ def campaign_status(workspace: Path, campaign_id: str | None = None) -> dict[str
                     "metrics": series.recent(),
                     "latest_throughput": (
                         metric_payloads[0].get("candidates_per_second")
-                        if campaign_state == "running" and metric_payloads
+                        if campaign_state == "running"
+                        and metric_payloads
+                        and active_attempt_started_at is not None
+                        and _timestamp_at_or_after(
+                            metric_rows[0]["end_at"],
+                            active_attempt_started_at,
+                        )
                         else 0.0
-                        if campaign_state != "running"
-                        else None
                     ),
                 }
             )
@@ -720,12 +744,6 @@ def campaign_status(workspace: Path, campaign_id: str | None = None) -> dict[str
             """,
             (selected,),
         ).fetchone()
-        tables = {
-            str(row[0])
-            for row in connection.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            )
-        }
         attempts = []
         if "campaign_execution_attempts" in tables:
             for row in connection.execute(
@@ -1938,6 +1956,22 @@ class ResearchCampaignRunner:
                 "AI policy lease expired during provider outage: "
                 + ", ".join(expired[:8])
             )
+
+
+def _timestamp_at_or_after(value: Any, boundary: str) -> bool:
+    try:
+        timestamp = datetime.fromisoformat(
+            str(value).replace("Z", "+00:00")
+        )
+        lower_bound = datetime.fromisoformat(
+            boundary.replace("Z", "+00:00")
+        )
+    except (TypeError, ValueError):
+        return False
+    try:
+        return timestamp >= lower_bound
+    except TypeError:
+        return False
 
 
 def _deadline_reached(campaign: dict[str, Any]) -> bool:
