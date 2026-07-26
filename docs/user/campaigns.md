@@ -100,6 +100,12 @@ uniform and forbidden-cycle-targeted mutation time and reports reuse of the
 current graph's witness choices. It does not create a candidate history or
 change the selected mutation sequence.
 
+The dashboard's aggregate throughput is the sum of the latest completed
+metric window from every running lane. Each lane card shows that same
+latest-window value, so the visible lane rates can be added directly. Rolling
+telemetry remains the basis for diversity, duplicate-rate, and trend fields.
+Up to eight lane cards are visible in the main lane panel before expansion.
+
 [screenshot: ID=USR-CAMPAIGN-01; save as docs/assets/screenshots/user/campaigns/director-assessment.png; crop the “Director assessment & hypotheses” section from a running or stopped campaign, include the latest campaign assessment, at least two hypothesis cards with confidence/evidence, and the adjacent current Director decision summary; exclude raw JSON technical details.]
 
 [screenshot: ID=USR-CAMPAIGN-02; save as docs/assets/screenshots/user/campaigns/lane-trajectories.png; crop the live lane visualization or lane cards showing at least three lanes with distinct statuses or algorithms, checkpoint markers, and one fork/restart/parameter revision indicator; include the section heading and legend.]

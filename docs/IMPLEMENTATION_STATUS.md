@@ -2,6 +2,15 @@
 
 Last implementation audit: **2026-07-26**.
 
+## Consistent per-lane and aggregate throughput
+
+The main campaign lane cards now use each lane's latest completed metric
+window, matching the live-frontier aggregate throughput contract. The existing
+rolling telemetry summary remains unchanged for diversity, duplicate rate,
+yield, and trends. The main lane panel displays up to eight cards instead of
+the generic six-card bound, so a fully allocated eight-lane campaign is visible
+without expansion.
+
 ## Current-graph witness cache for targeted mutations
 
 After the persistent C++ scorer removed the original DFS bottleneck,

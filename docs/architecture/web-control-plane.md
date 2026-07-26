@@ -65,7 +65,9 @@ The live-frontier inspector derives aggregate campaign throughput by summing
 the latest completed metric window for each running lane. Missing first-batch
 measurements do not erase the available aggregate; the UI exposes measured
 versus running-lane coverage in the value tooltip. Per-lane throughput remains
-available in the lane view.
+available in the lane view and uses the same latest-completed-window semantic,
+while rolling telemetry remains available for trend fields. The main campaign
+lane panel shows up to eight lane cards without requiring expansion.
 
 ## Graph visualization
 

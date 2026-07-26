@@ -540,15 +540,23 @@ def campaign_status(workspace: Path, campaign_id: str | None = None) -> dict[str
                 """,
                 (row["lane_id"],),
             ).fetchall()
+            metric_payloads = [
+                json.loads(metric["metrics_json"]) for metric in metric_rows
+            ]
             series = TelemetrySeries(maximum=8)
-            for metric in reversed(metric_rows):
-                series.append(json.loads(metric["metrics_json"]))
+            for metrics in reversed(metric_payloads):
+                series.append(metrics)
             lanes.append(
                 {
                     **dict(row),
                     "parameters": json.loads(row["current_parameters_json"]),
                     "seed_lineage": json.loads(row["seed_lineage_json"]),
                     "metrics": series.recent(),
+                    "latest_throughput": (
+                        metric_payloads[0].get("candidates_per_second")
+                        if metric_payloads
+                        else None
+                    ),
                 }
             )
         assessment = connection.execute(

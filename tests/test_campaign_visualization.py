@@ -7,6 +7,7 @@ from pathlib import Path
 from threading import Thread
 
 from sglab.model import BitGraph
+from sglab.research.campaign import campaign_status
 from sglab.research.store import ResearchStore
 from sglab.research.protocol import canonical_json
 from sglab.research.visualization import (
@@ -59,6 +60,14 @@ class CampaignVisualizationTests(unittest.TestCase):
         self.assertIn("navigator.clipboard.writeText(value)", dashboard)
         self.assertIn("target.classList.add('is-copied')", dashboard)
         self.assertNotIn("Copy ID", dashboard)
+        self.assertIn(
+            "boundedList('lanes-list',campaign.lanes||[],laneCard,8)",
+            dashboard,
+        )
+        self.assertIn(
+            "throughput=l.latest_throughput",
+            dashboard,
+        )
 
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -151,6 +160,34 @@ class CampaignVisualizationTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
+
+    def test_campaign_lane_card_exposes_latest_completed_metrics(self) -> None:
+        with ResearchStore(self.workspace / "results.sqlite3") as store:
+            store.record_lane_metric_window(
+                metric_window_id="window-2",
+                lane_id="lane-1",
+                campaign_id=CAMPAIGN_ID,
+                lane_version=0,
+                start_high_water=100,
+                end_high_water=300,
+                started_at="2026-07-26T00:00:10Z",
+                ended_at="2026-07-26T00:00:20Z",
+                metrics={
+                    "candidates_per_second": 20.0,
+                    "best_scalar": 8,
+                    "best_score": [0, 1, 8, 0, 4],
+                    "diversity": 0.8,
+                    "operator_yield": 0.04,
+                    "plateau_evaluations": 10,
+                },
+            )
+
+        status = campaign_status(self.workspace, CAMPAIGN_ID)
+        lane = next(
+            item for item in status["lanes"] if item["lane_id"] == "lane-1"
+        )
+        self.assertEqual(lane["latest_throughput"], 20.0)
+        self.assertEqual(lane["metrics"]["candidates_per_second"], 15.0)
 
     def _retain(
         self,
