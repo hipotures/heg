@@ -59,6 +59,12 @@ per-candidate profile dictionary, JSON, event, SQLite row or log line is
 created. The aggregated `timing.score_profile` is emitted and persisted once
 with the completed batch.
 
+Long-running batches may also publish a transient live-frontier sample at most
+once per second. The worker copies the already accepted graph, its existing
+score, candidate ID, lane version, and high-water counter into a size-bounded
+payload. This path never calls the scorer or constructs a resumable checkpoint.
+The non-important queue event may be dropped under pressure.
+
 ## Checkpoints
 
 Checkpoint content includes enough state to reproduce continuation:
@@ -71,6 +77,11 @@ Checkpoint content includes enough state to reproduce continuation:
 - hash/manifest.
 
 Resume verifies hashes and starts a new process generation.
+
+Live-frontier samples are not checkpoints. The coordinator atomically
+overwrites one SHA-256-protected `live-frontier-*.json` file per lane, keeps no
+history, and creates no SQLite row. Durable post-batch checkpoints and their
+checkpoint-before-telemetry ordering remain unchanged.
 
 ## Concurrency
 

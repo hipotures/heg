@@ -4,9 +4,18 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from queue import Queue
+from unittest.mock import patch
 
-from sglab.research.lanes import LaneManager, LaneSpec
+from sglab.research.lanes import (
+    LaneManager,
+    LaneRuntime,
+    LaneSpec,
+    _LaneKernel,
+    _publish_live_frontier,
+)
 from sglab.research.telemetry import TelemetrySeries, compare_effects
+from sglab.state import read_json
 
 
 def lane_spec(lane_id: str, algorithm: str, share: float = 0.5) -> LaneSpec:
@@ -48,6 +57,60 @@ def poll_until(manager: LaneManager, predicate, timeout: float = 8.0) -> None:
 
 
 class LaneManagerTests(unittest.TestCase):
+    def test_live_frontier_publication_reuses_score_and_overwrites_file(
+        self,
+    ) -> None:
+        spec = lane_spec("lane-preview", "iterated_local_search")
+        kernel = _LaneKernel(spec, checkpoint=None, fork_seed=None)
+        previews = []
+        events = Queue(maxsize=1)
+        stop = type("Stop", (), {"is_set": lambda self: False})()
+        for _ in range(2):
+            kernel.run_batch(stop, max_evaluations=1)
+            with (
+                patch.object(
+                    kernel,
+                    "_score",
+                    side_effect=AssertionError("preview rescored graph"),
+                ),
+                patch.object(
+                    kernel,
+                    "checkpoint",
+                    side_effect=AssertionError(
+                        "preview serialized full checkpoint"
+                    ),
+                ),
+            ):
+                _publish_live_frontier(
+                    events, spec, kernel, lane_version=0
+                )
+            previews.append(events.get_nowait()["preview"])
+        self.assertEqual(len(previews), 2)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manager = LaneManager(root)
+            runtime = LaneRuntime(
+                spec=spec,
+                process=None,
+                commands=None,
+                stop_event=None,
+                pause_event=None,
+            )
+            manager._remember_live_frontier(runtime, previews[0])
+            manager._remember_live_frontier(runtime, previews[1])
+            paths = list(
+                (root / "lane-checkpoints").glob(
+                    "live-frontier-*.json"
+                )
+            )
+            self.assertEqual(len(paths), 1)
+            self.assertEqual(
+                read_json(paths[0])["preview_id"],
+                previews[1]["preview_id"],
+            )
+            self.assertFalse(any(root.glob("*.sqlite*")))
+
     def test_live_patch_fork_progress_and_idempotency(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             manager = LaneManager(
@@ -71,6 +134,10 @@ class LaneManagerTests(unittest.TestCase):
                         and lane_b.high_water >= 100
                         and lane_a.latest_checkpoint_id is not None
                     ),
+                )
+                poll_until(
+                    manager,
+                    lambda: lane_a.latest_live_frontier is not None,
                 )
                 self.assertTrue(lane_a.process.is_alive())
                 self.assertTrue(lane_b.process.is_alive())

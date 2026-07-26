@@ -6,6 +6,7 @@ from multiprocessing import get_context
 from pathlib import Path
 from queue import Empty, Full
 from random import Random
+from threading import Event, Thread
 from typing import Any
 import ast
 import dataclasses
@@ -45,6 +46,8 @@ TIMING_COUNTER_NAMES = (
     "sqlite_persistence",
     "exact_final_verification",
 )
+LIVE_FRONTIER_INTERVAL_SECONDS = 1.0
+LIVE_FRONTIER_PAYLOAD_LIMIT_BYTES = 64 * 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,6 +133,7 @@ class LaneRuntime:
     resource_share: float = 0.0
     latest_checkpoint_id: str | None = None
     latest_checkpoint: dict[str, Any] | None = None
+    latest_live_frontier: dict[str, Any] | None = None
     telemetry: TelemetrySeries = field(default_factory=TelemetrySeries)
     high_water: int = 0
     improvements: list[dict[str, Any]] = field(default_factory=list)
@@ -252,6 +256,12 @@ class _LaneKernel:
                     _candidate_id(self.spec.campaign_id, self.best_graph),
                 )
             )
+        self.live_frontier_state = (
+            self.graph,
+            self.score,
+            self.current_candidate_id,
+            self.high_water,
+        )
 
     def _new_seed(self, seed: int) -> None:
         self.rng = Random(seed)
@@ -274,6 +284,12 @@ class _LaneKernel:
         self.tabu.append(self.graph.stable_hash())
         self.recent_hashes.clear()
         self.recent_hash_set.clear()
+        self.live_frontier_state = (
+            self.graph,
+            self.score,
+            self.current_candidate_id,
+            self.high_water,
+        )
 
     def restart(self, seed: int) -> None:
         self._new_seed(seed)
@@ -318,6 +334,12 @@ class _LaneKernel:
         self.tabu.append(self.graph.stable_hash())
         self.recent_hashes.clear()
         self.recent_hash_set.clear()
+        self.live_frontier_state = (
+            self.graph,
+            self.score,
+            self.current_candidate_id,
+            self.high_water,
+        )
 
     def patch(self, patch: dict[str, Any]) -> None:
         if "order" in patch and int(patch["order"]) != self.graph.n:
@@ -417,6 +439,12 @@ class _LaneKernel:
             evaluated += 1
             self.algorithm_evaluated += 1
             if candidate == self.graph:
+                self.live_frontier_state = (
+                    self.graph,
+                    self.score,
+                    self.current_candidate_id,
+                    self.high_water + evaluated,
+                )
                 continue
             legal += 1
             duplicate_started = (
@@ -517,6 +545,16 @@ class _LaneKernel:
                     )
             else:
                 self.stagnation += 1
+            self.live_frontier_state = (
+                self.graph,
+                self.score,
+                (
+                    self.current_candidate_id
+                    if self.instrumentation_enabled
+                    else _candidate_id(self.spec.campaign_id, self.graph)
+                ),
+                self.high_water + evaluated,
+            )
         self.high_water += evaluated
         loop_finished = time.perf_counter()
         elapsed = max(loop_finished - started, 1e-9)
@@ -745,6 +783,61 @@ class _LaneKernel:
         return {**payload, "checkpoint_id": f"checkpoint-{digest[:24]}", "sha256": digest}
 
 
+def _live_frontier_payload(
+    *,
+    lane_id: str,
+    lane_version: int,
+    graph: BitGraph,
+    score: ScoreResult,
+    candidate_id: str,
+    high_water: int,
+) -> dict[str, Any]:
+    payload = {
+        "schema_version": 1,
+        "lane_id": lane_id,
+        "lane_version": lane_version,
+        "graph6": graph.to_graph6(),
+        "score": _score_payload(score),
+        "current_candidate_id": candidate_id,
+        "high_water": high_water,
+        "published_at": utc_now(),
+        "transient": True,
+    }
+    digest = hashlib.sha256(
+        canonical_json(payload, max_bytes=LIVE_FRONTIER_PAYLOAD_LIMIT_BYTES)
+    ).hexdigest()
+    return {
+        **payload,
+        "preview_id": f"live-frontier-{digest[:24]}",
+        "sha256": digest,
+    }
+
+
+def _publish_live_frontier(
+    events: Any,
+    spec: LaneSpec,
+    kernel: _LaneKernel,
+    lane_version: int,
+) -> None:
+    graph, score, candidate_id, high_water = kernel.live_frontier_state
+    _emit(
+        events,
+        {
+            "kind": "live_frontier",
+            "lane_id": spec.lane_id,
+            "preview": _live_frontier_payload(
+                lane_id=spec.lane_id,
+                lane_version=lane_version,
+                graph=graph,
+                score=score,
+                candidate_id=candidate_id,
+                high_water=high_water,
+            ),
+            "at": utc_now(),
+        },
+    )
+
+
 def _lane_worker(
     spec: LaneSpec,
     commands: Any,
@@ -756,6 +849,8 @@ def _lane_worker(
     memory_limit_bytes: int | None,
     score_profiling_enabled: bool,
 ) -> None:
+    preview_stop: Event | None = None
+    preview_thread: Thread | None = None
     try:
         set_address_space_limit(memory_limit_bytes)
         kernel = _LaneKernel(
@@ -789,6 +884,23 @@ def _lane_worker(
             },
             important=True,
         )
+        preview_stop = Event()
+
+        def publish_live_frontier() -> None:
+            while not preview_stop.wait(LIVE_FRONTIER_INTERVAL_SECONDS):
+                try:
+                    _publish_live_frontier(
+                        events, spec, kernel, lane_version
+                    )
+                except Exception:
+                    continue
+
+        preview_thread = Thread(
+            target=publish_live_frontier,
+            name=f"sglab-live-frontier-{spec.lane_id}",
+            daemon=True,
+        )
+        preview_thread.start()
         while not stop_event.is_set():
             lane_version, resource_share, current_checkpoint = _apply_commands(
                 spec,
@@ -870,6 +982,11 @@ def _lane_worker(
             important=True,
         )
         raise
+    finally:
+        if preview_stop is not None:
+            preview_stop.set()
+        if preview_thread is not None:
+            preview_thread.join(timeout=1)
 
 
 def _apply_commands(
@@ -1230,6 +1347,9 @@ class LaneManager:
         elif kind == "checkpoint":
             checkpoint = dict(event["checkpoint"])
             self._remember_checkpoint(runtime, checkpoint)
+        elif kind == "live_frontier":
+            preview = dict(event["preview"])
+            self._remember_live_frontier(runtime, preview)
         elif kind == "telemetry":
             metrics = dict(event["metrics"])
             runtime.telemetry.append(metrics)
@@ -1297,6 +1417,21 @@ class LaneManager:
                 expired_path.unlink()
             except FileNotFoundError:
                 pass
+
+    def _remember_live_frontier(
+        self, runtime: LaneRuntime, preview: dict[str, Any]
+    ) -> None:
+        if str(preview.get("lane_id")) != runtime.spec.lane_id:
+            raise ValueError("live frontier lane mismatch")
+        runtime.latest_live_frontier = preview
+        runtime.high_water = max(
+            runtime.high_water, int(preview.get("high_water", 0))
+        )
+        lane_digest = hashlib.sha256(
+            runtime.spec.lane_id.encode("utf-8")
+        ).hexdigest()
+        path = self.checkpoint_dir / f"live-frontier-{lane_digest[:24]}.json"
+        atomic_write_json(path, preview)
 
     def pin_checkpoint(self, checkpoint_id: str) -> None:
         if checkpoint_id not in self.checkpoints:

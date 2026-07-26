@@ -4,6 +4,7 @@ from dataclasses import replace
 from http.client import HTTPConnection
 from pathlib import Path
 from multiprocessing import get_context
+from queue import Queue
 from random import Random
 from shutil import which
 from statistics import median
@@ -23,6 +24,12 @@ from .certification import verify_cpp
 from .external import canonical_graph6
 from .locations import source_root
 from .model import BitGraph, find_cycle_of_length
+from .research.lanes import (
+    LaneSpec,
+    _LaneKernel,
+    _emit,
+    _live_frontier_payload,
+)
 from .resources import (
     current_rss_bytes,
     disk_free_bytes,
@@ -224,7 +231,7 @@ def microbenchmark(
         database_path = Path(directory) / "bench.sqlite3"
         connection = sqlite3.connect(database_path)
         connection.execute("CREATE TABLE metrics (a INTEGER, b REAL)")
-        operations["sqlite_batch_100"] = _measure(
+        operations["sqlite_commit_100_rows"] = _measure(
             lambda: _sqlite_batch(connection), iterations
         )
         connection.close()
@@ -237,6 +244,70 @@ def microbenchmark(
                     "workers": {"alive": 1},
                     "values": list(range(32)),
                 },
+            ),
+            iterations,
+        )
+        pipeline_spec = LaneSpec(
+            lane_id="lane-benchmark",
+            campaign_id="campaign-benchmark",
+            target="erdos_gyarfas",
+            algorithm="random_restart",
+            graph_family="connected_cubic",
+            seed=20260726,
+            parameters={
+                "order": 20,
+                "batch_candidates": 10,
+                "witness_cap": 16,
+            },
+            resource_share=1.0,
+        )
+        pipeline_kernel = _LaneKernel(
+            pipeline_spec,
+            checkpoint=None,
+            fork_seed=None,
+            instrumentation_enabled=True,
+            score_profiling_enabled=False,
+        )
+        never_stop = type(
+            "_BenchmarkStop",
+            (),
+            {"is_set": lambda self: False},
+        )()
+        operations["candidate_evaluation_batch_10_n20"] = _measure(
+            lambda: pipeline_kernel.run_batch(
+                never_stop, max_evaluations=10
+            ),
+            iterations,
+        )
+        operations["checkpoint_serialization_n20"] = _measure(
+            lambda: pipeline_kernel.checkpoint(0), iterations
+        )
+        event_queue: Queue[dict[str, Any]] = Queue(maxsize=1)
+        event = {
+            "kind": "telemetry",
+            "lane_id": pipeline_spec.lane_id,
+            "lane_version": 0,
+            "metrics": pipeline_kernel.run_batch(
+                never_stop, max_evaluations=1
+            ),
+            "at": utc_now(),
+        }
+        operations["telemetry_event_publication"] = _measure(
+            lambda: _queue_event_round_trip(event_queue, event),
+            iterations,
+        )
+        live_path = Path(directory) / "live-frontier.json"
+        operations["live_frontier_publication"] = _measure(
+            lambda: atomic_write_json(
+                live_path,
+                _live_frontier_payload(
+                    lane_id=pipeline_spec.lane_id,
+                    lane_version=0,
+                    graph=pipeline_kernel.graph,
+                    score=pipeline_kernel.score,
+                    candidate_id=pipeline_kernel.current_candidate_id,
+                    high_water=pipeline_kernel.high_water,
+                ),
             ),
             iterations,
         )
@@ -263,8 +334,13 @@ def _sqlite_batch(connection: sqlite3.Connection) -> None:
         [(index, index / 10) for index in range(100)],
     )
     connection.commit()
-    connection.execute("DELETE FROM metrics")
-    connection.commit()
+
+
+def _queue_event_round_trip(
+    events: Queue[dict[str, Any]], event: dict[str, Any]
+) -> None:
+    _emit(events, event)
+    events.get_nowait()
 
 
 def _calibration_case(task: tuple[int, str, int, float]) -> dict[str, Any]:

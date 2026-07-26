@@ -21,6 +21,18 @@ workspace/
 └── reports/
 ```
 
+An active research campaign additionally uses:
+
+```text
+research-campaigns/<campaign-id>/lane-checkpoints/
+├── checkpoint-<content-hash>.json
+└── live-frontier-<lane-hash>.json
+```
+
+Checkpoint files are durable, retained artifacts. Each live-frontier file is
+an atomically overwritten, transient 64 KiB-bounded sample; it is not entered
+in SQLite and is never a Resume source.
+
 ## Safe relative references
 
 SQLite and public reports should store safe relative artifact references and

@@ -318,6 +318,48 @@ class CampaignVisualizationTests(unittest.TestCase):
         atomic_write_json(path, checkpoint)
         return path
 
+    def _write_live_preview(
+        self,
+        *,
+        graph: BitGraph,
+        lane_id: str = "lane-2",
+        high_water: int = 654,
+    ) -> Path:
+        payload = {
+            "schema_version": 1,
+            "lane_id": lane_id,
+            "lane_version": 4,
+            "graph6": graph.to_graph6(),
+            "score": {
+                "valid": True,
+                "witness_counts": {"4": 1},
+                "weighted_penalty": 16,
+                "novelty": 0.5,
+                "simplicity": graph.size(),
+                "complete": False,
+                "ordering_key": [0, 1, 16, 0, graph.size()],
+            },
+            "current_candidate_id": "candidate-live-preview",
+            "high_water": high_water,
+            "published_at": "2026-07-26T12:34:56Z",
+            "transient": True,
+        }
+        digest = hashlib.sha256(
+            canonical_json(payload, max_bytes=64 * 1024)
+        ).hexdigest()
+        preview = {
+            **payload,
+            "preview_id": f"live-frontier-{digest[:24]}",
+            "sha256": digest,
+        }
+        path = (
+            self.campaign_dir
+            / "lane-checkpoints"
+            / "live-frontier-lane-2.json"
+        )
+        atomic_write_json(path, preview)
+        return path
+
     def test_global_lane_and_exact_witness_projection(self) -> None:
         global_best = campaign_graph_visualization(
             self.workspace, source="global_best"
@@ -403,6 +445,37 @@ class CampaignVisualizationTests(unittest.TestCase):
             17,
         )
         self.assertEqual(DEFAULT_LIVE_FRONTIER_INTERVAL_SECONDS, 5)
+
+    def test_live_frontier_prefers_transient_preview_and_falls_back(
+        self,
+    ) -> None:
+        self._write_live_checkpoint(
+            graph=self.first_graph, high_water=321
+        )
+        preview_path = self._write_live_preview(
+            graph=self.second_graph, high_water=654
+        )
+        selected = campaign_graph_visualization(
+            self.workspace, source="live_frontier"
+        )
+        self.assertEqual(
+            selected["selection"]["candidate_id"],
+            "candidate-live-preview",
+        )
+        self.assertEqual(selected["selection"]["high_water"], 654)
+        self.assertEqual(
+            selected["selection"]["published_at"],
+            "2026-07-26T12:34:56Z",
+        )
+        preview_path.write_text("{}", encoding="utf-8")
+        fallback = campaign_graph_visualization(
+            self.workspace, source="live_frontier"
+        )
+        self.assertEqual(
+            fallback["selection"]["candidate_id"],
+            "candidate-live-frontier",
+        )
+        self.assertEqual(fallback["selection"]["high_water"], 321)
 
     def test_live_frontier_rejects_symlinked_checkpoint_directory(
         self,

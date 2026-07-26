@@ -23,6 +23,7 @@ VISUALIZATION_VERIFICATION_LIMIT = 64
 VISUALIZATION_CYCLE_NODE_BUDGET = 20_000
 VISUALIZATION_MANIFEST_LIMIT_BYTES = 1024 * 1024
 VISUALIZATION_LIVE_CHECKPOINT_LIMIT_BYTES = 1024 * 1024
+VISUALIZATION_LIVE_PREVIEW_LIMIT_BYTES = 64 * 1024
 VISUALIZATION_LIVE_CHECKPOINT_SCAN_LIMIT = 256
 VISUALIZATION_LIVE_DIRECTORY_ENTRY_LIMIT = 2048
 DEFAULT_LIVE_FRONTIER_INTERVAL_SECONDS = 5
@@ -444,44 +445,62 @@ def _select_live_checkpoint(
         raise VisualizationUnavailableError(
             "live checkpoint directory is unavailable"
         )
-    candidates: list[tuple[int, Path]] = []
+    previews: list[tuple[int, Path]] = []
+    checkpoints: list[tuple[int, Path]] = []
     for inspected, path in enumerate(checkpoint_dir.iterdir(), start=1):
         if inspected > VISUALIZATION_LIVE_DIRECTORY_ENTRY_LIMIT:
             break
-        if (
-            path.name.startswith("checkpoint-")
-            and path.name.endswith(".json")
-        ):
-            try:
-                file_stat = path.lstat()
-            except FileNotFoundError:
-                continue
-            if (
-                stat.S_ISREG(file_stat.st_mode)
-                and 0 < file_stat.st_size
-                <= VISUALIZATION_LIVE_CHECKPOINT_LIMIT_BYTES
-            ):
-                candidates.append((file_stat.st_mtime_ns, path))
-    candidates.sort(key=lambda item: (item[0], item[1].name), reverse=True)
-    candidates = candidates[:VISUALIZATION_LIVE_CHECKPOINT_SCAN_LIMIT]
-    fallback: dict[str, Any] | None = None
-    for modified_ns, path in candidates:
-        try:
-            checkpoint = _read_live_checkpoint(path)
-        except (OSError, ValueError, json.JSONDecodeError):
+        if not path.name.endswith(".json"):
             continue
-        checkpoint_lane = str(checkpoint.get("lane_id") or "")
-        if checkpoint_lane not in known_lanes:
-            continue
-        if lane_id is not None and checkpoint_lane != lane_id:
-            continue
-        selected = _live_checkpoint_selection(
-            checkpoint, modified_ns=modified_ns
+        limit = (
+            VISUALIZATION_LIVE_PREVIEW_LIMIT_BYTES
+            if path.name.startswith("live-frontier-")
+            else (
+                VISUALIZATION_LIVE_CHECKPOINT_LIMIT_BYTES
+                if path.name.startswith("checkpoint-")
+                else None
+            )
         )
-        if lane_id is not None or checkpoint_lane in active_lanes:
-            return selected
-        if fallback is None:
-            fallback = selected
+        if limit is None:
+            continue
+        try:
+            file_stat = path.lstat()
+        except FileNotFoundError:
+            continue
+        if (
+            stat.S_ISREG(file_stat.st_mode)
+            and 0 < file_stat.st_size <= limit
+        ):
+            collection = (
+                previews
+                if path.name.startswith("live-frontier-")
+                else checkpoints
+            )
+            collection.append((file_stat.st_mtime_ns, path))
+    for collection in (previews, checkpoints):
+        collection.sort(
+            key=lambda item: (item[0], item[1].name), reverse=True
+        )
+        del collection[VISUALIZATION_LIVE_CHECKPOINT_SCAN_LIMIT:]
+    fallback: dict[str, Any] | None = None
+    for collection in (previews, checkpoints):
+        for modified_ns, path in collection:
+            try:
+                checkpoint = _read_live_checkpoint(path)
+            except (OSError, ValueError, json.JSONDecodeError):
+                continue
+            checkpoint_lane = str(checkpoint.get("lane_id") or "")
+            if checkpoint_lane not in known_lanes:
+                continue
+            if lane_id is not None and checkpoint_lane != lane_id:
+                continue
+            selected = _live_checkpoint_selection(
+                checkpoint, modified_ns=modified_ns
+            )
+            if lane_id is not None or checkpoint_lane in active_lanes:
+                return selected
+            if fallback is None:
+                fallback = selected
     if fallback is not None:
         return fallback
     raise VisualizationUnavailableError(
@@ -496,10 +515,14 @@ def _read_live_checkpoint(path: Path) -> dict[str, Any]:
     descriptor = os.open(path, flags)
     try:
         before = os.fstat(descriptor)
+        size_limit = (
+            VISUALIZATION_LIVE_PREVIEW_LIMIT_BYTES
+            if path.name.startswith("live-frontier-")
+            else VISUALIZATION_LIVE_CHECKPOINT_LIMIT_BYTES
+        )
         if (
             not stat.S_ISREG(before.st_mode)
-            or not 0 < before.st_size
-            <= VISUALIZATION_LIVE_CHECKPOINT_LIMIT_BYTES
+            or not 0 < before.st_size <= size_limit
         ):
             raise ValueError("live checkpoint is unavailable")
         chunks = []
@@ -524,22 +547,30 @@ def _read_live_checkpoint(path: Path) -> dict[str, Any]:
     value = json.loads(payload)
     if not isinstance(value, dict):
         raise ValueError("live checkpoint must be an object")
-    checkpoint_id = value.get("checkpoint_id")
+    is_preview = path.name.startswith("live-frontier-")
+    checkpoint_id = value.get(
+        "preview_id" if is_preview else "checkpoint_id"
+    )
     digest = value.get("sha256")
     unsigned = {
         key: item
         for key, item in value.items()
-        if key not in {"checkpoint_id", "sha256"}
+        if key
+        not in {
+            "preview_id" if is_preview else "checkpoint_id",
+            "sha256",
+        }
     }
     calculated = hashlib.sha256(
         canonical_json(
             unsigned,
-            max_bytes=VISUALIZATION_LIVE_CHECKPOINT_LIMIT_BYTES,
+            max_bytes=size_limit,
         )
     ).hexdigest()
+    identifier_prefix = "live-frontier" if is_preview else "checkpoint"
     if (
         not isinstance(checkpoint_id, str)
-        or checkpoint_id != f"checkpoint-{calculated[:24]}"
+        or checkpoint_id != f"{identifier_prefix}-{calculated[:24]}"
         or digest != calculated
     ):
         raise ValueError("live checkpoint integrity mismatch")
@@ -562,6 +593,14 @@ def _live_checkpoint_selection(
         or not lane_id
     ):
         raise ValueError("live checkpoint is incomplete")
+    artifact_id = checkpoint.get(
+        "preview_id", checkpoint.get("checkpoint_id")
+    )
+    published_at = checkpoint.get("published_at")
+    if not isinstance(published_at, str):
+        published_at = datetime.fromtimestamp(
+            modified_ns / 1_000_000_000, tz=UTC
+        ).isoformat().replace("+00:00", "Z")
     return {
         "candidate_id": candidate_id,
         "graph6": graph6,
@@ -571,14 +610,12 @@ def _live_checkpoint_selection(
         "score_json": json.dumps(score, sort_keys=True),
         "lane_id": lane_id,
         "lane_version": int(checkpoint.get("lane_version", 0)),
-        "checkpoint_ref": str(checkpoint["checkpoint_id"]),
-        "checkpoint_id": str(checkpoint["checkpoint_id"]),
+        "checkpoint_ref": str(artifact_id),
+        "checkpoint_id": str(artifact_id),
         "created_at": datetime.fromtimestamp(
             modified_ns / 1_000_000_000, tz=UTC
         ).isoformat().replace("+00:00", "Z"),
-        "published_at": datetime.fromtimestamp(
-            modified_ns / 1_000_000_000, tz=UTC
-        ).isoformat().replace("+00:00", "Z"),
+        "published_at": published_at,
         "state": "live_frontier",
         "certification_status": None,
         "candidate_snapshot_id": None,

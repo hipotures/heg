@@ -2,7 +2,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from sglab.benchmark import calibrate, quantiles, soak, write_report
+from sglab.benchmark import (
+    calibrate,
+    microbenchmark,
+    quantiles,
+    soak,
+    write_report,
+)
 
 
 class BenchmarkTests(unittest.TestCase):
@@ -11,6 +17,20 @@ class BenchmarkTests(unittest.TestCase):
         self.assertEqual(result["p50"], 3)
         self.assertEqual(result["p90"], 100)
         self.assertEqual(result["maximum"], 100)
+
+    def test_microbenchmark_separates_search_pipeline_stages(self) -> None:
+        operations = microbenchmark(
+            iterations=1, orders=(20,)
+        )["operations"]
+        self.assertTrue(
+            {
+                "candidate_evaluation_batch_10_n20",
+                "checkpoint_serialization_n20",
+                "sqlite_commit_100_rows",
+                "telemetry_event_publication",
+                "live_frontier_publication",
+            }.issubset(operations)
+        )
 
     def test_short_calibration_covers_frontier_gates_and_writes_reports(self) -> None:
         report = calibrate(0.002, seeds=1, jobs=2)

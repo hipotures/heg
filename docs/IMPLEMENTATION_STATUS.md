@@ -2,6 +2,23 @@
 
 Last implementation audit: **2026-07-26**.
 
+## Transient live-frontier publication
+
+Search workers now publish the already accepted graph and score at most once
+per second during long batches. Publication does not call `cheap_score()` or
+build a full checkpoint. The coordinator atomically overwrites one
+SHA-256-protected, 64 KiB-bounded preview file per lane; no preview history,
+SQLite row, log line, or scientific event is created. The visualization reader
+prefers a valid preview and falls back to the latest valid durable checkpoint.
+
+The standard microbenchmark now reports candidate evaluation, checkpoint
+serialization, SQLite commit, telemetry/event enqueue, and live-frontier
+publication separately. A 10-sample `n=20` run measured medians of 5.672 ms per
+10-candidate evaluation batch, 0.818 ms checkpoint serialization, 0.066 ms per
+100-row SQLite commit, 0.001 ms telemetry/event enqueue, and 0.097 ms
+live-frontier publication. See
+`docs/reports/M6_LIVE_FRONTIER_PUBLICATION.md`.
+
 ## Count-only hot-loop scorer and batch-local profiling
 
 The Erdős–Gyárfás ranking path now uses a reusable lane-local iterative

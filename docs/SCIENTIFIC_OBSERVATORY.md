@@ -22,16 +22,21 @@ selection, and the selected vertex survive the dashboard's periodic refresh.
 The display uses a deterministic layout so an unchanged candidate does not
 jump between polls.
 
-`Live search frontier` reads the newest integrity-checked lane checkpoint and
-shows its current accepted graph. A dropdown directly after the graph-source
-selector sets the browser sampling interval to 1, 2, 3, 4, or 5 seconds and
-appears only in live-frontier mode. The default is 5 seconds and the selection
-persists for the browser session. Live graphs are
+`Live search frontier` first reads the newest integrity-checked transient lane
+preview and falls back to an integrity-checked checkpoint when no valid
+preview exists. Each active worker may publish at most one preview per second
+by copying its already accepted graph and score; it does not rescore the graph
+or serialize a full checkpoint. The coordinator atomically overwrites one
+64 KiB-bounded file per lane and does not create a SQLite row. A dropdown
+directly after the graph-source selector sets the browser sampling interval to
+1, 2, 3, 4, or 5 seconds and appears only in live-frontier mode. The default is
+5 seconds and the selection persists for the browser session. Live graphs are
 labelled transient heuristic telemetry: they are neither retained scientific
-records nor exact certification. Checkpoint files are bounded to 1 MiB, read
-without following symlinks, and verified against their stored SHA-256 before
-decoding. When the campaign is not running, the toolbar says `Frontier paused`
-and shows the campaign state/fault without presenting a stale sample timestamp.
+records nor exact certification. Preview files are bounded to 64 KiB and
+checkpoint files to 1 MiB; both are read without following symlinks and
+verified against their stored SHA-256 before decoding. When the campaign is not
+running, the toolbar says `Frontier paused` and shows the campaign state/fault
+without presenting a stale sample timestamp.
 
 Cycle layers use separate styles for lengths 4, 8, 16, 32, and other relevant
 lengths. Display-cycle examples come from a bounded local scan and are always
@@ -76,8 +81,8 @@ displayable record returns `409`.
 
 The service opens SQLite in read-only mode. Verification manifests are read
 only through a campaign-root-contained, non-symlink path and have a 1 MiB
-display limit. Live checkpoints use the same no-follow and bounded-read
-principles, and their internal checkpoint hash is recomputed. No endpoint
+display limit. Live previews and checkpoints use the same no-follow and
+bounded-read principles, and their internal hash is recomputed. No endpoint
 writes campaign data, follows a symlink, starts search, calls a model, or
 schedules verification.
 

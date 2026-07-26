@@ -32,6 +32,9 @@ collections. Current visualizations include campaign scientific observatory
 and live search-frontier views. The live-frontier graph has an independent
 browser-session sampling control with allowlisted intervals from 1 to 5
 seconds; other dashboard data retains the dashboard-wide polling cadence.
+The server prefers the lane's 64 KiB transient live-frontier file and falls
+back to the latest integrity-checked durable checkpoint. Reading the preview
+does not trigger scoring, checkpoint creation, or a database write.
 
 ## Graph visualization
 
