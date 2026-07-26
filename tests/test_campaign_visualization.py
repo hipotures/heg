@@ -623,6 +623,12 @@ class CampaignVisualizationTests(unittest.TestCase):
                 b"LIVE_FRONTIER_INTERVAL_SECONDS = [1, 2, 3, 4, 5]",
                 javascript,
             )
+            self.assertIn(b"<dt>Throughput</dt>", javascript)
+            self.assertIn(
+                b"latestLaneWindows.get(selection.lane_id)",
+                javascript,
+            )
+            self.assertIn(b"Math.round(throughput)", javascript)
             self.assertNotIn(b"last sample", javascript)
             self.assertNotIn(b"sampling \xc2\xb7 sample", javascript)
         finally:
