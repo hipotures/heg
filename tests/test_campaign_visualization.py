@@ -637,12 +637,23 @@ class CampaignVisualizationTests(unittest.TestCase):
                 b"LIVE_FRONTIER_INTERVAL_SECONDS = [1, 2, 3, 4, 5]",
                 javascript,
             )
-            self.assertIn(b"<dt>Throughput</dt>", javascript)
+            self.assertIn(b"<dt>Aggregate throughput</dt>", javascript)
             self.assertIn(
-                b"latestLaneWindows.get(selection.lane_id)",
+                b".filter(lane => lane.state === 'running')",
                 javascript,
             )
-            self.assertIn(b"Math.round(throughput)", javascript)
+            self.assertIn(
+                b"measuredLaneRates.reduce((total, rate) => total + rate, 0)",
+                javascript,
+            )
+            self.assertIn(
+                b"Sum of latest completed measurements from",
+                javascript,
+            )
+            self.assertIn(
+                b"Math.round(aggregateThroughput)",
+                javascript,
+            )
             self.assertIn(
                 b'<dt>Graph SHA-256</dt><dd title="',
                 javascript,

@@ -35,6 +35,11 @@ seconds; other dashboard data retains the dashboard-wide polling cadence.
 The server prefers the lane's 64 KiB transient live-frontier file and falls
 back to the latest integrity-checked durable checkpoint. Reading the preview
 does not trigger scoring, checkpoint creation, or a database write.
+The live-frontier inspector derives aggregate campaign throughput by summing
+the latest completed metric window for each running lane. Missing first-batch
+measurements do not erase the available aggregate; the UI exposes measured
+versus running-lane coverage in the value tooltip. Per-lane throughput remains
+available in the lane view.
 
 ## Graph visualization
 

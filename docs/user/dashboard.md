@@ -73,6 +73,10 @@ after the graph-source selector to choose a 1–5 second refresh interval. The
 choice lasts for the current browser session. During a long search batch the
 graph may advance from a lightweight one-second lane preview; this preview
 reuses the existing score, is not a checkpoint, and is not certification.
+The live-frontier inspector reports aggregate campaign throughput: the sum of
+the latest completed throughput measurement for every running lane. Until a
+new lane completes its first batch, the value sums the available running-lane
+measurements and its tooltip reports measurement coverage.
 
 [screenshot: ID=USR-DASHBOARD-01; save as docs/assets/screenshots/user/dashboard/scientific-observatory.png; crop the complete “Scientific observatory” or “Search frontier” panel with the graph visualization, legend, current/best candidate selector, lane/frontier points, and any 2D/3D or camera controls; include the panel title and exclude unrelated campaign forms.]
 

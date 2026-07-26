@@ -2,6 +2,17 @@
 
 Last implementation audit: **2026-07-26**.
 
+## Aggregate live-frontier throughput
+
+The live-frontier inspector now labels throughput as a campaign aggregate and
+sums the latest completed measurement for every running lane. A lane that has
+not yet completed its first batch no longer makes the whole value unavailable:
+the available running-lane measurements remain visible, with measured/running
+coverage in the tooltip. The lane visualization continues to report
+lane-specific throughput. This is a read-only projection over existing
+batch-level telemetry; it adds no scoring, checkpoint, SQLite, event, or
+per-candidate work.
+
 ## Director verification-target schema
 
 The dynamic Director output schema now restricts every

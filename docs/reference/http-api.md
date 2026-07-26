@@ -24,10 +24,17 @@ GET /api/candidates?limit=<n>
 GET /api/logs?limit=<n>
 GET /api/artifact/<candidate-id>.<graph6|json|svg>
 GET /api/research-campaign
+GET /api/research-campaign/visualization/graph
+GET /api/research-campaign/visualization/series
 GET /api/comparisons/<id>
 GET /api/comparisons/<id>/progress
 GET /api/comparisons/<id>/turns
 ```
+
+The bounded visualization series contains lane lifecycle summaries and
+completed metric windows. The dashboard sums the latest completed throughput
+window for every lane whose current state is `running`; lane-specific values
+remain separate evidence.
 
 ## Core write APIs
 

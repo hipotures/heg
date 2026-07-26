@@ -493,12 +493,22 @@
       for (const window of state.series?.lane_windows || []) {
         latestLaneWindows.set(window.lane_id, window);
       }
-      const throughput = numeric(
-        latestLaneWindows.get(selection.lane_id)?.candidates_per_second
-      );
-      const throughputLabel = throughput === null
+      const activeLanes = (state.series?.lanes || [])
+        .filter(lane => lane.state === 'running');
+      const measuredLaneRates = activeLanes
+        .map(lane => numeric(
+          latestLaneWindows.get(lane.lane_id)?.candidates_per_second
+        ))
+        .filter(rate => rate !== null);
+      const aggregateThroughput = measuredLaneRates.length
+        ? measuredLaneRates.reduce((total, rate) => total + rate, 0)
+        : null;
+      const throughputLabel = aggregateThroughput === null
         ? 'Unavailable'
-        : `${Math.round(throughput).toLocaleString()}/s`;
+        : `${Math.round(aggregateThroughput).toLocaleString()}/s`;
+      const throughputTitle = measuredLaneRates.length
+        ? `Sum of latest completed measurements from ${measuredLaneRates.length} of ${activeLanes.length} running lanes`
+        : 'No completed throughput measurement is available for a running lane';
       const lengths = [...new Set([
         ...data.cycle_examples.map(item => Number(item.length)),
         ...(exact?.witnesses || []).map(item => Number(item.length)),
@@ -540,7 +550,7 @@
           <div><dt>Score coverage</dt><dd>${score.complete === false ? 'Approximate / truncated' : score.complete === true ? 'Complete' : 'Unrecorded'}</dd></div>
           ${selection.transient ? `<div><dt>Lane evaluations</dt><dd>${fmt(selection.high_water)}</dd></div>` : ''}
           <div><dt>Graph SHA-256</dt><dd title="${esc(selection.graph_sha256)}">${esc(shortId(selection.graph_sha256))}</dd></div>
-          ${selection.transient ? `<div><dt>Throughput</dt><dd>${throughputLabel}</dd></div>` : ''}
+          ${selection.transient ? `<div><dt>Aggregate throughput</dt><dd title="${esc(throughputTitle)}">${throughputLabel}</dd></div>` : ''}
         </dl>
         ${selection.transient
           ? '<div class="observatory-warning">Live frontier is transient heuristic telemetry. It is not a retained scientific record or exact certification.</div>'
