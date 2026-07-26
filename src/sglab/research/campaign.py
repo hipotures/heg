@@ -565,7 +565,7 @@ def campaign_status(workspace: Path, campaign_id: str | None = None) -> dict[str
             for row in connection.execute("PRAGMA table_info(app_server_turns)")
         }
         attempt_turn_fields = (
-            ", execution_attempt_id, memory_snapshot_id"
+            ", t.execution_attempt_id, t.memory_snapshot_id"
             if {"execution_attempt_id", "memory_snapshot_id"}.issubset(
                 turn_columns
             )
@@ -575,14 +575,19 @@ def campaign_status(workspace: Path, campaign_id: str | None = None) -> dict[str
             dict(row)
             for row in connection.execute(
                 f"""
-                SELECT turn_record_id, thread_id, turn_id, status, wall_seconds,
-                       input_tokens, cached_input_tokens,
-                       cache_write_input_tokens, output_tokens,
-                       reasoning_output_tokens, total_tokens, started_at,
-                       completed_at, error_kind, final_agent_item_id,
-                       thread_lifecycle {attempt_turn_fields}
-                FROM app_server_turns WHERE campaign_id=?
-                ORDER BY started_at DESC, rowid DESC LIMIT 10
+                SELECT t.turn_record_id, t.thread_id, t.turn_id, t.status,
+                       t.wall_seconds, t.input_tokens, t.cached_input_tokens,
+                       t.cache_write_input_tokens, t.output_tokens,
+                       t.reasoning_output_tokens, t.total_tokens, t.started_at,
+                       t.completed_at, t.error_kind, t.final_agent_item_id,
+                       t.thread_lifecycle, s.model_requested AS model,
+                       s.effort_requested AS reasoning_effort
+                       {attempt_turn_fields}
+                FROM app_server_turns AS t
+                JOIN app_server_sessions AS s
+                  ON s.session_record_id=t.session_record_id
+                WHERE t.campaign_id=?
+                ORDER BY t.started_at DESC, t.rowid DESC LIMIT 10
                 """,
                 (selected,),
             )

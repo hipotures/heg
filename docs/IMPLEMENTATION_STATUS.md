@@ -2,6 +2,14 @@
 
 Last implementation audit: **2026-07-26**.
 
+## Director turn model and effort provenance
+
+Persistent App Server turn cards now show a compact `model:effort` badge next
+to their validity and thread-lifecycle badges. Values come from the immutable
+App Server session joined to that specific turn, rather than from current
+campaign settings, so historical turns retain their actual requested contract.
+The badge wraps with the existing status row on narrow screens.
+
 ## Browser-local timestamps across the UI
 
 Every primary timestamp on the dashboard, scientific observatory, and

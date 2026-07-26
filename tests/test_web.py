@@ -264,10 +264,23 @@ class WebAssetsTests(unittest.TestCase):
                     },
                     wall_seconds=1.0,
                 )
+            atomic_write_json(
+                workspace / "active-research-campaign.json",
+                {"campaign_id": "campaign-1"},
+            )
             server = create_server(workspace, "127.0.0.1", 0)
             thread = Thread(target=server.serve_forever, daemon=True)
             thread.start()
             connection = HTTPConnection(*server.server_address, timeout=2)
+            connection.request("GET", "/api/research-campaign")
+            response = connection.getresponse()
+            self.assertEqual(response.status, 200)
+            campaign = json.loads(response.read())
+            self.assertEqual(campaign["turns"][0]["model"], "gpt-5.6-luna")
+            self.assertEqual(
+                campaign["turns"][0]["reasoning_effort"],
+                "high",
+            )
             connection.request(
                 "GET",
                 "/api/research-campaign/turn/turn-record-1/communication",

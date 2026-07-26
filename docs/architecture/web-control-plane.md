@@ -58,7 +58,9 @@ lane revisions, runs, live-frontier publication, retained-candidate history,
 and comparison creation. Original values remain in semantic `time` elements
 and tooltips; technical raw JSON, persistence, ordering, and API responses stay
 in UTC. Persistent App Server turns retain their descending `started_at`
-order.
+order. Each turn also joins its immutable App Server session record and shows
+the requested model and reasoning effort as a compact `model:effort` badge;
+the dashboard does not infer this provenance from current campaign state.
 The live-frontier inspector derives aggregate campaign throughput by summing
 the latest completed metric window for each running lane. Missing first-batch
 measurements do not erase the available aggregate; the UI exposes measured

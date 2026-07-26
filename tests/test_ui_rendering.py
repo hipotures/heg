@@ -217,6 +217,14 @@ class SemanticUiRenderingTests(unittest.TestCase):
         self.assertIn("localTimeHtml(r.applied_at)", dashboard)
         self.assertIn("localTimeHtml(r.created_at)", dashboard)
         self.assertIn("'Stored UTC':'Stored timestamp'", dashboard)
+        self.assertIn(
+            "${esc(row.model)}:${esc(row.reasoning_effort)}",
+            dashboard,
+        )
+        self.assertIn(
+            'title="Requested model and reasoning effort"',
+            dashboard,
+        )
         comparison = self.decode(comparisons_page())
         self.assertIn("new Intl.DateTimeFormat('pl-PL'", comparison)
         self.assertIn("hourCycle:'h23'", comparison)

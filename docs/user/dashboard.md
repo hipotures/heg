@@ -93,6 +93,8 @@ applies across campaign attempts, Director records, events, lane history,
 search runs, graph provenance, candidate history, and comparison suites.
 Persistent App Server turns remain newest first. Hover a local timestamp to
 inspect its original persisted UTC value; raw technical JSON remains unchanged.
+Each turn's status row also shows the model and reasoning effort recorded for
+its App Server session in `model:effort` form.
 
 [screenshot: ID=USR-DASHBOARD-01; save as docs/assets/screenshots/user/dashboard/scientific-observatory.png; crop the complete “Scientific observatory” or “Search frontier” panel with the graph visualization, legend, current/best candidate selector, lane/frontier points, and any 2D/3D or camera controls; include the panel title and exclude unrelated campaign forms.]
 

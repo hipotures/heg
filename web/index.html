@@ -430,7 +430,10 @@ function turnsView(rows){
     const output=`${fmt(row.output_tokens)} tokens`;
     const reasoning=`${fmt(row.reasoning_output_tokens)} reasoning`;
     const started=row.started_at||'';
-    return `<article class="turn-card"><div class="turn-card-head"><div><div class="chips">${badge(row.status)} ${badge(row.thread_lifecycle||'unrecorded')}</div><h3>Director turn ${idText(row.turn_id||'pending')}</h3><div class="meta">Thread ${id(row.thread_id)}</div><div class="meta">Started locally · ${localTimeHtml(started)}</div></div>${row.error_kind?`<div class="effect bad"><strong>${esc(label(row.error_kind))}</strong></div>`:''}</div><div class="turn-metrics">${metricTile('Latency',latency)}${metricTile('Input',`<strong>${esc(input)}</strong><span>${esc(cached)}</span>`,'',`${input} · ${cached}`)}${metricTile('Output',`<strong>${esc(output)}</strong><span>${esc(reasoning)}</span>`,'',`${output} · ${reasoning}`)}${metricTile('Server total',fmt(row.total_tokens),'emphasis')}</div>${turnCommunication(row)}</article>`;
+    const modelEffortChip=row.model&&row.reasoning_effort
+      ?`<span class="chip" title="Requested model and reasoning effort">${esc(row.model)}:${esc(row.reasoning_effort)}</span>`
+      :'';
+    return `<article class="turn-card"><div class="turn-card-head"><div><div class="chips">${badge(row.status)} ${badge(row.thread_lifecycle||'unrecorded')}${modelEffortChip}</div><h3>Director turn ${idText(row.turn_id||'pending')}</h3><div class="meta">Thread ${id(row.thread_id)}</div><div class="meta">Started locally · ${localTimeHtml(started)}</div></div>${row.error_kind?`<div class="effect bad"><strong>${esc(label(row.error_kind))}</strong></div>`:''}</div><div class="turn-metrics">${metricTile('Latency',latency)}${metricTile('Input',`<strong>${esc(input)}</strong><span>${esc(cached)}</span>`,'',`${input} · ${cached}`)}${metricTile('Output',`<strong>${esc(output)}</strong><span>${esc(reasoning)}</span>`,'',`${output} · ${reasoning}`)}${metricTile('Server total',fmt(row.total_tokens),'emphasis')}</div>${turnCommunication(row)}</article>`;
   }).join('')}</div>`;
 }
 async function loadTurnCommunication(details,refreshView=null){
