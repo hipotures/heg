@@ -19,6 +19,14 @@ client-limit compaction and verifies that both submitted repair states are
 equal. The paused production database was captured with SQLite Online Backup;
 schema v16 passed integrity and foreign-key checks.
 
+Production attempt 15 exercised the exact failed boundary: its first response
+was `completed_invalid`, then a fresh repair turn started and completed
+without the former snapshot mismatch. The repair response remained invalid
+for one inadmissible verification candidate, so the whole action batch was
+correctly rejected and the campaign stopped after its single allowed repair.
+This later model-output fault executed no action and is separate from the
+repaired state-identity protocol.
+
 ## Versioned duplicate keys and independent sample provenance
 
 Lane checkpoints now record canonical `duplicate_key_scheme` values while

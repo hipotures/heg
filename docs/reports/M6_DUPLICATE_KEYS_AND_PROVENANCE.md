@@ -114,3 +114,9 @@ the restored tracker, telemetry payload and new in-memory checkpoint each
 contained zero. All 100 candidate evaluations agreed between C++ and Python,
 with zero fallbacks and zero parity mismatches, and the source checkpoint file
 hash was unchanged.
+
+Attempt 13 then confirmed the deployed behavior in five consecutive durable
+telemetry windows: each reported `independent_sample`, zero mutation-ancestry
+records, zero ancestry-construction seconds, zero scorer fallbacks and zero
+parity mismatches. Observed throughput ranged from 684.3 to 790.9
+candidates/s before an external terminal interrupt stopped the attempt.

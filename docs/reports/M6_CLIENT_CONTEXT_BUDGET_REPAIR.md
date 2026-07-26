@@ -112,3 +112,21 @@ SHA-256
 `7ad6b1ee2e3e1757d2c83fbf4e059603d83d290713a6dff77de72c55d17109a0`;
 `PRAGMA integrity_check` returned `ok` and
 `PRAGMA foreign_key_check` returned no rows.
+
+### Live acceptance
+
+Attempt 15 reached the same production repair boundary under commit
+`6820e93eb27a5a98f001a7cd33664dabba1872bb`:
+
+```text
+first turn  -> completed_invalid, 75.50 s
+repair turn -> completed_invalid, 81.62 s
+```
+
+Both turns referenced
+`snapshot-312187900f3a458d88a04b11d31b10cb`. The repair started normally; the
+former `prompt DirectorStateV2 does not match the committed snapshot` fault
+did not recur. Offline validation found that the repair fixed the first
+response's inadmissible evidence IDs but retained one inadmissible candidate
+in `schedule_verification`. The host therefore rejected the complete batch
+and stopped after the one allowed repair, with no action dispatched.
