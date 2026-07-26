@@ -435,6 +435,20 @@ class CampaignContinuityTests(unittest.TestCase):
             self.skipTest("real campaign compatibility workspace unavailable")
         database = root / "results.sqlite3"
         before = database.stat()
+        with sqlite3.connect(
+            f"file:{database.resolve()}?mode=ro",
+            uri=True,
+        ) as connection:
+            expected_attempt_index = int(
+                connection.execute(
+                    """
+                    SELECT coalesce(max(attempt_index), 0) + 1
+                    FROM campaign_execution_attempts
+                    WHERE campaign_id=?
+                    """,
+                    ("campaign-b68ec445388e49b2be0b6fabf8ff6600",),
+                ).fetchone()[0]
+            )
         preview = build_resume_preview(
             root,
             "campaign-b68ec445388e49b2be0b6fabf8ff6600",
@@ -447,7 +461,10 @@ class CampaignContinuityTests(unittest.TestCase):
             code_commit="offline-test",
         )
         after = database.stat()
-        self.assertEqual(preview["proposed_attempt_index"], 2)
+        self.assertEqual(
+            preview["proposed_attempt_index"],
+            expected_attempt_index,
+        )
         self.assertEqual(preview["reusable_checkpoint_count"], 6)
         self.assertEqual(
             preview["historical_stale_actions_excluded"][0]["action_id"],

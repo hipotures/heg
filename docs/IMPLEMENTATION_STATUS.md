@@ -1,6 +1,6 @@
 # Implementation Status
 
-Last implementation audit: **2026-07-25**.
+Last implementation audit: **2026-07-26**.
 
 ## Campaign execution attempts, candidate lifetime, and scientific memory
 
@@ -53,6 +53,14 @@ execution-attempt row before claiming that Resume started and reports a
 pre-attempt subprocess exit instead of returning a misleading PID. Resume
 previews continue to report historical stale actions after they are already
 terminalized.
+
+The first attempt-scoped production Resume then exposed a second compatibility
+boundary: expected App Server wrappers were accepted below the legacy
+`runtime-groups` tree but not below the new immutable attempt
+`application-data` tree. The same strict four-name, `codex-arg0-*`,
+trusted-executable policy now recognizes both private layouts. Targets remain
+non-followed for accounting, wrong-directory/untrusted links remain rejected,
+and the failed execution attempt remains immutable historical evidence.
 
 ## First real graph campaign authorization gate
 

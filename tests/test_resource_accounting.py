@@ -129,6 +129,63 @@ class ResourceAccountingTests(unittest.TestCase):
                 0,
             )
 
+    def test_attempt_scoped_app_server_wrappers_are_trusted_and_not_followed(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            root = base / "attempt"
+            target_root = base / "codex-install"
+            target = target_root / "vendor" / "wrapper"
+            target.parent.mkdir(parents=True)
+            target.write_bytes(b"x" * 8192)
+            target.chmod(0o755)
+            wrapper_dir = (
+                root
+                / "application-data"
+                / "director"
+                / "codex-home"
+                / "tmp"
+                / "arg0"
+                / "codex-arg0-runtime"
+            )
+            wrapper_dir.mkdir(parents=True)
+            for name in (
+                "apply_patch",
+                "applypatch",
+                "codex-execve-wrapper",
+                "codex-linux-sandbox",
+            ):
+                (wrapper_dir / name).symlink_to(target)
+            report = account_execution_root(
+                root,
+                trusted_symlink_roots=(
+                    TrustedSymlinkRoot(target_root, "test_codex_install"),
+                ),
+            )
+            self.assertEqual(report.symlink_policy_status, "passed")
+            self.assertEqual(
+                {
+                    value.classification for value in report.symlinks
+                },
+                {"expected_runtime_wrapper"},
+            )
+            self.assertTrue(
+                all(
+                    value.relative_path.startswith(
+                        "app-server-tmp/arg0/"
+                    )
+                    for value in report.symlinks
+                )
+            )
+            self.assertEqual(
+                sum(
+                    category.apparent_bytes
+                    for category in report.categories.values()
+                ),
+                0,
+            )
+
     def test_expected_basename_in_wrong_directory_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary)

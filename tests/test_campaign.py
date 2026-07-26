@@ -15,6 +15,7 @@ from sglab.research.campaign import (
     PRODUCTION_DIRECTOR_MODEL,
     PRODUCTION_MAXIMUM_DIRECTOR_TURNS,
     ResearchCampaignRunner,
+    campaign_attempt_application_data,
     campaign_status,
     load_prepared_campaign_plan,
     parse_duration,
@@ -239,6 +240,83 @@ class CampaignOperatorContractTests(unittest.TestCase):
             telemetry = json.loads(
                 (
                     campaign_dir
+                    / "director"
+                    / "runtime-resource-telemetry.json"
+                ).read_text(encoding="utf-8")
+            )
+            self.assertEqual(telemetry["enforcement"], "continue")
+            self.assertEqual(
+                {
+                    row["classification"]
+                    for row in telemetry["symlinks"]
+                },
+                {"expected_runtime_wrapper"},
+            )
+
+    def test_resumed_attempt_accepts_expected_wrapper_symlinks(self) -> None:
+        codex = shutil.which("codex")
+        if codex is None:
+            self.skipTest("installed codex is unavailable")
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            (workspace / "workspace.json").write_text(
+                json.dumps(
+                    {
+                        "workspace_kind": "first_real_graph_campaign",
+                        "synthetic_data": False,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with ResearchStore(workspace / "results.sqlite3"):
+                pass
+            plan = prepare_campaign_plan(
+                workspace,
+                duration_seconds=3600,
+            )
+            attempt_id = "execution-attempt-wrapper-test"
+            application_data = campaign_attempt_application_data(
+                workspace,
+                plan["campaign_id"],
+                attempt_id,
+            )
+            arg0 = (
+                application_data
+                / "director"
+                / "codex-home"
+                / "tmp"
+                / "arg0"
+                / "codex-arg0-test"
+            )
+            arg0.mkdir(parents=True)
+            target = Path(codex).resolve()
+            for name in EXPECTED_APP_SERVER_WRAPPERS:
+                os.symlink(target, arg0 / name)
+            runner = ResearchCampaignRunner(
+                workspace=workspace,
+                stop_mode="time_limit",
+                duration_seconds=3600,
+                campaign_id=plan["campaign_id"],
+                maximum_director_turns=plan["director"][
+                    "maximum_cycles"
+                ],
+                context_mode=plan["director"]["context_mode"],
+                prepared_plan=plan,
+            )
+            runner._attempt_private_root = application_data.parent
+            runner._sample_runtime_resources(
+                plan["campaign_id"],
+                workspace
+                / "research-campaigns"
+                / plan["campaign_id"],
+                stage="test",
+                force=True,
+            )
+            telemetry = json.loads(
+                (
+                    workspace
+                    / "research-campaigns"
+                    / plan["campaign_id"]
                     / "director"
                     / "runtime-resource-telemetry.json"
                 ).read_text(encoding="utf-8")

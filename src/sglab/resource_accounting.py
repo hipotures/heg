@@ -224,13 +224,21 @@ def discover_trusted_codex_roots(
 
 def _expected_wrapper_location(relative: Path) -> bool:
     parts = relative.parts
-    return (
+    legacy_runtime_group = (
         len(parts) == 8
         and parts[0] == "runtime-groups"
         and parts[2:6] == ("director", "codex-home", "tmp", "arg0")
         and parts[6].startswith("codex-arg0")
         and len(parts[6]) <= 80
     )
+    execution_attempt = (
+        len(parts) == 7
+        and parts[:5]
+        == ("application-data", "director", "codex-home", "tmp", "arg0")
+        and parts[5].startswith("codex-arg0")
+        and len(parts[5]) <= 80
+    )
+    return legacy_runtime_group or execution_attempt
 
 
 def _symlink_safe_label(relative: Path) -> str:
