@@ -6,7 +6,11 @@ import json
 import tempfile
 import unittest
 
-from sglab.research.app_server_client import AppServerSession
+from sglab.research.app_server_client import (
+    AppServerSession,
+    AppServerTurnResult,
+    AppServerUsage,
+)
 from sglab.research.context import (
     ANCESTRY_MAX_BYTES,
     CLIENT_ESTIMATED_TOKENS_MAX,
@@ -16,6 +20,7 @@ from sglab.research.context import (
     DirectorContextMode,
     complete_context_size_report,
     director_state_v2_schema,
+    evidence_registry_ids,
     prepare_director_state_v2,
 )
 from sglab.research.director import (
@@ -23,7 +28,11 @@ from sglab.research.director import (
     base_instructions,
     build_director_prompt,
 )
-from sglab.research.protocol import canonical_json, director_decision_schema
+from sglab.research.protocol import (
+    action_identity_contract,
+    canonical_json,
+    director_decision_schema,
+)
 from sglab.research.store import ResearchStore
 from sglab.research.validation import DecisionContext
 
@@ -153,6 +162,78 @@ def snapshot(actions: list[dict] | None = None) -> dict:
         "recent_actions": actions or [],
         "available_evidence_ids": [],
     }
+
+
+def client_limit_snapshot() -> dict:
+    value = snapshot()
+    value["resources"] = {"max_active_lanes": 16}
+    value["lanes"] = [
+        {
+            "lane_id": f"lane-{index}",
+            "lane_version": 0,
+            "state": "running" if index < 7 else "stopped",
+            "algorithm": "iterated_local_search",
+            "checkpoint_id": (
+                f"checkpoint-{index:02d}-" + "c" * 40
+            ),
+        }
+        for index in range(13)
+    ]
+    value["continuity"] = {
+        "current_executable_candidate_ids": [
+            f"candidate-{index:02d}-" + "a" * 32
+            for index in range(9)
+        ],
+        "current_executable_checkpoint_ids": [
+            f"checkpoint-{index:02d}-" + "c" * 40
+            for index in range(21)
+        ],
+        "hypothesis_ledger": [
+            {
+                "hypothesis_id": (
+                    f"hypothesis-{index:02d}-" + "h" * 24
+                ),
+                "statement": "s" * 400,
+                "status": "active",
+            }
+            for index in range(64)
+        ],
+        "candidate_ledger": [
+            {
+                "candidate_id": (
+                    f"candidate-{index:02d}-" + "a" * 32
+                ),
+                "score": [0, index, 16, 0, 64],
+                "lane_id": f"lane-{index % 7}",
+            }
+            for index in range(11)
+        ],
+        "lane_and_checkpoint_ledger": [
+            {
+                "lane_id": f"lane-{index}",
+                "checkpoint_id": (
+                    f"checkpoint-{index:02d}-" + "c" * 40
+                ),
+                "parameters": {"detail": "p" * 400},
+            }
+            for index in range(13)
+        ],
+        "explored_regions": [
+            {"region_id": index, "summary": "e" * 400}
+            for index in range(9)
+        ],
+        "unresolved_scientific_questions": [
+            {"question_id": index, "text": "q" * 400}
+            for index in range(11)
+        ],
+        "exact_verifier_outcomes": [
+            {
+                "candidate_id": "candidate-exact",
+                "status": "INVALID_CANDIDATE",
+            }
+        ],
+    }
+    return value
 
 
 class DirectorStateV2Tests(unittest.TestCase):
@@ -287,13 +368,41 @@ class DirectorStateV2Tests(unittest.TestCase):
             1,
         )
 
+    def test_compact_action_space_preserves_reference_roles(self) -> None:
+        prepared = prepare_director_state_v2(client_limit_snapshot())
+        action_space = prepared.state["allowed_action_space"]
+        self.assertNotIn("reference_objects", action_space)
+        executable = evidence_registry_ids(
+            prepared.executable_target_registry
+        )
+        advisory = evidence_registry_ids(
+            prepared.advisory_target_registry
+        )
+        self.assertTrue(
+            set(action_space["active_executable_lane_ids"])
+            .union(action_space["candidate_target_ids"])
+            .union(action_space["checkpoint_target_ids"])
+            .issubset(executable)
+        )
+        self.assertTrue(
+            set(action_space["historical_lane_ids"]).issubset(advisory)
+        )
+        self.assertTrue(
+            set(action_space["historical_lane_ids"]).isdisjoint(
+                executable
+            )
+        )
+
 
 class ModeClient:
-    def __init__(self):
+    def __init__(self, decision: dict | None = None):
         self.thread_count = 0
         self.compactions = 0
         self.turns = 0
         self.resumes = 0
+        self.decision = decision
+        self.prompts: list[str] = []
+        self.wire_bytes = b'{"bounded":"wire"}\n'
 
     async def start(self) -> None:
         return None
@@ -328,9 +437,30 @@ class ModeClient:
             raw_thread={},
         )
 
-    async def turn(self, *args, **kwargs):
+    async def turn(self, session, prompt, **kwargs):
         self.turns += 1
-        raise AssertionError("oversized context reached inference")
+        self.prompts.append(prompt)
+        if self.decision is None:
+            raise AssertionError("oversized context reached inference")
+        return AppServerTurnResult(
+            thread_id=session.thread_id,
+            turn_id="turn-context-budget",
+            status="completed",
+            text=json.dumps(self.decision),
+            parsed=self.decision,
+            usage=AppServerUsage(
+                10,
+                0,
+                5,
+                0,
+                15,
+                {"totalTokens": 15},
+            ),
+            deltas=(),
+            retrying_errors=(),
+            raw_completed_turn={"status": "completed"},
+            final_agent_item_id="item-context-budget",
+        )
 
     async def close(self) -> None:
         return None
@@ -466,6 +596,173 @@ class ContextModeBoundaryTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(reports), 1)
             persisted = json.loads(reports[0].read_text(encoding="utf-8"))
             self.assertFalse(persisted["within_client_token_limit"])
+            await director.close()
+            store.close()
+
+    async def test_total_request_limit_compacts_reducible_state_before_turn(
+        self,
+    ) -> None:
+        current = client_limit_snapshot()
+        initial = prepare_director_state_v2(current)
+        initial_prompt = build_director_prompt(current)
+        initial_hypotheses = evidence_registry_ids(
+            initial.evidence_registry,
+            kinds=frozenset({"hypothesis"}),
+        )
+        initial_report = complete_context_size_report(
+            initial,
+            prompt=initial_prompt,
+            base_instructions=base_instructions(),
+            output_schema=director_decision_schema(
+                initial.state["allowed_action_space"],
+                existing_hypothesis_ids=initial_hypotheses,
+                action_id_prefix="action-test",
+            ),
+            mode=DirectorContextMode.STATELESS_TURNS,
+        )
+        self.assertFalse(initial_report["within_client_token_limit"])
+        self.assertNotIn(
+            "reference_objects", initial.state["allowed_action_space"]
+        )
+
+        decision = {
+            "schema_version": "1.0",
+            "snapshot_id": "snapshot-context",
+            "campaign_assessment": "Continue bounded search.",
+            "hypothesis_updates": [],
+            "actions": [
+                {
+                    "action_id": (
+                        action_identity_contract("snapshot-context")[
+                            "recommended_prefix"
+                        ]
+                        + "-review"
+                    ),
+                    "type": "set_review_trigger",
+                    "priority": 10,
+                    "hypothesis_ids": [],
+                    "evidence_ids": [],
+                    "rationale": "Continue bounded observation.",
+                    "expected_effect": "Review after another bounded window.",
+                    "evaluation_window": {
+                        "max_wall_seconds": 120,
+                        "max_candidate_delta": 10000,
+                    },
+                    "idempotency_key": "context-budget-review",
+                    "lease_seconds": 300,
+                    "fallback": {
+                        "on_precondition_failure": "reject"
+                    },
+                    "review_trigger": {
+                        "min_wall_seconds": 30,
+                        "max_wall_seconds": 120,
+                        "candidate_delta": 10000,
+                        "events": ["new_global_best"],
+                    },
+                }
+            ],
+            "next_review": {
+                "min_wall_seconds": 30,
+                "max_wall_seconds": 120,
+                "candidate_delta": 10000,
+                "events": ["new_global_best"],
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = ResearchStore(root / "results.sqlite3")
+            store.create_campaign(
+                campaign_id="campaign",
+                target="erdos_gyarfas",
+                target_definition_sha256="a" * 64,
+                stop_mode="time_limit",
+                deadline_at="2026-07-25T00:00:00Z",
+            )
+            store.record_snapshot(
+                snapshot_id="snapshot-context",
+                campaign_id="campaign",
+                campaign_state_version=0,
+                high_water={},
+                artifact_ref="snapshots/snapshot-context.json",
+                artifact_sha256="b" * 64,
+                payload_bytes=2,
+            )
+            store.record_trigger(
+                trigger_id="trigger",
+                campaign_id="campaign",
+                campaign_state_version=0,
+                reasons=["bootstrap"],
+                first_event_at="2026-07-24T00:00:00Z",
+                snapshot_id="snapshot-context",
+            )
+            client = ModeClient(decision)
+            director = ActiveDirector(
+                client=client,  # type: ignore[arg-type]
+                store=store,
+                campaign_id="campaign",
+                campaign_dir=root,
+                codex_version="0.145.0",
+                executable_sha256="c" * 64,
+                protocol_schema_sha256="d" * 64,
+                context_mode=DirectorContextMode.STATELESS_TURNS,
+            )
+            await director.start()
+            evidence = await director.request_decision_once(
+                snapshot=current,
+                trigger_id="trigger",
+                context=DecisionContext(
+                    snapshot_id="snapshot-context",
+                    evidence_ids=frozenset(),
+                    lane_versions={},
+                    lane_algorithms={},
+                    checkpoint_ids=frozenset(),
+                    candidate_ids=frozenset(),
+                    hypothesis_ids=frozenset(),
+                    max_active_lanes=16,
+                ),
+                prompt=initial_prompt,
+            )
+            self.assertTrue(
+                evidence.validation.accepted,
+                evidence.validation.issues,
+            )
+            self.assertEqual(client.turns, 1)
+            reports = list(
+                (root / "director" / "context-budgets").glob("*.json")
+            )
+            self.assertEqual(len(reports), 1)
+            persisted = json.loads(
+                reports[0].read_text(encoding="utf-8")
+            )
+            self.assertTrue(persisted["within_client_token_limit"])
+            self.assertTrue(
+                persisted["client_limit_compaction_applied"]
+            )
+            self.assertTrue(
+                persisted["client_limit_state_byte_targets"]
+            )
+            submitted = json.loads(client.prompts[0])[
+                "director_state_v2"
+            ]
+            submitted_hypotheses = {
+                item["hypothesis_id"]
+                for item in submitted["continuity"][
+                    "hypothesis_ledger"
+                ]
+            }
+            self.assertEqual(
+                submitted_hypotheses,
+                {
+                    f"hypothesis-{index:02d}-" + "h" * 24
+                    for index in range(64)
+                },
+            )
+            self.assertEqual(
+                submitted["continuity"]["exact_verifier_outcomes"][0][
+                    "candidate_id"
+                ],
+                "candidate-exact",
+            )
             await director.close()
             store.close()
 

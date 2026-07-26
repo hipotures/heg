@@ -59,6 +59,12 @@ the repair against an SQLite Online Backup of the affected workspace, run
 rebuilt projection is at most the campaign's recorded hard limit before
 resuming the original campaign.
 
+For `client-owned context estimate exceeds ... tokens`, also confirm that the
+build measures and, when possible, reduces the complete request rather than
+only `DirectorStateV2`. The Resume preview should be checked against an Online
+Backup of the faulted workspace. Compare the old and rebuilt
+evidence/advisory/executable ID sets and require exact parity before resuming.
+
 ## Scientific invalidation
 
 If a bug invalidated prior scientific results, do not Resume. Mark the

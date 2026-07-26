@@ -8,6 +8,11 @@ import hashlib
 import json
 
 from .catalog import action_catalog
+from .continuity import (
+    ScientificMemoryCompactor,
+    ScientificMemoryPolicy,
+    ScientificStateOverflow,
+)
 from .protocol import canonical_json
 
 
@@ -191,6 +196,16 @@ def prepare_director_state_v2(
             state["previous_outcomes"].pop()
         else:
             break
+    if _json_size(state) > hard_limit_bytes:
+        try:
+            state = ScientificMemoryCompactor(
+                ScientificMemoryPolicy(
+                    soft_limit_bytes=min(24 * 1024, hard_limit_bytes),
+                    hard_limit_bytes=hard_limit_bytes,
+                )
+            ).project(state)
+        except ScientificStateOverflow:
+            pass
     within_state_limits = (
         _json_size(state) <= hard_limit_bytes
         and _json_size(ancestry) <= ANCESTRY_MAX_BYTES
@@ -434,23 +449,55 @@ def build_reference_registries(
 
     visit(state, "$")
     action_space = state.get("allowed_action_space")
-    reference_objects = (
-        action_space.get("reference_objects", [])
-        if isinstance(action_space, dict)
-        else []
-    )
-    for index, value in enumerate(reference_objects):
-        if not isinstance(value, dict):
-            continue
-        add(
-            value.get("id"),
-            str(value.get("object_kind") or "reference"),
-            f"$.allowed_action_space.reference_objects[{index}].id",
-            status=str(value.get("status") or "unknown"),
-            evidence_allowed=bool(value.get("evidence_allowed")),
-            advisory_allowed=bool(value.get("advisory_allowed")),
-            executable_allowed=bool(value.get("executable_allowed")),
+    if isinstance(action_space, dict):
+        lane_states = action_space.get("lane_lifecycle_states", {})
+        if not isinstance(lane_states, dict):
+            lane_states = {}
+        role_lists = (
+            (
+                "active_executable_lane_ids",
+                "lane",
+                "active",
+                True,
+            ),
+            (
+                "historical_lane_ids",
+                "lane",
+                "historical",
+                False,
+            ),
+            (
+                "candidate_target_ids",
+                "candidate",
+                "retained",
+                True,
+            ),
+            (
+                "checkpoint_target_ids",
+                "checkpoint",
+                "retained",
+                bool(action_space.get("active_executable_lane_ids")),
+            ),
         )
+        for key, kind, status, executable in role_lists:
+            values = action_space.get(key, [])
+            if not isinstance(values, list):
+                continue
+            for index, identifier in enumerate(values):
+                current_status = (
+                    str(lane_states.get(identifier, status))
+                    if kind == "lane"
+                    else status
+                )
+                add(
+                    identifier,
+                    kind,
+                    f"$.allowed_action_space.{key}[{index}]",
+                    status=current_status,
+                    evidence_allowed=True,
+                    advisory_allowed=True,
+                    executable_allowed=executable,
+                )
 
     entries = [
         {
@@ -820,74 +867,6 @@ def _applicable_action_space(
     )
 
     active_by_id = {str(value["lane_id"]): value for value in active_lanes}
-    reference_objects: list[dict[str, Any]] = []
-    seen: set[tuple[str, str]] = set()
-
-    def add_reference(
-        identifier: str,
-        kind: str,
-        status: str,
-        *,
-        advisory: bool,
-        executable: bool,
-    ) -> None:
-        key = (identifier, kind)
-        if not identifier or key in seen:
-            return
-        seen.add(key)
-        reference_objects.append(
-            {
-                "id": identifier,
-                "object_kind": kind,
-                "status": status,
-                "evidence_allowed": True,
-                "advisory_allowed": advisory,
-                "executable_allowed": executable,
-            }
-        )
-
-    for lane in lanes:
-        lane_id = str(lane["lane_id"])
-        status = str(lane.get("state") or "unknown")
-        add_reference(
-            lane_id,
-            "lane",
-            status,
-            advisory=True,
-            executable=lane_id in active_by_id,
-        )
-    for lane_id in sorted(
-        {
-            str(value)
-            for value in _values_for_keys(state, {"lane_id"})
-            if isinstance(value, str) and value
-        }
-    ):
-        if lane_id not in {str(value["lane_id"]) for value in lanes}:
-            add_reference(
-                lane_id,
-                "lane",
-                "historical",
-                advisory=True,
-                executable=False,
-            )
-    for candidate_id in candidate_ids:
-        add_reference(
-            candidate_id,
-            "candidate",
-            "retained",
-            advisory=True,
-            executable=True,
-        )
-    for checkpoint_id in checkpoint_ids:
-        add_reference(
-            checkpoint_id,
-            "checkpoint",
-            "retained",
-            advisory=True,
-            executable=bool(active_lane_ids),
-        )
-
     result = {
         "catalog_version": catalog["catalog_version"],
         "actions": actions,
@@ -898,8 +877,11 @@ def _applicable_action_space(
             for value in lanes
             if str(value["lane_id"]) not in active_by_id
         ),
+        "lane_lifecycle_states": {
+            str(value["lane_id"]): str(value.get("state") or "unknown")
+            for value in lanes
+        },
         "candidate_target_ids": candidate_ids,
-        "reference_objects": reference_objects,
         "algorithms": catalog["algorithms"],
         "graph_families": [
             value["id"] for value in catalog["graph_families"]

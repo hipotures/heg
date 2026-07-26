@@ -7,6 +7,18 @@ receives a complete bounded scientific state.
 
 This avoids server-side conversation growth and makes model context auditable.
 
+Two deterministic gates apply before inference:
+
+1. reduce `DirectorStateV2` to its byte limit;
+2. measure base instructions, prompt, and output schema together.
+
+If the complete request exceeds its token estimate while the state still
+contains policy-droppable detail, the host derives a smaller state-byte target
+from the exact excess plus 1 KiB headroom and rebuilds the prompt, registries,
+and schema. Exact-verifier facts and current executable IDs remain
+non-droppable. If those facts alone cannot fit, the turn still fails closed
+before inference.
+
 ## Submitted material
 
 A Director request contains:
@@ -22,6 +34,10 @@ A Director request contains:
 - applicable action space;
 - previous expectation/outcome comparison;
 - action-ID namespace recommendation.
+
+The action space carries compact target-ID lists. Evidence, advisory, and
+executable registries derive their roles from those lists; the prompt does not
+repeat a verbose object for every reference.
 
 ## Structured output
 

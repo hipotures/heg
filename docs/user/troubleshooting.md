@@ -61,9 +61,14 @@ No Director action or exact-verification job was started after this fault.
 Upgrade to a build that compacts scientific memory before enforcing the total
 Director-state limit, then preview Resume with a repair acknowledgement.
 
-If the fault remains on the repaired build, inspect the saved context-budget
-report. A final reduced `DirectorStateV2` above 32,768 bytes, or total
-client-owned context above its token gate, is a real fail-closed condition.
+For `client-owned context estimate exceeds ... tokens`, use a build that also
+reduces policy-droppable state against the exact combined size of base
+instructions, prompt, and output schema. The saved context-budget report shows
+`client_limit_compaction_applied` and the attempted state-byte targets.
+
+If the fault remains after both passes, inspect that report. A final reduced
+`DirectorStateV2` above 32,768 bytes, or a complete request above its token
+gate after all safe reductions, is a real fail-closed condition.
 
 ## Checkpoint mismatch
 

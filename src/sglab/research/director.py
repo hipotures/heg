@@ -20,6 +20,7 @@ from .app_server_client import (
 from .context import (
     DEFAULT_DIRECTOR_CONTEXT_MODE,
     CLIENT_ESTIMATED_TOKENS_MAX,
+    DIRECTOR_STATE_MAX_BYTES,
     DirectorContextBudgetExceeded,
     DirectorContextMode,
     complete_context_size_report,
@@ -36,6 +37,9 @@ from .protocol import (
 )
 from .store import ResearchStore, new_id
 from .validation import DecisionContext, validate_decision
+
+
+CLIENT_CONTEXT_COMPACTION_HEADROOM_BYTES = 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -394,12 +398,93 @@ class ActiveDirector:
             raise RuntimeError(
                 "prompt DirectorStateV2 does not match the committed snapshot"
             )
+        client_compaction_targets: list[int] = []
+        client_compaction_failure: str | None = None
+        while True:
+            parsed_prompt["director_state_v2"] = prepared_state.state
+            prompt = canonical_json(
+                parsed_prompt, max_bytes=MAX_SNAPSHOT_BYTES
+            ).decode("ascii")
+            validation_context = replace(
+                context,
+                snapshot_id=str(
+                    prepared_state.state["source_snapshot_id"]
+                ),
+                evidence_ids=evidence_registry_ids(
+                    prepared_state.evidence_registry
+                ),
+                candidate_ids=evidence_registry_ids(
+                    prepared_state.evidence_registry,
+                    kinds=frozenset({"candidate"}),
+                ),
+                checkpoint_ids=evidence_registry_ids(
+                    prepared_state.evidence_registry,
+                    kinds=frozenset({"checkpoint"}),
+                ),
+                hypothesis_ids=evidence_registry_ids(
+                    prepared_state.evidence_registry,
+                    kinds=frozenset({"hypothesis"}),
+                ),
+                advisory_target_ids=evidence_registry_ids(
+                    prepared_state.advisory_target_registry
+                ),
+                executable_target_ids=evidence_registry_ids(
+                    prepared_state.executable_target_registry
+                ),
+                applicable_action_types=frozenset(
+                    prepared_state.state["allowed_action_space"]["actions"]
+                ),
+            )
+            output_schema = director_decision_schema(
+                prepared_state.state["allowed_action_space"],
+                existing_hypothesis_ids=validation_context.hypothesis_ids,
+                action_id_prefix=action_identity_contract(
+                    snapshot_id
+                )["recommended_prefix"],
+            )
+            context_report = complete_context_size_report(
+                prepared_state,
+                prompt=prompt,
+                base_instructions=base_instructions(),
+                output_schema=output_schema,
+                mode=self.context_mode,
+            )
+            if context_report["within_client_token_limit"]:
+                break
+            total_bytes = int(context_report["client_owned_input_bytes"])
+            state_bytes = int(
+                context_report["post_compaction"][
+                    "director_state_bytes"
+                ]
+            )
+            excess_bytes = total_bytes - CLIENT_ESTIMATED_TOKENS_MAX * 4
+            next_limit = state_bytes - max(
+                CLIENT_CONTEXT_COMPACTION_HEADROOM_BYTES,
+                excess_bytes
+                + CLIENT_CONTEXT_COMPACTION_HEADROOM_BYTES,
+            )
+            if not 1024 <= next_limit < DIRECTOR_STATE_MAX_BYTES:
+                break
+            client_compaction_targets.append(next_limit)
+            try:
+                prepared_state = prepare_director_state_v2(
+                    snapshot, hard_limit_bytes=next_limit
+                )
+            except DirectorContextBudgetExceeded as error:
+                client_compaction_failure = str(error)
+                break
+        context_report["client_limit_compaction_applied"] = bool(
+            client_compaction_targets
+        )
+        context_report["client_limit_state_byte_targets"] = (
+            client_compaction_targets
+        )
+        if client_compaction_failure is not None:
+            context_report["client_limit_compaction_failure"] = (
+                client_compaction_failure
+            )
         registry_bytes = canonical_json(
             prepared_state.evidence_registry, max_bytes=128 * 1024
-        )
-        _write_private(
-            self.campaign_dir / registry_relative,
-            registry_bytes + b"\n",
         )
         advisory_registry_bytes = canonical_json(
             prepared_state.advisory_target_registry,
@@ -414,6 +499,10 @@ class ActiveDirector:
             max_bytes=128 * 1024,
         )
         _write_private(
+            self.campaign_dir / registry_relative,
+            registry_bytes + b"\n",
+        )
+        _write_private(
             self.campaign_dir / advisory_registry_relative,
             advisory_registry_bytes + b"\n",
         )
@@ -425,48 +514,6 @@ class ActiveDirector:
             self.campaign_dir / action_space_relative,
             action_space_bytes + b"\n",
         )
-        validation_context = replace(
-            context,
-            snapshot_id=str(prepared_state.state["source_snapshot_id"]),
-            evidence_ids=evidence_registry_ids(
-                prepared_state.evidence_registry
-            ),
-            candidate_ids=evidence_registry_ids(
-                prepared_state.evidence_registry,
-                kinds=frozenset({"candidate"}),
-            ),
-            checkpoint_ids=evidence_registry_ids(
-                prepared_state.evidence_registry,
-                kinds=frozenset({"checkpoint"}),
-            ),
-            hypothesis_ids=evidence_registry_ids(
-                prepared_state.evidence_registry,
-                kinds=frozenset({"hypothesis"}),
-            ),
-            advisory_target_ids=evidence_registry_ids(
-                prepared_state.advisory_target_registry
-            ),
-            executable_target_ids=evidence_registry_ids(
-                prepared_state.executable_target_registry
-            ),
-            applicable_action_types=frozenset(
-                prepared_state.state["allowed_action_space"]["actions"]
-            ),
-        )
-        output_schema = director_decision_schema(
-            prepared_state.state["allowed_action_space"],
-            existing_hypothesis_ids=validation_context.hypothesis_ids,
-            action_id_prefix=action_identity_contract(
-                snapshot_id
-            )["recommended_prefix"],
-        )
-        context_report = complete_context_size_report(
-            prepared_state,
-            prompt=prompt,
-            base_instructions=base_instructions(),
-            output_schema=output_schema,
-            mode=self.context_mode,
-        )
         context_bytes = canonical_json(
             context_report, max_bytes=128 * 1024
         )
@@ -477,7 +524,8 @@ class ActiveDirector:
         if not context_report["within_client_token_limit"]:
             raise DirectorContextBudgetExceeded(
                 "client-owned context estimate exceeds "
-                f"{CLIENT_ESTIMATED_TOKENS_MAX} tokens"
+                f"{CLIENT_ESTIMATED_TOKENS_MAX} tokens",
+                size_report=context_report,
             )
         if not prior_turns:
             await self._prepare_context_boundary()

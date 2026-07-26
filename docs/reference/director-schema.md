@@ -14,6 +14,12 @@ A Director response contains:
 The exact generated JSON schema is derived from the submitted action space and
 registries.
 
+The submitted action space uses separate compact lists for active executable
+lanes, historical lanes, candidate targets, and checkpoint targets, plus one
+compact lane-lifecycle map. Reference registries deterministically recover
+status and evidence/advisory/executable roles from these values. A duplicated
+per-reference object list is not part of the model-facing contract.
+
 ## Hypothesis updates
 
 Operations:
@@ -79,6 +85,11 @@ One invalid result may produce a repair request containing:
 - no duplicated full rejected response.
 
 The repair must keep the same snapshot ID.
+
+The complete-request budget includes base instructions, prompt, and output
+schema. A request-level compaction pass may reduce policy-droppable
+`DirectorStateV2` detail and rebuild these artifacts under the same snapshot ID
+before any inference starts.
 
 ## Output limitations
 

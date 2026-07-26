@@ -2,6 +2,27 @@
 
 Last implementation audit: **2026-07-26**.
 
+## Complete Director request-budget repair
+
+The repeated production `DirectorContextBudgetExceeded` fault was reproduced
+from attempt 8. Its state was valid at 32,722 bytes, so state-only compaction
+did not run, while base instructions, prompt, and output schema together
+reached 64,250 bytes / 16,063 estimated tokens.
+
+The action space no longer repeats 43 verbose reference objects. Compact
+lane/candidate/checkpoint lists now reconstruct identical evidence, advisory,
+and executable registries. A second deterministic pass also derives a lower
+state target from any remaining complete-request excess plus 1 KiB headroom
+before inference. Exact-verifier facts and current executable IDs remain
+non-droppable.
+
+An SQLite Online Backup of the faulted campaign passed
+`PRAGMA integrity_check` and `PRAGMA foreign_key_check`. Rebuilding its latest
+snapshot reduced the complete request to 57,843 bytes / 14,461 estimated
+tokens. Registry parity was exact: evidence 60/60, advisory 43/43, executable
+37/37, with no missing or added IDs. See
+`docs/reports/M6_CLIENT_CONTEXT_BUDGET_REPAIR.md`.
+
 ## Transient live-frontier publication
 
 Search workers now publish the already accepted graph and score at most once
