@@ -539,7 +539,7 @@
           <div><dt>Weighted penalty</dt><dd>${fmt(score.weighted_penalty)}</dd></div>
           <div><dt>Score coverage</dt><dd>${score.complete === false ? 'Approximate / truncated' : score.complete === true ? 'Complete' : 'Unrecorded'}</dd></div>
           ${selection.transient ? `<div><dt>Lane evaluations</dt><dd>${fmt(selection.high_water)}</dd></div>` : ''}
-          <div><dt>Graph SHA-256</dt><dd class="id" title="${esc(selection.graph_sha256)}">${esc(shortId(selection.graph_sha256))}</dd></div>
+          <div><dt>Graph SHA-256</dt><dd title="${esc(selection.graph_sha256)}">${esc(shortId(selection.graph_sha256))}</dd></div>
           ${selection.transient ? `<div><dt>Throughput</dt><dd>${throughputLabel}</dd></div>` : ''}
         </dl>
         ${selection.transient

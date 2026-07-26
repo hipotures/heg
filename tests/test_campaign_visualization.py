@@ -629,6 +629,10 @@ class CampaignVisualizationTests(unittest.TestCase):
                 javascript,
             )
             self.assertIn(b"Math.round(throughput)", javascript)
+            self.assertIn(
+                b'<dt>Graph SHA-256</dt><dd title="',
+                javascript,
+            )
             self.assertNotIn(b"last sample", javascript)
             self.assertNotIn(b"sampling \xc2\xb7 sample", javascript)
         finally:
