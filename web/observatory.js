@@ -544,8 +544,13 @@
         : score.complete === true
           ? 'Complete'
           : 'Unrecorded';
-      const metricCard = (name, displayValue, detail = '') =>
-        `<div data-copy-observatory-value="${esc(`${name}: ${displayValue}`)}"
+      const metricCard = (
+        name,
+        displayValue,
+        detail = '',
+        clipboardValue = displayValue,
+      ) =>
+        `<div data-copy-observatory-value="${esc(`${name}: ${clipboardValue}`)}"
               title="${esc(`Click to copy ${name}`)}">
           <dt>${esc(name)}</dt>
           <dd${detail ? ` title="${esc(detail)}"` : ''}>${esc(displayValue)}</dd>
@@ -590,7 +595,7 @@
           ${metricCard('Weighted penalty', fmt(score.weighted_penalty))}
           ${metricCard('Score coverage', scoreCoverage)}
           ${selection.transient ? metricCard('Lane evaluations', fmt(selection.high_water)) : ''}
-          ${metricCard('Graph SHA-256', shortId(selection.graph_sha256), selection.graph_sha256)}
+          ${metricCard('Graph SHA-256', shortId(selection.graph_sha256), selection.graph_sha256, selection.graph_sha256)}
           ${selection.transient ? metricCard('Aggregate throughput', throughputLabel, throughputTitle) : ''}
         </dl>
         ${selection.transient

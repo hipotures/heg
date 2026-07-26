@@ -37,7 +37,7 @@ class CampaignVisualizationTests(unittest.TestCase):
         self.assertIn("data-copy-observatory-value", script)
         self.assertIn("root.addEventListener('click', async event => {", script)
         self.assertNotIn("root.addEventListener('dblclick'", script)
-        self.assertIn("`${name}: ${displayValue}`", script)
+        self.assertIn("`${name}: ${clipboardValue}`", script)
         self.assertIn("document.execCommand('copy')", script)
         self.assertIn("navigator.clipboard.writeText(value)", script)
         self.assertIn("card.classList.add('is-copied')", script)
@@ -676,7 +676,7 @@ class CampaignVisualizationTests(unittest.TestCase):
                 javascript,
             )
             self.assertIn(
-                b"metricCard('Graph SHA-256', shortId(selection.graph_sha256)",
+                b"metricCard('Graph SHA-256', shortId(selection.graph_sha256), selection.graph_sha256, selection.graph_sha256)",
                 javascript,
             )
             self.assertNotIn(b"last sample", javascript)

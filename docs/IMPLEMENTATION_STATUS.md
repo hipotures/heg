@@ -14,8 +14,9 @@ API payloads.
 
 Each of the six live-frontier inspector metric cards also supports independent
 single-click copy with card-local confirmation. Clipboard text includes the
-card label and value exactly as displayed, including an abbreviated graph
-hash.
+card label and value. Values match the display except for the abbreviated
+graph-hash card, which copies its complete SHA-256 value without changing the
+card layout.
 
 ## Aggregate live-frontier throughput
 

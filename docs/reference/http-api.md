@@ -43,7 +43,8 @@ This is a client interaction rule and does not change any HTTP response or
 persistence contract.
 Single-click copying from a live-frontier metric card is likewise client-only
 and makes no HTTP request. Each card copies its own label and displayed value,
-including the abbreviated display form of the graph hash.
+except that the graph-hash card copies its complete SHA-256 value while
+retaining the abbreviated display.
 
 ## Core write APIs
 

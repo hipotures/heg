@@ -43,7 +43,8 @@ interval after the selection is cleared.
 The six live-frontier summary cards copy their own label and current value on
 a single click. This clipboard interaction is browser-local and issues no API
 request. Clipboard text matches the card's displayed text, including an
-abbreviated graph hash.
+abbreviated graph hash, except that the graph-hash card copies its complete
+SHA-256 value without changing the card layout.
 The live-frontier inspector derives aggregate campaign throughput by summing
 the latest completed metric window for each running lane. Missing first-batch
 measurements do not erase the available aggregate; the UI exposes measured
