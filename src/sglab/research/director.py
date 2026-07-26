@@ -23,6 +23,7 @@ from .context import (
     DIRECTOR_STATE_MAX_BYTES,
     DirectorContextBudgetExceeded,
     DirectorContextMode,
+    PreparedDirectorState,
     complete_context_size_report,
     evidence_registry_ids,
     prepare_director_state_v2,
@@ -347,6 +348,7 @@ class ActiveDirector:
         prompt: str,
         prior_turns: tuple[str, ...],
         repair_allowed: bool,
+        prepared_state: PreparedDirectorState | None = None,
     ) -> DirectorEvidence:
         if self.session is None or self.session_record_id is None:
             raise RuntimeError("Director session has not been started")
@@ -380,18 +382,20 @@ class ActiveDirector:
             / "context-budgets"
             / f"{turn_record_id}.json"
         )
-        try:
-            prepared_state = prepare_director_state_v2(snapshot)
-        except DirectorContextBudgetExceeded as error:
-            if error.size_report is not None:
-                _write_private(
-                    self.campaign_dir / context_relative,
-                    canonical_json(
-                        error.size_report, max_bytes=128 * 1024
+        state_is_fixed = prepared_state is not None
+        if prepared_state is None:
+            try:
+                prepared_state = prepare_director_state_v2(snapshot)
+            except DirectorContextBudgetExceeded as error:
+                if error.size_report is not None:
+                    _write_private(
+                        self.campaign_dir / context_relative,
+                        canonical_json(
+                            error.size_report, max_bytes=128 * 1024
+                        )
+                        + b"\n",
                     )
-                    + b"\n",
-                )
-            raise
+                raise
         parsed_prompt = _json_object(prompt)
         supplied_state = parsed_prompt.get("director_state_v2")
         if supplied_state != prepared_state.state:
@@ -450,6 +454,8 @@ class ActiveDirector:
                 mode=self.context_mode,
             )
             if context_report["within_client_token_limit"]:
+                break
+            if state_is_fixed:
                 break
             total_bytes = int(context_report["client_owned_input_bytes"])
             state_bytes = int(
@@ -712,6 +718,7 @@ class ActiveDirector:
                 prompt=repair_prompt,
                 prior_turns=all_turns,
                 repair_allowed=False,
+                prepared_state=prepared_state,
             )
         return DirectorEvidence(
             decision=(

@@ -70,3 +70,9 @@ detail that the scientific-memory policy permits dropping is reduced before
 this final decision. The complete-request pass uses the exact excess plus
 headroom and rebuilds the prompt, registries, and schema; a pre-reduction size
 alone is not grounds for the fault.
+
+`prompt DirectorStateV2 does not match the committed snapshot` is an internal
+protocol fault raised before inference when the prompt state differs from the
+prepared state bound to its source snapshot. For a repair turn, “prepared
+state” means the exact post-budget state submitted on the invalid first turn,
+not a fresh projection at another byte limit.

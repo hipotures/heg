@@ -71,6 +71,13 @@ only `DirectorStateV2`. The Resume preview should be checked against an Online
 Backup of the faulted workspace. Compare the old and rebuilt
 evidence/advisory/executable ID sets and require exact parity before resuming.
 
+For `prompt DirectorStateV2 does not match the committed snapshot` after an
+invalid response, inspect the first turn's context-budget artifact. If
+`client_limit_compaction_applied` is true, confirm that the repair path reuses
+the exact prepared state and registries from that turn. A repair must not
+recompute the same source snapshot at the default byte limit. Test an
+invalid→repair sequence before Resume.
+
 ## Scientific invalidation
 
 If a bug invalidated prior scientific results, do not Resume. Mark the

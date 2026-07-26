@@ -91,6 +91,11 @@ schema. A request-level compaction pass may reduce policy-droppable
 `DirectorStateV2` detail and rebuild these artifacts under the same snapshot ID
 before any inference starts.
 
+When the first response is invalid, its repair turn receives the exact
+post-budget `DirectorStateV2` and reference registries submitted on that first
+turn. Recomputing the repair state at a different byte limit is a protocol
+fault, even when both projections have the same source snapshot ID.
+
 ## Output limitations
 
 The Director cannot:

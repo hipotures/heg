@@ -85,3 +85,30 @@ The focused request-level regression starts one fake Director turn only after
 compaction, verifies the persisted context report is within the gate, and
 checks that all 64 synthetic hypothesis IDs plus an exact-verifier outcome
 survive the reduction.
+
+## Repair-turn follow-up
+
+Production attempt 11 later exercised the invalid-response repair path after
+complete-request compaction. The first turn was within budget:
+
+| Measurement | Value |
+|---|---:|
+| derived state target | 31,099 bytes |
+| submitted `DirectorStateV2` | 31,077 bytes |
+| complete request estimate | 15,739 tokens |
+| first-turn status | `completed_invalid` |
+
+Before starting repair inference, the old recursion rebuilt the source
+snapshot at the default 32 KiB limit and rejected the repair prompt's exact
+31,077-byte state as a mismatch. No repair action or verifier job started.
+
+The repair recursion now carries the exact prepared state and registries from
+the invalid first turn. The regression sends an invalid response through the
+same request-budget reduction, starts exactly one repair turn, and asserts
+equality of the two submitted `DirectorStateV2` objects.
+
+A consistent Online Backup of the paused schema-v16 production database had
+SHA-256
+`7ad6b1ee2e3e1757d2c83fbf4e059603d83d290713a6dff77de72c55d17109a0`;
+`PRAGMA integrity_check` returned `ok` and
+`PRAGMA foreign_key_check` returned no rows.

@@ -74,6 +74,11 @@ The repair request uses:
 - invalid-response SHA-256;
 - no duplicated full invalid response.
 
+If complete-request budgeting reduced the first turn below the ordinary
+Director-state limit, the repair reuses that exact prepared state and its
+registries. It does not rebuild the state at the default limit or perform a
+second, semantically different projection.
+
 The repair runs on a fresh stateless thread. One repair is allowed per
 scientific state.
 

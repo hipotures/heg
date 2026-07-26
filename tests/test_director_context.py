@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-import copy
 import json
 import tempfile
 import unittest
@@ -599,7 +598,7 @@ class ContextModeBoundaryTests(unittest.IsolatedAsyncioTestCase):
             await director.close()
             store.close()
 
-    async def test_total_request_limit_compacts_reducible_state_before_turn(
+    async def test_total_request_limit_compacts_and_repair_reuses_exact_state(
         self,
     ) -> None:
         current = client_limit_snapshot()
@@ -763,6 +762,30 @@ class ContextModeBoundaryTests(unittest.IsolatedAsyncioTestCase):
                 ],
                 "candidate-exact",
             )
+            client.decision = {"invalid": True}
+            repaired = await director.request_decision(
+                snapshot=current,
+                trigger_id="trigger",
+                context=DecisionContext(
+                    snapshot_id="snapshot-context",
+                    evidence_ids=frozenset(),
+                    lane_versions={},
+                    lane_algorithms={},
+                    checkpoint_ids=frozenset(),
+                    candidate_ids=frozenset(),
+                    hypothesis_ids=frozenset(),
+                    max_active_lanes=16,
+                ),
+            )
+            self.assertFalse(repaired.validation.accepted)
+            self.assertEqual(client.turns, 3)
+            first_repair_state = json.loads(client.prompts[1])[
+                "director_state_v2"
+            ]
+            submitted_repair_state = json.loads(client.prompts[2])[
+                "director_state_v2"
+            ]
+            self.assertEqual(submitted_repair_state, first_repair_state)
             await director.close()
             store.close()
 

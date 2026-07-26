@@ -70,6 +70,12 @@ If the fault remains after both passes, inspect that report. A final reduced
 `DirectorStateV2` above 32,768 bytes, or a complete request above its token
 gate after all safe reductions, is a real fail-closed condition.
 
+If the detail instead says `prompt DirectorStateV2 does not match the
+committed snapshot` immediately after a completed invalid Director turn,
+upgrade to a build that reuses the first turn's exact post-budget state for
+repair. The invalid response and stopped attempt remain evidence; Resume only
+after the fix is committed and acknowledged.
+
 ## Checkpoint mismatch
 
 A checkpoint hash failed. The affected lane is not restored. Other lanes and

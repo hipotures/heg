@@ -2,6 +2,23 @@
 
 Last implementation audit: **2026-07-26**.
 
+## Director repair-turn state identity
+
+Production attempt 11 completed four valid Director turns, then received one
+semantically invalid response. Its first request had safely reduced
+`DirectorStateV2` to 31,077 bytes under a 31,099-byte derived target. The
+repair path incorrectly rebuilt the same source snapshot at the default
+32 KiB limit and stopped fail-closed before starting the repair inference with
+`prompt DirectorStateV2 does not match the committed snapshot`.
+
+Repair recursion now carries the exact prepared state and all three reference
+registries used by the invalid turn. The repair prompt therefore preserves
+byte-for-byte scientific-state identity instead of performing another
+projection. A request-budget regression exercises invalid→repair after
+client-limit compaction and verifies that both submitted repair states are
+equal. The paused production database was captured with SQLite Online Backup;
+schema v16 passed integrity and foreign-key checks.
+
 ## Versioned duplicate keys and independent sample provenance
 
 Lane checkpoints now record canonical `duplicate_key_scheme` values while
