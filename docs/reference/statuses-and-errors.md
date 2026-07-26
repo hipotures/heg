@@ -67,7 +67,8 @@ without losing non-droppable facts. No inference should occur.
 `DirectorContextBudgetExceeded` means the final reduced Director state or the
 complete client-owned request context exceeded its configured gate. Historical
 detail that the scientific-memory policy permits dropping is reduced before
-this final decision. The complete-request pass targets 15,000 estimated tokens,
+this final decision. The complete-request pass targets 15,000 estimated tokens
+and applies a separate 32,000-token hard gate,
 uses the exact excess plus headroom, and rebuilds the prompt, registries, and
 schema. If the ideal state target is below the irreducible safe-state floor,
 the tightest feasible state is used. A pre-reduction size or one impossible

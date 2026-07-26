@@ -238,6 +238,27 @@ def client_limit_snapshot() -> dict:
 
 
 class DirectorStateV2Tests(unittest.TestCase):
+    def test_complete_request_hard_gate_is_32k_tokens(self) -> None:
+        prepared = prepare_director_state_v2(snapshot([]))
+        report = complete_context_size_report(
+            prepared,
+            prompt="x" * (20_000 * 4),
+            base_instructions=base_instructions(),
+            output_schema=director_decision_schema(),
+            mode=DirectorContextMode.STATELESS_TURNS,
+        )
+
+        self.assertEqual(CLIENT_ESTIMATED_TOKENS_MAX, 32_000)
+        self.assertGreater(
+            report["client_owned_estimated_tokens"],
+            16_000,
+        )
+        self.assertLessEqual(
+            report["client_owned_estimated_tokens"],
+            CLIENT_ESTIMATED_TOKENS_MAX,
+        )
+        self.assertTrue(report["within_client_token_limit"])
+
     def test_prompt_omits_durable_reserved_action_id_list(self) -> None:
         current = snapshot(
             [
@@ -383,6 +404,7 @@ class DirectorStateV2Tests(unittest.TestCase):
         self.assertLessEqual(max(sizes[-20:]), max(sizes[:20]) + 1024)
 
     def test_all_modes_submit_same_scientific_state_and_budget(self) -> None:
+        self.assertEqual(CLIENT_ESTIMATED_TOKENS_MAX, 32_000)
         prepared = prepare_director_state_v2(
             snapshot([batch_action(3), batch_action(2), batch_action(1)])
         )
@@ -670,7 +692,11 @@ class ContextModeBoundaryTests(unittest.IsolatedAsyncioTestCase):
             ),
             mode=DirectorContextMode.STATELESS_TURNS,
         )
-        self.assertFalse(initial_report["within_client_token_limit"])
+        self.assertGreater(
+            initial_report["client_owned_estimated_tokens"],
+            CLIENT_ESTIMATED_TOKENS_SOFT_TARGET,
+        )
+        self.assertTrue(initial_report["within_client_token_limit"])
         self.assertNotIn(
             "reference_objects", initial.state["allowed_action_space"]
         )

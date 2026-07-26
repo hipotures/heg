@@ -13,7 +13,7 @@ Two deterministic gates apply before inference:
 2. measure base instructions, prompt, and output schema together.
 
 The complete-request pass targets 15,000 estimated client-owned tokens, leaving
-headroom below the 16,000-token hard gate. While the state still contains
+headroom below the 32,000-token hard gate. While the state still contains
 policy-droppable detail, the host derives a smaller state-byte target from the
 exact excess plus 1 KiB headroom and rebuilds the prompt, registries, and
 schema. If that ideal target is below the irreducible safe-state floor, a

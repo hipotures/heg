@@ -72,7 +72,7 @@ build measures and, when possible, reduces the complete request rather than
 only `DirectorStateV2`. The Resume preview should be checked against an Online
 Backup of the faulted workspace. Compare the old and rebuilt
 evidence/advisory/executable ID sets and require exact parity before resuming.
-For current builds, require a 15,000-token soft target, a 16,000-token hard
+For current builds, require a 15,000-token soft target, a 32,000-token hard
 gate, and successful irreducible-floor recovery when the ideal state target is
 unattainable. `client_limit_compaction_failure_recovered=true` means the failed
 intermediate target was handled; it is not itself a terminal fault.

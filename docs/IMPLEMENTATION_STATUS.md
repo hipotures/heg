@@ -2,6 +2,20 @@
 
 Last implementation audit: **2026-07-26**.
 
+## Director client-context hard gate raised to 32,000
+
+The complete client-owned Director request now fails closed at 32,000 estimated
+tokens instead of 16,000. Deterministic compaction still targets 15,000 tokens,
+so ordinary requests keep the previous cost and context discipline; the larger
+hard gate only supplies recovery margin when non-droppable exact-verifier facts
+or executable IDs prevent further safe reduction.
+
+A regression constructs a complete request above 16,000 and below 32,000
+tokens and verifies that it is admitted, while the existing oversized-context
+test still fails before inference above the new boundary. The App Server
+protocol audit passed without authentication or a model turn. See
+`docs/reports/M6_DIRECTOR_CONTEXT_HARD_LIMIT_32K.md`.
+
 ## Recurring Director context-budget repair
 
 The fifth production `DirectorContextBudgetExceeded` recurrence was reproduced

@@ -100,7 +100,7 @@ schema. A request-level compaction pass may reduce policy-droppable
 `DirectorStateV2` detail and rebuild these artifacts under the same snapshot ID
 before any inference starts.
 
-The pass targets 15,000 estimated tokens before applying the 16,000-token hard
+The pass targets 15,000 estimated tokens before applying the 32,000-token hard
 gate. If the calculated state target is smaller than the non-droppable
 projection, the host searches deterministically for the tightest feasible
 state. This preserves exact-verifier facts and current executable IDs while

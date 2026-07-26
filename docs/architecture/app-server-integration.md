@@ -58,6 +58,12 @@ The row exists as soon as an authoritative turn ID is known.
 Production Director turns are fresh threads. Continuity comes from
 scientific-memory state, not conversation history.
 
+## Client-owned request budget
+
+The host targets 15,000 estimated client-owned tokens through deterministic
+scientific-state compaction. The independent fail-closed hard gate is 32,000
+estimated tokens and is enforced before `turn/start`.
+
 ## Platform instructions
 
 Platform-owned sandbox/developer/environment wrappers may be present. The

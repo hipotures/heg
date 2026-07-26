@@ -1,6 +1,6 @@
 # ADR 0011: Director Request Headroom and Safe-Floor Recovery
 
-- **Status:** Accepted
+- **Status:** Superseded in part by ADR 0012
 - **Date:** 2026-07-26
 
 ## Context
