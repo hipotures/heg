@@ -12,11 +12,18 @@
     Math.max(minimum, Math.min(maximum, value));
   const numeric = value =>
     typeof value === 'number' && Number.isFinite(value) ? value : null;
+  const DEFAULT_LIVE_FRONTIER_INTERVAL_SECONDS = 10;
 
   window.createScientificObservatory = options => {
     const {root, api, esc, fmt, label, shortId, badge} = options;
+    const configuredLiveInterval = Number(
+      options.liveFrontierIntervalSeconds
+        ?? DEFAULT_LIVE_FRONTIER_INTERVAL_SECONDS
+    );
     const state = {
       campaignId: null,
+      campaignState: null,
+      campaignFault: null,
       source: sessionStorage.getItem('sglab-observatory-source') || 'global_best',
       laneId: sessionStorage.getItem('sglab-observatory-lane') || '',
       candidateId: '',
@@ -31,6 +38,16 @@
       refreshing: false,
       refreshQueued: false,
       destroyed: false,
+      liveFrontierIntervalSeconds: clamp(
+        Number.isFinite(configuredLiveInterval)
+          ? configuredLiveInterval
+          : DEFAULT_LIVE_FRONTIER_INTERVAL_SECONDS,
+        1,
+        3600,
+      ),
+      lastLiveFrontierFetchAt: 0,
+      lastLiveFrontierSampleLabel: '',
+      forceGraphRefresh: false,
     };
 
     root.innerHTML = `
@@ -40,6 +57,7 @@
             <label>Graph source
               <select data-observatory-source>
                 <option value="global_best">Best global candidate</option>
+                <option value="live_frontier">Live search frontier</option>
                 <option value="lane_best">Best from a lane</option>
                 <option value="m4_active">Candidate currently in M4</option>
               </select>
@@ -89,7 +107,7 @@
     const panel = root.querySelector('[data-observatory-panel]');
     const stage = root.querySelector('[data-graph-stage]');
     if (!TABS.some(([key]) => key === state.tab)) state.tab = 'graph';
-    if (!['global_best', 'lane_best', 'm4_active'].includes(state.source)) {
+    if (!['global_best', 'live_frontier', 'lane_best', 'm4_active'].includes(state.source)) {
       state.source = 'global_best';
     }
     sourceSelect.value = state.source;
@@ -146,6 +164,8 @@
     const refresh = async campaign => {
       if (!campaign?.campaign_id) {
         state.campaignId = null;
+        state.campaignState = null;
+        state.campaignFault = null;
         state.graph = null;
         state.series = null;
         showEmpty('No research campaign is selected.');
@@ -163,6 +183,8 @@
         state.positions = null;
         state.transform = {x: 0, y: 0, scale: 1};
       }
+      state.campaignState = campaign.state || null;
+      state.campaignFault = campaign.fault_kind || null;
       if (state.source === 'lane_best' && !state.laneId) {
         state.source = 'global_best';
       }
@@ -171,16 +193,44 @@
         setStatus('Loading retained scientific evidence…');
       }
       try {
+        const now = performance.now();
+        const liveDue = state.forceGraphRefresh
+          || state.source !== 'live_frontier'
+          || !state.graph
+          || now - state.lastLiveFrontierFetchAt
+            >= state.liveFrontierIntervalSeconds * 1000;
         const [graph, series] = await Promise.all([
-          api(graphQuery()),
+          liveDue ? api(graphQuery()) : Promise.resolve(state.graph),
           api('/api/research-campaign/visualization/series'),
         ]);
         if (state.destroyed) return;
         state.series = series;
         updateSourceControls(graph);
-        updateGraph(graph);
+        if (liveDue) {
+          updateGraph(graph);
+          state.forceGraphRefresh = false;
+          if (state.source === 'live_frontier') {
+            state.lastLiveFrontierFetchAt = performance.now();
+            state.lastLiveFrontierSampleLabel =
+              graph.selection?.published_at
+              || new Date().toLocaleTimeString();
+            const advertised = Number(
+              graph.display_contract?.live_frontier_interval_seconds
+            );
+            if (Number.isFinite(advertised)) {
+              state.liveFrontierIntervalSeconds = clamp(advertised, 1, 3600);
+            }
+          }
+        }
         renderActivePanel();
-        setStatus(`Updated · ${new Date().toLocaleTimeString()}`);
+        if (state.source === 'live_frontier') {
+          const running = state.campaignState === 'running';
+          setStatus(running
+            ? `Live frontier · ${fmt(state.liveFrontierIntervalSeconds)} s sampling · sample ${state.lastLiveFrontierSampleLabel}`
+            : `Frontier paused · ${label(state.campaignState || 'not running')}${state.campaignFault ? ` · ${label(state.campaignFault)}` : ''} · last sample ${state.lastLiveFrontierSampleLabel}`);
+        } else {
+          setStatus(`Updated · ${new Date().toLocaleTimeString()}`);
+        }
       } catch (error) {
         setStatus(error.message);
         if (!state.graph) showEmpty(error.message);
@@ -432,17 +482,22 @@
       inspector.innerHTML = `
         <div>
           <div class="chips">${badge(selection.state)}
+            ${selection.transient ? badge('transient heuristic') : ''}
             ${selection.verification_status ? badge(selection.verification_status) : ''}
           </div>
           <h3 title="${esc(selection.candidate_id)}">${esc(shortId(selection.candidate_id))}</h3>
-          <p class="meta">From ${esc(shortId(selection.lane_id))} · ${esc(selection.created_at)}</p>
+          <p class="meta">From ${esc(shortId(selection.lane_id))} · ${esc(selection.published_at || selection.created_at)}</p>
         </div>
         <dl class="semantic">
           <div><dt>Order / edges</dt><dd>${fmt(data.graph.order)} / ${fmt(data.graph.size)}</dd></div>
           <div><dt>Weighted penalty</dt><dd>${fmt(score.weighted_penalty)}</dd></div>
           <div><dt>Score coverage</dt><dd>${score.complete === false ? 'Approximate / truncated' : score.complete === true ? 'Complete' : 'Unrecorded'}</dd></div>
+          ${selection.transient ? `<div><dt>Lane evaluations</dt><dd>${fmt(selection.high_water)}</dd></div>` : ''}
           <div><dt>Graph SHA-256</dt><dd class="id" title="${esc(selection.graph_sha256)}">${esc(shortId(selection.graph_sha256))}</dd></div>
         </dl>
+        ${selection.transient
+          ? '<div class="observatory-warning">Live frontier is transient heuristic telemetry. It is not a retained scientific record or exact certification.</div>'
+          : ''}
         ${score.complete === false
           ? '<div class="observatory-warning">Witness counts are capped or incomplete. They are heuristic measurements, not certification.</div>'
           : ''}
@@ -649,6 +704,8 @@
       state.source = source;
       if (source === 'lane_best') state.laneId = value || state.laneId;
       if (source === 'candidate') state.candidateId = value;
+      state.forceGraphRefresh = true;
+      if (source === 'live_frontier') state.lastLiveFrontierFetchAt = 0;
       laneLabel.hidden = source !== 'lane_best';
       persistSelection();
       if (state.campaignId) {

@@ -8,7 +8,9 @@ from threading import Thread
 
 from sglab.model import BitGraph
 from sglab.research.store import ResearchStore
+from sglab.research.protocol import canonical_json
 from sglab.research.visualization import (
+    DEFAULT_LIVE_FRONTIER_INTERVAL_SECONDS,
     VisualizationNotFoundError,
     VisualizationUnavailableError,
     campaign_graph_visualization,
@@ -254,6 +256,68 @@ class CampaignVisualizationTests(unittest.TestCase):
             },
         )
 
+    def _write_live_checkpoint(
+        self,
+        *,
+        graph: BitGraph,
+        lane_id: str = "lane-2",
+        high_water: int = 321,
+    ) -> Path:
+        graph6 = graph.to_graph6()
+        payload = {
+            "lane_id": lane_id,
+            "lane_version": 3,
+            "graph6": graph6,
+            "score": {
+                "valid": True,
+                "witness_counts": {"4": 1},
+                "weighted_penalty": 16,
+                "novelty": 0.5,
+                "simplicity": 4,
+                "complete": False,
+                "ordering_key": [0, 1, 16, 0, 4],
+            },
+            "best_graph6": graph6,
+            "best_score": {
+                "valid": True,
+                "witness_counts": {"4": 1},
+                "weighted_penalty": 16,
+                "novelty": 0.5,
+                "simplicity": 4,
+                "complete": False,
+                "ordering_key": [0, 1, 16, 0, 4],
+            },
+            "rng_state": "(3, (1, 2, 3), None)",
+            "algorithm_evaluated": high_water,
+            "stagnation": 9,
+            "tabu": [],
+            "parameters": {
+                "order": graph.n,
+                "batch_candidates": 100,
+                "witness_cap": 8,
+            },
+            "high_water": high_water,
+            "accepted_ancestry": [],
+            "best_ancestry": [],
+            "current_candidate_id": "candidate-live-frontier",
+            "best_candidate_id": "candidate-live-frontier",
+        }
+        digest = hashlib.sha256(
+            canonical_json(payload, max_bytes=1024 * 1024)
+        ).hexdigest()
+        checkpoint = {
+            **payload,
+            "checkpoint_id": f"checkpoint-{digest[:24]}",
+            "sha256": digest,
+        }
+        path = (
+            self.campaign_dir
+            / "lane-checkpoints"
+            / f"checkpoint-{digest[:24]}.json"
+        )
+        atomic_write_json(path, checkpoint)
+        return path
+
     def test_global_lane_and_exact_witness_projection(self) -> None:
         global_best = campaign_graph_visualization(
             self.workspace, source="global_best"
@@ -309,6 +373,50 @@ class CampaignVisualizationTests(unittest.TestCase):
         )
         self.assertEqual(selected["graph"]["size"], 6)
 
+    def test_live_frontier_uses_verified_nonfollowed_lane_checkpoint(
+        self,
+    ) -> None:
+        self._write_live_checkpoint(graph=self.second_graph)
+        selected = campaign_graph_visualization(
+            self.workspace,
+            source="live_frontier",
+            live_frontier_interval_seconds=17,
+        )
+        self.assertEqual(
+            selected["selection"]["candidate_id"],
+            "candidate-live-frontier",
+        )
+        self.assertEqual(selected["selection"]["lane_id"], "lane-2")
+        self.assertEqual(selected["selection"]["high_water"], 321)
+        self.assertTrue(selected["selection"]["transient"])
+        self.assertEqual(selected["selection"]["state"], "live_frontier")
+        self.assertEqual(selected["graph"]["size"], 6)
+        self.assertFalse(
+            selected["display_contract"][
+                "live_frontier_is_certification"
+            ]
+        )
+        self.assertEqual(
+            selected["display_contract"][
+                "live_frontier_interval_seconds"
+            ],
+            17,
+        )
+        self.assertEqual(DEFAULT_LIVE_FRONTIER_INTERVAL_SECONDS, 10)
+
+    def test_live_frontier_rejects_symlinked_checkpoint_directory(
+        self,
+    ) -> None:
+        outside = self.workspace / "outside-checkpoints"
+        outside.mkdir()
+        checkpoint_dir = self.campaign_dir / "lane-checkpoints"
+        checkpoint_dir.parent.mkdir(parents=True, exist_ok=True)
+        checkpoint_dir.symlink_to(outside, target_is_directory=True)
+        with self.assertRaises(VisualizationUnavailableError):
+            campaign_graph_visualization(
+                self.workspace, source="live_frontier"
+            )
+
     def test_series_are_bounded_and_separate_scientific_semantics(self) -> None:
         series = campaign_visualization_series(self.workspace)
         self.assertEqual(len(series["candidate_history"]), 2)
@@ -356,6 +464,7 @@ class CampaignVisualizationTests(unittest.TestCase):
             )
 
     def test_visualization_http_endpoints_are_protected_and_bounded(self) -> None:
+        self._write_live_checkpoint(graph=self.second_graph)
         server = create_server(
             self.workspace, "127.0.0.1", 0, token="visual-secret"
         )
@@ -389,6 +498,22 @@ class CampaignVisualizationTests(unittest.TestCase):
             )
             connection.request(
                 "GET",
+                "/api/research-campaign/visualization/graph"
+                "?source=live_frontier",
+                headers=headers,
+            )
+            response = connection.getresponse()
+            self.assertEqual(response.status, 200)
+            live = json.loads(response.read())
+            self.assertTrue(live["selection"]["transient"])
+            self.assertEqual(
+                live["display_contract"][
+                    "live_frontier_interval_seconds"
+                ],
+                10,
+            )
+            connection.request(
+                "GET",
                 "/api/research-campaign/visualization/series",
                 headers=headers,
             )
@@ -412,7 +537,14 @@ class CampaignVisualizationTests(unittest.TestCase):
             response = connection.getresponse()
             self.assertEqual(response.status, 200)
             self.assertEqual(response.getheader("Cache-Control"), "no-store")
-            self.assertIn(b"createScientificObservatory", response.read())
+            javascript = response.read()
+            self.assertIn(b"createScientificObservatory", javascript)
+            self.assertIn(b"Live search frontier", javascript)
+            self.assertIn(b"Frontier paused", javascript)
+            self.assertIn(
+                b"DEFAULT_LIVE_FRONTIER_INTERVAL_SECONDS = 10",
+                javascript,
+            )
         finally:
             connection.close()
             server.shutdown()

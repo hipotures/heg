@@ -10,6 +10,7 @@ state.
 The primary canvas can display:
 
 - the best retained candidate across the campaign;
+- the latest live search-frontier graph from an active lane;
 - the best retained candidate from a selected lane;
 - the immutable candidate snapshot currently consumed by M4;
 - a specific retained candidate selected from history.
@@ -20,6 +21,18 @@ paths are exposed to the browser. Pan, zoom, layer visibility, source
 selection, and the selected vertex survive the dashboard's periodic refresh.
 The display uses a deterministic layout so an unchanged candidate does not
 jump between polls.
+
+`Live search frontier` reads the newest integrity-checked lane checkpoint and
+shows its current accepted graph. The default browser sampling interval is 10
+seconds. It is an explicit `liveFrontierIntervalSeconds` component parameter
+(and a matching server display-contract value), ready to be connected to a
+future dashboard settings section. Live graphs are labelled transient
+heuristic telemetry: they are neither retained scientific records nor exact
+certification. Checkpoint files are bounded to 1 MiB, read without following
+symlinks, and verified against their stored SHA-256 before decoding.
+When the campaign is not running, the toolbar says `Frontier paused`, shows
+the campaign state/fault, and retains the last checkpoint timestamp instead of
+implying that new graphs are still being produced.
 
 Cycle layers use separate styles for lengths 4, 8, 16, 32, and other relevant
 lengths. Display-cycle examples come from a bounded local scan and are always
@@ -56,15 +69,18 @@ GET /api/research-campaign/visualization/graph?source=global_best
 GET /api/research-campaign/visualization/series
 ```
 
-`source` may be `global_best`, `lane_best`, `m4_active`, or `candidate`.
+`source` may be `global_best`, `live_frontier`, `lane_best`, `m4_active`, or
+`candidate`.
 `lane_best` requires `lane_id`; `candidate` requires `candidate_id`.
 Unknown selections return `404`, while a valid source that currently has no
 displayable record returns `409`.
 
 The service opens SQLite in read-only mode. Verification manifests are read
 only through a campaign-root-contained, non-symlink path and have a 1 MiB
-display limit. No endpoint writes campaign data, follows a symlink, starts
-search, calls a model, or schedules verification.
+display limit. Live checkpoints use the same no-follow and bounded-read
+principles, and their internal checkpoint hash is recomputed. No endpoint
+writes campaign data, follows a symlink, starts search, calls a model, or
+schedules verification.
 
 ## Responsive and refresh behavior
 

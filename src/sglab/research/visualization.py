@@ -5,11 +5,15 @@ from pathlib import Path
 from typing import Any
 import hashlib
 import json
+import os
+import stat
 import sqlite3
+from datetime import UTC, datetime
 
 from ..model import BitGraph, find_cycles_of_length_bounded
 from ..state import read_json
 from ..targets import TARGETS
+from .protocol import canonical_json
 
 
 VISUALIZATION_CANDIDATE_LIMIT = 256
@@ -18,11 +22,16 @@ VISUALIZATION_TOTAL_WINDOW_LIMIT = 2048
 VISUALIZATION_VERIFICATION_LIMIT = 64
 VISUALIZATION_CYCLE_NODE_BUDGET = 20_000
 VISUALIZATION_MANIFEST_LIMIT_BYTES = 1024 * 1024
+VISUALIZATION_LIVE_CHECKPOINT_LIMIT_BYTES = 1024 * 1024
+VISUALIZATION_LIVE_CHECKPOINT_SCAN_LIMIT = 256
+VISUALIZATION_LIVE_DIRECTORY_ENTRY_LIMIT = 2048
+DEFAULT_LIVE_FRONTIER_INTERVAL_SECONDS = 10
 VISUALIZATION_SOURCES = {
     "global_best",
     "lane_best",
     "m4_active",
     "candidate",
+    "live_frontier",
 }
 
 
@@ -40,9 +49,18 @@ def campaign_graph_visualization(
     source: str,
     lane_id: str | None = None,
     candidate_id: str | None = None,
+    live_frontier_interval_seconds: int = (
+        DEFAULT_LIVE_FRONTIER_INTERVAL_SECONDS
+    ),
 ) -> dict[str, Any]:
     if source not in VISUALIZATION_SOURCES:
         raise ValueError("unsupported visualization source")
+    if (
+        isinstance(live_frontier_interval_seconds, bool)
+        or not isinstance(live_frontier_interval_seconds, int)
+        or not 1 <= live_frontier_interval_seconds <= 3600
+    ):
+        raise ValueError("live frontier interval must be 1 to 3600 seconds")
     if source == "lane_best" and not lane_id:
         raise ValueError("lane_best requires lane_id")
     if source == "candidate" and not candidate_id:
@@ -56,13 +74,21 @@ def campaign_graph_visualization(
         if campaign is None:
             raise VisualizationNotFoundError("campaign not found")
         target = str(campaign["target"])
-        selected = _select_candidate(
-            connection,
-            campaign_id=campaign_id,
-            source=source,
-            lane_id=lane_id,
-            candidate_id=candidate_id,
-        )
+        if source == "live_frontier":
+            selected = _select_live_checkpoint(
+                root / "research-campaigns" / campaign_id,
+                connection=connection,
+                campaign_id=campaign_id,
+                lane_id=lane_id,
+            )
+        else:
+            selected = _select_candidate(
+                connection,
+                campaign_id=campaign_id,
+                source=source,
+                lane_id=lane_id,
+                candidate_id=candidate_id,
+            )
         graph6 = str(selected["graph6"])
         try:
             graph = BitGraph.from_graph6(graph6)
@@ -126,6 +152,10 @@ def campaign_graph_visualization(
                 "state": str(selected.get("state") or "retained"),
                 "verification_status": selected.get("certification_status"),
                 "graph_sha256": graph_sha256,
+                "transient": bool(selected.get("transient")),
+                "checkpoint_id": selected.get("checkpoint_id"),
+                "high_water": selected.get("high_water"),
+                "published_at": selected.get("published_at"),
             },
             "graph": {
                 "order": graph.n,
@@ -156,6 +186,10 @@ def campaign_graph_visualization(
                     VISUALIZATION_CYCLE_NODE_BUDGET
                 ),
                 "symlink_targets_followed": False,
+                "live_frontier_interval_seconds": (
+                    live_frontier_interval_seconds
+                ),
+                "live_frontier_is_certification": False,
             },
         }
     finally:
@@ -372,6 +406,185 @@ def _select_candidate(
             str(row["candidate_id"]),
         ),
     )
+
+
+def _select_live_checkpoint(
+    campaign_root: Path,
+    *,
+    connection: sqlite3.Connection,
+    campaign_id: str,
+    lane_id: str | None,
+) -> dict[str, Any]:
+    lane_rows = connection.execute(
+        """
+        SELECT lane_id, state FROM research_lanes
+        WHERE campaign_id=? ORDER BY updated_at DESC, lane_id
+        """,
+        (campaign_id,),
+    ).fetchall()
+    known_lanes = {str(row["lane_id"]) for row in lane_rows}
+    if lane_id is not None and lane_id not in known_lanes:
+        raise VisualizationNotFoundError("lane not found")
+    active_lanes = {
+        str(row["lane_id"])
+        for row in lane_rows
+        if str(row["state"]) in {"starting", "running", "paused", "stopping"}
+    }
+    checkpoint_dir = campaign_root / "lane-checkpoints"
+    try:
+        directory_stat = checkpoint_dir.lstat()
+    except FileNotFoundError as error:
+        raise VisualizationUnavailableError(
+            "no live search frontier is available"
+        ) from error
+    if (
+        stat.S_ISLNK(directory_stat.st_mode)
+        or not stat.S_ISDIR(directory_stat.st_mode)
+    ):
+        raise VisualizationUnavailableError(
+            "live checkpoint directory is unavailable"
+        )
+    candidates: list[tuple[int, Path]] = []
+    for inspected, path in enumerate(checkpoint_dir.iterdir(), start=1):
+        if inspected > VISUALIZATION_LIVE_DIRECTORY_ENTRY_LIMIT:
+            break
+        if (
+            path.name.startswith("checkpoint-")
+            and path.name.endswith(".json")
+        ):
+            try:
+                file_stat = path.lstat()
+            except FileNotFoundError:
+                continue
+            if (
+                stat.S_ISREG(file_stat.st_mode)
+                and 0 < file_stat.st_size
+                <= VISUALIZATION_LIVE_CHECKPOINT_LIMIT_BYTES
+            ):
+                candidates.append((file_stat.st_mtime_ns, path))
+    candidates.sort(key=lambda item: (item[0], item[1].name), reverse=True)
+    candidates = candidates[:VISUALIZATION_LIVE_CHECKPOINT_SCAN_LIMIT]
+    fallback: dict[str, Any] | None = None
+    for modified_ns, path in candidates:
+        try:
+            checkpoint = _read_live_checkpoint(path)
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        checkpoint_lane = str(checkpoint.get("lane_id") or "")
+        if checkpoint_lane not in known_lanes:
+            continue
+        if lane_id is not None and checkpoint_lane != lane_id:
+            continue
+        selected = _live_checkpoint_selection(
+            checkpoint, modified_ns=modified_ns
+        )
+        if lane_id is not None or checkpoint_lane in active_lanes:
+            return selected
+        if fallback is None:
+            fallback = selected
+    if fallback is not None:
+        return fallback
+    raise VisualizationUnavailableError(
+        "no live search frontier is available"
+    )
+
+
+def _read_live_checkpoint(path: Path) -> dict[str, Any]:
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags)
+    try:
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or not 0 < before.st_size
+            <= VISUALIZATION_LIVE_CHECKPOINT_LIMIT_BYTES
+        ):
+            raise ValueError("live checkpoint is unavailable")
+        chunks = []
+        remaining = before.st_size
+        while remaining:
+            chunk = os.read(descriptor, min(remaining, 64 * 1024))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        payload = b"".join(chunks)
+        after = os.fstat(descriptor)
+    finally:
+        os.close(descriptor)
+    if (
+        before.st_dev != after.st_dev
+        or before.st_ino != after.st_ino
+        or before.st_size != after.st_size
+        or len(payload) != before.st_size
+    ):
+        raise ValueError("live checkpoint changed while being read")
+    value = json.loads(payload)
+    if not isinstance(value, dict):
+        raise ValueError("live checkpoint must be an object")
+    checkpoint_id = value.get("checkpoint_id")
+    digest = value.get("sha256")
+    unsigned = {
+        key: item
+        for key, item in value.items()
+        if key not in {"checkpoint_id", "sha256"}
+    }
+    calculated = hashlib.sha256(
+        canonical_json(
+            unsigned,
+            max_bytes=VISUALIZATION_LIVE_CHECKPOINT_LIMIT_BYTES,
+        )
+    ).hexdigest()
+    if (
+        not isinstance(checkpoint_id, str)
+        or checkpoint_id != f"checkpoint-{calculated[:24]}"
+        or digest != calculated
+    ):
+        raise ValueError("live checkpoint integrity mismatch")
+    return value
+
+
+def _live_checkpoint_selection(
+    checkpoint: dict[str, Any], *, modified_ns: int
+) -> dict[str, Any]:
+    graph6 = checkpoint.get("graph6")
+    score = checkpoint.get("score")
+    candidate_id = checkpoint.get("current_candidate_id")
+    lane_id = checkpoint.get("lane_id")
+    if (
+        not isinstance(graph6, str)
+        or not isinstance(score, dict)
+        or not isinstance(candidate_id, str)
+        or not candidate_id
+        or not isinstance(lane_id, str)
+        or not lane_id
+    ):
+        raise ValueError("live checkpoint is incomplete")
+    return {
+        "candidate_id": candidate_id,
+        "graph6": graph6,
+        "graph_sha256": hashlib.sha256(
+            graph6.encode("ascii")
+        ).hexdigest(),
+        "score_json": json.dumps(score, sort_keys=True),
+        "lane_id": lane_id,
+        "lane_version": int(checkpoint.get("lane_version", 0)),
+        "checkpoint_ref": str(checkpoint["checkpoint_id"]),
+        "checkpoint_id": str(checkpoint["checkpoint_id"]),
+        "created_at": datetime.fromtimestamp(
+            modified_ns / 1_000_000_000, tz=UTC
+        ).isoformat().replace("+00:00", "Z"),
+        "published_at": datetime.fromtimestamp(
+            modified_ns / 1_000_000_000, tz=UTC
+        ).isoformat().replace("+00:00", "Z"),
+        "state": "live_frontier",
+        "certification_status": None,
+        "candidate_snapshot_id": None,
+        "high_water": int(checkpoint.get("high_water", 0)),
+        "transient": True,
+    }
 
 
 def _score_ordering_key(score: dict[str, Any]) -> tuple[Any, ...]:

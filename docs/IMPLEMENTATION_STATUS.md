@@ -5,12 +5,15 @@ Last implementation audit: **2026-07-26**.
 ## Scientific observatory
 
 The live campaign dashboard now includes a bounded read-only scientific
-observatory. It renders the global-best graph, a lane-best graph, the immutable
-candidate currently consumed by M4, or a retained historical candidate.
+observatory. It renders the global-best graph, a 10-second configurable live
+search-frontier sample, a lane-best graph, the immutable candidate currently
+consumed by M4, or a retained historical candidate.
 Server-side `graph6` decoding keeps raw encodings and artifact paths out of the
 browser contract. Distinct overlays show bounded non-certifying cycle examples
 and hash-checked persisted M4 witnesses without conflating heuristic evidence
-with certification.
+with certification. Live frontier checkpoints are size-bounded, opened without
+following symlinks, integrity-checked, and explicitly labelled transient
+heuristic telemetry.
 
 Supporting tabs show weighted-penalty history, cycle profiles, lane telemetry,
 verification state, and retained-candidate history. SQLite reads and browser
