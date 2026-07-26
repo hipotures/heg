@@ -8,7 +8,10 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from sglab.cli import build_parser
-from sglab.research.context import prepare_director_state_v2
+from sglab.research.context import (
+    CLIENT_ESTIMATED_TOKENS_MAX,
+    prepare_director_state_v2,
+)
 from sglab.research.context_screen import (
     SCREEN_EFFORT,
     SCREEN_MODEL,
@@ -240,7 +243,8 @@ class ContextScreenTests(unittest.TestCase):
                     request["historical_outcomes_bytes"], 12 * 1024
                 )
                 self.assertLessEqual(
-                    request["client_owned_estimated_tokens"], 12_000
+                    request["client_owned_estimated_tokens"],
+                    CLIENT_ESTIMATED_TOKENS_MAX,
                 )
             self.assertFalse(
                 (

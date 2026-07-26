@@ -429,7 +429,7 @@ class ContextModeBoundaryTests(unittest.IsolatedAsyncioTestCase):
                     "director_state_v2": prepare_director_state_v2(
                         current
                     ).state,
-                    "padding": "x" * 50_000,
+                    "padding": "x" * (CLIENT_ESTIMATED_TOKENS_MAX * 4),
                 },
                 sort_keys=True,
                 separators=(",", ":"),
