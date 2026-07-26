@@ -55,6 +55,7 @@
     .wide{grid-column:1/-1}.span-4{grid-column:span 4}.span-8{grid-column:span 8}
     .section-heading{display:flex;justify-content:space-between;align-items:start;gap:1rem;margin-bottom:.8rem}.section-heading h2{font-size:1.18rem;letter-spacing:-.015em;margin:0}.section-heading p{color:var(--muted);margin:.2rem 0 0;font-size:.87rem}.section-heading>a{white-space:nowrap}
     .metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:.6rem}.metric{padding:.72rem;background:var(--surface-2);border:1px solid var(--line);border-radius:9px;min-width:0}.metric span{display:block;color:var(--muted);font-size:.72rem;margin-bottom:.2rem}.metric strong{display:block;overflow-wrap:anywhere}
+    .copyable-tile{position:relative;cursor:copy}.copyable-tile.is-copied::after{content:"Copied";position:absolute;right:.45rem;top:.4rem;padding:.18rem .38rem;border-radius:999px;background:var(--accent-strong);color:var(--surface);font:700 .62rem/1 var(--sans)}.copyable-text{cursor:copy}.copyable-text.is-copied{color:var(--accent-strong)}
     .metric.emphasis{background:var(--accent-soft)}.metric.good{background:var(--good-soft)}.metric.bad{background:var(--bad-soft)}
     .badge,.chip{display:inline-flex;border-radius:999px;padding:.18rem .48rem;font-size:.72rem;font-weight:750;border:1px solid var(--line)}.badge{white-space:nowrap}.chip{max-width:100%;white-space:normal;overflow-wrap:anywhere}.badge.good{color:var(--good);background:var(--good-soft);border-color:transparent}.badge.bad{color:var(--bad);background:var(--bad-soft);border-color:transparent}.badge.warn{color:var(--warn);background:var(--warn-soft);border-color:transparent}.badge.info{color:var(--info);background:var(--info-soft);border-color:transparent}.badge.neutral{color:var(--muted);background:var(--surface-2)}
     .chips,.controls{display:flex;gap:.35rem;flex-wrap:wrap;align-items:center}.controls{margin-top:.75rem}
@@ -65,7 +66,7 @@
     form{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.7rem}label{display:grid;gap:.25rem;color:var(--muted);font-size:.8rem;font-weight:650}label input,label select{color:var(--text);font-weight:400}
     .primary{background:var(--accent);border-color:var(--accent);color:#fff}.danger-button{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 45%,var(--line))}
     .notice{min-height:1.2rem;color:var(--warn);font-weight:650}.empty{padding:1.6rem;text-align:center;color:var(--muted);border:1px dashed var(--line-strong);border-radius:8px}
-    .id{font:12px/1.4 var(--mono);overflow-wrap:anywhere}.id-value{display:inline-flex;align-items:center;gap:.3rem;max-width:100%}.copy-id{min-height:2rem;padding:.2rem .42rem;font-size:.68rem;font-weight:700;color:var(--muted);background:transparent}.clamp{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
+    .id{font:12px/1.4 var(--mono);overflow-wrap:anywhere}.clamp{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
     .table-wrap{max-width:100%;overflow:auto;border:1px solid var(--line);border-radius:9px}table{width:100%;border-collapse:collapse;font-size:.82rem}th,td{text-align:left;vertical-align:top;padding:.58rem;border-bottom:1px solid var(--line)}th{background:var(--surface-2);color:var(--muted);font-size:.7rem;text-transform:uppercase;letter-spacing:.055em;white-space:nowrap}tbody tr:last-child td{border:0}
     details{margin-top:.5rem;border-top:1px solid var(--line);padding-top:.45rem}summary{cursor:pointer;color:var(--accent-strong);font-weight:650}
     pre{max-height:20rem;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--surface-2);border:1px solid var(--line);border-radius:7px;padding:.65rem;font:12px/1.5 var(--mono)}
@@ -78,7 +79,7 @@
       .site-header{position:static}.header-inner{display:grid;grid-template-columns:minmax(0,1fr) auto;padding:.8rem 1rem}.brand{min-width:0}.brand strong a{display:inline-flex;align-items:center;min-height:2.75rem}.theme-toggle{grid-column:2;grid-row:1;min-width:auto;min-height:2.75rem;padding:.52rem .62rem;font-size:.8rem;white-space:nowrap}
       nav{grid-column:1/-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));margin:0;overflow:visible;padding:.55rem 0 .1rem;gap:.3rem}nav a{min-height:2.75rem;display:grid;place-items:center;text-align:center;white-space:nowrap;font-size:.9rem}
       .section-nav{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.25rem}.section-nav a{min-height:2.75rem;display:grid;place-items:center;text-align:center;white-space:nowrap}
-      input,select,button,.copy-id,.section-heading>a,.form-actions>a{min-height:2.75rem}
+      input,select,button,.section-heading>a,.form-actions>a{min-height:2.75rem}
       .section-heading>a,.form-actions>a{display:inline-flex;align-items:center}
       main{padding:1rem .75rem 3rem}.hero{align-items:start}.hero h1{font-size:1.75rem}.workspace-grid{display:block}section{margin-bottom:.8rem;padding:.85rem}.grid{grid-template-columns:1fr}.card-head{display:grid}
       .responsive table,.responsive thead,.responsive tbody,.responsive tr,.responsive th,.responsive td{display:block}.responsive thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}.responsive tr{padding:.65rem;border-bottom:1px solid var(--line)}.responsive tr:last-child{border:0}.responsive td{display:grid;grid-template-columns:7rem minmax(0,1fr);gap:.5rem;padding:.28rem 0;border:0}.responsive td::before{content:attr(data-label);color:var(--muted);font-size:.68rem;text-transform:uppercase;letter-spacing:.05em;font-weight:750}
@@ -134,11 +135,35 @@ const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const fmt=v=>v===null||v===undefined?'Unavailable':Number(v).toLocaleString();
 const label=v=>String(v??'').replaceAll('_',' ').replace(/\b\w/g,c=>c.toUpperCase());
 const shortId=v=>{const s=String(v??'');return s.length>20?`${s.slice(0,11)}…${s.slice(-6)}`:s};
-const idText=v=>v?`<span class="id" title="${esc(v)}">${esc(shortId(v))}</span>`:'—';
-const copyButton=v=>v?`<button type="button" class="copy-id" data-copy="${esc(v)}" aria-label="Copy full identifier">Copy ID</button>`:'';
-const id=v=>v?`<span class="id-value">${idText(v)}${copyButton(v)}</span>`:'—';
+const shortIdText=v=>v?`<span class="id" title="${esc(v)}">${esc(shortId(v))}</span>`:'—';
+const idText=v=>v?`<span class="id copyable-text" data-copy-text="${esc(v)}" role="button" tabindex="0" title="${esc(`Click to copy ${v}`)}">${esc(shortId(v))}</span>`:'—';
+const id=v=>idText(v);
 const statusTone=v=>{const s=String(v??'').toLowerCase();if(/complete|valid|pass|applied|running|active|certified/.test(s))return'good';if(/fail|invalid|reject|error|abort|disagree/.test(s))return'bad';if(/time|stop|block|pause|unknown|pressure/.test(s))return'warn';return'neutral'};
 const badge=v=>`<span class="badge ${statusTone(v)}">${esc(label(v??'unknown'))}</span>`;
+const copyableAttributes=(name,value)=>`class="copyable-tile" data-copy-text="${esc(`${label(name)}: ${value}`)}" role="button" tabindex="0" title="${esc(`Click to copy ${label(name)}`)}"`;
+const semanticTileAttributes=(name,value)=>{
+  const containsObjects=value&&typeof value==='object'
+    &&(!Array.isArray(value)||value.some(item=>item&&typeof item==='object'));
+  return containsObjects?'':` ${copyableAttributes(name,semanticClipboardValue(value,name))}`;
+};
+function semanticClipboardValue(value,key=''){
+  if(value===null||value===undefined||value==='')return '';
+  if(typeof value==='boolean')return value?'Yes':'No';
+  if(typeof value==='number'){
+    if(/share|diversity|rate|weight|confidence|yield/.test(key)&&Math.abs(value)<=1)return `${(100*value).toFixed(1)}%`;
+    if(/seconds|elapsed|latency|wall/.test(key))return `${Number(value).toLocaleString(undefined,{maximumFractionDigits:2})} s`;
+    return Number(value).toLocaleString(undefined,{maximumFractionDigits:4});
+  }
+  if(Array.isArray(value))return value.map(item=>typeof item==='object'?JSON.stringify(item):String(item)).join(', ');
+  if(typeof value==='object')return JSON.stringify(value);
+  return String(value);
+}
+function metricTile(name,displayValue,tone='',clipboardValue=displayValue){
+  const rendered=displayValue&&String(displayValue).includes('<')
+    ?displayValue
+    :`<strong>${esc(displayValue)}</strong>`;
+  return `<div class="metric copyable-tile ${esc(tone)}" data-copy-text="${esc(`${name}: ${clipboardValue}`)}" role="button" tabindex="0" title="${esc(`Click to copy ${name}`)}"><span>${esc(name)}</span>${rendered}</div>`;
+}
 const selectionIntersects=element=>{
   const selection=window.getSelection?.();
   if(!element||!selection?.rangeCount||selection.isCollapsed)return false;
@@ -211,7 +236,7 @@ function restoreRefreshView(view){
   }
 }
 const technical=(title,value,key)=>value===null||value===undefined?'':`<details data-persist-details="${esc(key||title)}"${expandedDetails.has(key||title)?' open':''}><summary>${esc(title)}</summary><pre>${esc(typeof value==='string'?value:JSON.stringify(value,null,2))}</pre></details>`;
-const field=(name,value)=>{const technicalKey=/(^|[\s_-])(id|ids|hash|sha-?256|fingerprint)($|[\s_-])|prompt|director state|output schema/i.test(name);return value===null||value===undefined||value===''?'':`<div><dt>${esc(label(name))}</dt><dd>${typeof value==='string'&&technicalKey?id(value):esc(value)}</dd></div>`};
+const field=(name,value)=>{const technicalKey=/(^|[\s_-])(id|ids|hash|sha-?256|fingerprint)($|[\s_-])|prompt|director state|output schema/i.test(name);return value===null||value===undefined||value===''?'':`<div${semanticTileAttributes(name,value)}><dt>${esc(label(name))}</dt><dd>${typeof value==='string'&&technicalKey?shortIdText(value):esc(value)}</dd></div>`};
 function semanticValue(value,key=''){
   if(value===null||value===undefined||value==='')return '';
   if(typeof value==='boolean')return value?'Yes':'No';
@@ -224,16 +249,66 @@ function semanticValue(value,key=''){
     if(value.some(v=>v&&typeof v==='object'))return `<div class="stack">${value.map(v=>`<div class="nested-object">${semanticValue(v,key)}</div>`).join('')}</div>`;
     return `<div class="chips">${value.map(v=>`<span class="chip" title="${esc(v)}">${esc(shortId(v))}</span>`).join('')}</div>`;
   }
-  if(typeof value==='object')return `<dl class="semantic">${Object.entries(value).filter(([,v])=>v!==null&&v!==undefined).map(([k,v])=>`<div><dt>${esc(label(k))}</dt><dd>${semanticValue(v,k)}</dd></div>`).join('')}</dl>`;
-  return value.length>36?id(value):esc(value);
+  if(typeof value==='object')return `<dl class="semantic">${Object.entries(value).filter(([,v])=>v!==null&&v!==undefined).map(([k,v])=>`<div${semanticTileAttributes(k,v)}><dt>${esc(label(k))}</dt><dd>${semanticValue(v,k)}</dd></div>`).join('')}</dl>`;
+  return value.length>36?shortIdText(value):esc(value);
 }
-const semantic=(obj)=>`<dl class="semantic">${Object.entries(obj||{}).filter(([,v])=>v!==null&&v!==undefined&&v!=='').map(([k,v])=>`<div><dt>${esc(label(k))}</dt><dd>${semanticValue(v,k)}</dd></div>`).join('')}</dl>`;
+const semantic=(obj)=>`<dl class="semantic">${Object.entries(obj||{}).filter(([,v])=>v!==null&&v!==undefined&&v!=='').map(([k,v])=>`<div${semanticTileAttributes(k,v)}><dt>${esc(label(k))}</dt><dd>${semanticValue(v,k)}</dd></div>`).join('')}</dl>`;
 async function api(path,options={}){const response=await fetch(path,{...options,headers:{...headers,...(options.headers||{})},cache:'no-store'});let body;try{body=await response.json()}catch{body={error:`HTTP ${response.status}`}}if(!response.ok)throw new Error(body.error||`HTTP ${response.status}`);return body}
 const observatory=createScientificObservatory({root:document.getElementById('scientific-observatory'),api,esc,fmt,label,shortId,badge,selectionIntersects});
 function setThemeLabel(){const dark=document.documentElement.dataset.theme==='dark';const button=document.getElementById('theme-toggle');button.textContent=dark?'☀ Light theme':'☾ Dark theme';button.setAttribute('aria-pressed',String(dark))}
 document.getElementById('theme-toggle').addEventListener('click',()=>{const next=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=next;localStorage.setItem('sglab-theme',next);setThemeLabel()});setThemeLabel();
-document.addEventListener('click',async event=>{const button=event.target.closest('[data-copy]');if(!button)return;try{await navigator.clipboard.writeText(button.dataset.copy);const old=button.textContent;button.textContent='Copied';setTimeout(()=>button.textContent=old,900)}catch{button.title='Copy unavailable in this browser context'}});
-function metrics(target,items){replaceHtmlPreservingSelection(target,items.map(([name,value,tone=''])=>`<div class="metric ${tone}"><span>${esc(name)}</span><strong>${value&&String(value).includes('<')?value:esc(value)}</strong></div>`).join(''))}
+async function copyText(value){
+  const textarea=document.createElement('textarea');
+  textarea.value=value;
+  textarea.readOnly=true;
+  textarea.style.position='fixed';
+  textarea.style.opacity='0';
+  textarea.style.pointerEvents='none';
+  document.body.appendChild(textarea);
+  textarea.select();
+  textarea.setSelectionRange(0,value.length);
+  try{
+    if(document.execCommand('copy'))return true;
+  }catch{
+    // Fall through to the asynchronous Clipboard API.
+  }finally{
+    textarea.remove();
+  }
+  try{
+    await navigator.clipboard.writeText(value);
+    return true;
+  }catch{
+    return false;
+  }
+}
+function copyTargetFrom(element){
+  return element.closest('.copyable-tile')||element.closest('[data-copy-text]');
+}
+async function copyDashboardTarget(target){
+  if(!target?.dataset.copyText)return;
+  if(await copyText(target.dataset.copyText)){
+    window.getSelection?.()?.removeAllRanges();
+    for(const item of document.querySelectorAll('.is-copied'))item.classList.remove('is-copied');
+    target.classList.add('is-copied');
+    target.focus?.({preventScroll:true});
+    setTimeout(()=>{if(target.isConnected)target.classList.remove('is-copied')},900);
+  }else{
+    target.title='Clipboard access is unavailable in this browser context.';
+  }
+}
+document.addEventListener('click',event=>{
+  if(event.target.closest('a,button,input,select,textarea,summary'))return;
+  const target=copyTargetFrom(event.target);
+  if(target)copyDashboardTarget(target);
+});
+document.addEventListener('keydown',event=>{
+  if(event.key!=='Enter'&&event.key!==' ')return;
+  const target=event.target.matches?.('.copyable-tile,[data-copy-text]')?event.target:null;
+  if(!target)return;
+  event.preventDefault();
+  copyDashboardTarget(target);
+});
+function metrics(target,items){replaceHtmlPreservingSelection(target,items.map(([name,value,tone='',clipboardValue=value])=>metricTile(name,value,tone,clipboardValue)).join(''))}
 function actionTitle(type){return ({start_lane:'Start search lane',request_diagnostic:'Request diagnostic',set_review_trigger:'Set review trigger',promote_candidate:'Promote candidate',schedule_verification:'Schedule verification',stop_lane:'Stop search lane',patch_lane:'Change lane strategy',restart_lane:'Restart lane',fork_lane:'Fork lane',reallocate_resources:'Reallocate resources'})[type]||label(type)}
 function parameters(action){
   const p=action.parameters||{},source=p.spec||p.patch||p.review_trigger||p;
@@ -250,9 +325,9 @@ function effectView(effect,met,key){
   const tone=effect.outcome==='score_improvement'?'good':/regression|rejection/.test(effect.outcome||'')?'bad':/timeout|plateau/.test(effect.outcome||'')?'warn':'';
   return `<div class="effect ${tone}"><div class="card-head"><strong>${esc(label(effect.outcome||'Measured outcome'))}</strong>${badge(met===null?'expected signal unknown':met?'expected signal observed':'expected signal not observed')}</div>${semantic({score:delta===null?null:`${effect.initial_score} → ${effect.best_score}`,delta,evaluations:effect.evaluations,elapsed_seconds:effect.elapsed_seconds,throughput:effect.throughput,accepted_mutations:effect.accepted_mutations,global_records:effect.global_records,diversity:effect.diversity,exact_verifier:effect.exact_verifier_result})}${technical('Diagnostic details',{cycle_profile:effect.cycle_profile,mutation_ancestry:effect.mutation_ancestry,operator_yield_change:effect.operator_yield_change},`${key}:diagnostics`)}</div>`;
 }
-function actionCard(a){const key=`action:${a.action_id}`;return `<article class="card"><div class="card-head"><div><div class="chips">${badge(a.action_type)}${badge(a.validation_status)}${badge(a.application_status||'pending')}</div><h3>${esc(actionTitle(a.action_type))}</h3><div class="meta">${id(a.action_id)} · ${esc(a.created_at)}</div></div>${a.target_lane_id?`<div class="metric"><span>Target lane</span><strong>${id(a.target_lane_id)}</strong></div>`:''}</div><p class="clamp">${esc(a.expected_effect||'No rationale recorded.')}</p>${parameters(a)}${effectView(a.observed_effect,a.expectation_met,key)}${technical('Raw action record',a,`${key}:raw`)}</article>`}
-function laneCard(l){const p=l.parameters||{};return `<article class="card"><div class="card-head"><div><div class="chips">${badge(l.state)}${badge(l.algorithm)}</div><h3>${idText(l.lane_id)}</h3><div class="meta">Version ${esc(l.lane_version)} · generation ${esc(l.process_generation||0)} · ${copyButton(l.lane_id)}</div></div><div class="metric"><span>Throughput</span><strong>${Number(l.metrics?.candidates_per_second||0).toLocaleString(undefined,{maximumFractionDigits:1})}/s</strong></div></div><dl class="semantic">${field('Graph order',p.order)}${field('Witness cap',p.witness_cap)}${field('Candidates',l.telemetry_high_water||0)}${field('Diversity',Number(l.metrics?.diversity||0).toFixed(3))}${field('Duplicate rate',`${(100*Number(l.metrics?.duplicate_rate||0)).toFixed(1)}%`)}${field('Resource share',`${(100*Number(l.resource_share||0)).toFixed(0)}%`)}</dl><div class="controls"><button type="button" data-show-lane="${esc(l.lane_id)}">Show lane best</button></div>${technical('Complete lane controls',p,`lane:${l.lane_id}:controls`)}</article>`}
-function candidateCard(c){const counts=c.score?.witness_counts||{},degrees=Object.entries(c.degree_histogram||{}).map(([degree,count])=>`Degree ${degree}: ${count}`).join(' · ')||'Unavailable',dimensions=c.order===null||c.order===undefined?'Graph dimensions unavailable':`Connected graph · ${esc(c.order)} vertices / ${esc(c.size)} edges`;return `<article class="card"><div class="card-head"><div><div class="chips">${badge(c.verification_status)}${c.order===null||c.order===undefined?'':badge(`order ${c.order}`)}</div><h3>${idText(c.candidate_id)}</h3><div class="meta">${dimensions} · ${copyButton(c.candidate_id)}</div></div><div class="metric emphasis"><span>Weighted penalty</span><strong>${esc(c.score?.weighted_penalty??'—')}</strong></div></div><dl class="semantic">${field('4-cycles',counts['4']??0)}${field('8-cycles',counts['8']??0)}${field('16-cycles',counts['16']??0)}${field('Novelty',Number(c.score?.novelty||0).toFixed(3))}${field('Simplicity',c.score?.simplicity)}${field('Degree histogram',degrees)}</dl><div class="controls"><button type="button" data-show-candidate="${esc(c.candidate_id)}">Show graph</button>${['graph6','json','svg'].filter(k=>c.artifacts?.[k]).map(k=>`<button data-artifact="${esc(c.artifacts[k])}">Download ${esc(k.toUpperCase())}</button>`).join('')}</div>${technical('Candidate metadata',c,`candidate:${c.candidate_id}:metadata`)}</article>`}
+function actionCard(a){const key=`action:${a.action_id}`;return `<article class="card"><div class="card-head"><div><div class="chips">${badge(a.action_type)}${badge(a.validation_status)}${badge(a.application_status||'pending')}</div><h3>${esc(actionTitle(a.action_type))}</h3><div class="meta">${id(a.action_id)} · ${esc(a.created_at)}</div></div>${a.target_lane_id?metricTile('Target lane',shortIdText(a.target_lane_id),'',a.target_lane_id):''}</div><p class="clamp">${esc(a.expected_effect||'No rationale recorded.')}</p>${parameters(a)}${effectView(a.observed_effect,a.expectation_met,key)}${technical('Raw action record',a,`${key}:raw`)}</article>`}
+function laneCard(l){const p=l.parameters||{},throughput=`${Number(l.metrics?.candidates_per_second||0).toLocaleString(undefined,{maximumFractionDigits:1})}/s`;return `<article class="card"><div class="card-head"><div><div class="chips">${badge(l.state)}${badge(l.algorithm)}</div><h3>${idText(l.lane_id)}</h3><div class="meta">Version ${esc(l.lane_version)} · generation ${esc(l.process_generation||0)}</div></div>${metricTile('Throughput',throughput)}</div><dl class="semantic">${field('Graph order',p.order)}${field('Witness cap',p.witness_cap)}${field('Candidates',l.telemetry_high_water||0)}${field('Diversity',Number(l.metrics?.diversity||0).toFixed(3))}${field('Duplicate rate',`${(100*Number(l.metrics?.duplicate_rate||0)).toFixed(1)}%`)}${field('Resource share',`${(100*Number(l.resource_share||0)).toFixed(0)}%`)}</dl><div class="controls"><button type="button" data-show-lane="${esc(l.lane_id)}">Show lane best</button></div>${technical('Complete lane controls',p,`lane:${l.lane_id}:controls`)}</article>`}
+function candidateCard(c){const counts=c.score?.witness_counts||{},degrees=Object.entries(c.degree_histogram||{}).map(([degree,count])=>`Degree ${degree}: ${count}`).join(' · ')||'Unavailable',dimensions=c.order===null||c.order===undefined?'Graph dimensions unavailable':`Connected graph · ${esc(c.order)} vertices / ${esc(c.size)} edges`;return `<article class="card"><div class="card-head"><div><div class="chips">${badge(c.verification_status)}${c.order===null||c.order===undefined?'':badge(`order ${c.order}`)}</div><h3>${idText(c.candidate_id)}</h3><div class="meta">${dimensions}</div></div>${metricTile('Weighted penalty',c.score?.weighted_penalty??'—','emphasis')}</div><dl class="semantic">${field('4-cycles',counts['4']??0)}${field('8-cycles',counts['8']??0)}${field('16-cycles',counts['16']??0)}${field('Novelty',Number(c.score?.novelty||0).toFixed(3))}${field('Simplicity',c.score?.simplicity)}${field('Degree histogram',degrees)}</dl><div class="controls"><button type="button" data-show-candidate="${esc(c.candidate_id)}">Show graph</button>${['graph6','json','svg'].filter(k=>c.artifacts?.[k]).map(k=>`<button data-artifact="${esc(c.artifacts[k])}">Download ${esc(k.toUpperCase())}</button>`).join('')}</div>${technical('Candidate metadata',c,`candidate:${c.candidate_id}:metadata`)}</article>`}
 function eventLine(line){
   let event;try{event=typeof line==='string'?JSON.parse(line):line}catch{return `<article class="event-line"><div class="event-meta">${badge('unparsed event')}</div><p>${esc(line)}</p></article>`}
   return `<article class="event-line"><div class="event-meta">${badge(event.level||'info')}<strong>${esc(label(event.kind||'event'))}</strong><time>${esc(event.timestamp||'Timestamp unavailable')}</time></div><p>${esc(event.message||'No event message.')}</p>${technical('Technical event record',event,`event:${event.timestamp||'unknown'}:${event.kind||'event'}`)}</article>`;
@@ -308,7 +383,14 @@ function turnCommunication(row){
 }
 function turnsView(rows){
   if(!rows.length)return '<div class="empty">No Director turns yet.</div>';
-  return `<div class="turn-list">${rows.map(row=>`<article class="turn-card"><div class="turn-card-head"><div><div class="chips">${badge(row.status)} ${badge(row.thread_lifecycle||'unrecorded')}</div><h3>Director turn ${idText(row.turn_id||'pending')}</h3><div class="meta">Thread ${id(row.thread_id)}</div></div>${row.error_kind?`<div class="effect bad"><strong>${esc(label(row.error_kind))}</strong></div>`:''}</div><div class="turn-metrics"><div class="metric"><span>Latency</span><strong>${Number(row.wall_seconds||0).toFixed(2)} s</strong></div><div class="metric"><span>Input</span><strong>${fmt(row.input_tokens)} tokens</strong><span>${fmt(row.cached_input_tokens)} cached</span></div><div class="metric"><span>Output</span><strong>${fmt(row.output_tokens)} tokens</strong><span>${fmt(row.reasoning_output_tokens)} reasoning</span></div><div class="metric emphasis"><span>Server total</span><strong>${fmt(row.total_tokens)}</strong></div></div>${turnCommunication(row)}</article>`).join('')}</div>`;
+  return `<div class="turn-list">${rows.map(row=>{
+    const latency=`${Number(row.wall_seconds||0).toFixed(2)} s`;
+    const input=`${fmt(row.input_tokens)} tokens`;
+    const cached=`${fmt(row.cached_input_tokens)} cached`;
+    const output=`${fmt(row.output_tokens)} tokens`;
+    const reasoning=`${fmt(row.reasoning_output_tokens)} reasoning`;
+    return `<article class="turn-card"><div class="turn-card-head"><div><div class="chips">${badge(row.status)} ${badge(row.thread_lifecycle||'unrecorded')}</div><h3>Director turn ${idText(row.turn_id||'pending')}</h3><div class="meta">Thread ${id(row.thread_id)}</div></div>${row.error_kind?`<div class="effect bad"><strong>${esc(label(row.error_kind))}</strong></div>`:''}</div><div class="turn-metrics">${metricTile('Latency',latency)}${metricTile('Input',`<strong>${esc(input)}</strong><span>${esc(cached)}</span>`,'',`${input} · ${cached}`)}${metricTile('Output',`<strong>${esc(output)}</strong><span>${esc(reasoning)}</span>`,'',`${output} · ${reasoning}`)}${metricTile('Server total',fmt(row.total_tokens),'emphasis')}</div>${turnCommunication(row)}</article>`;
+  }).join('')}</div>`;
 }
 async function loadTurnCommunication(details,refreshView=null){
   const key=details.dataset.turnCommunication,body=details.querySelector('[data-communication-body]');
@@ -372,25 +454,25 @@ async function refresh(){
     document.getElementById('resume-form').elements.repair_acknowledgement.required=campaign.state==='paused_fault';
     document.getElementById('comparisons-overview').hidden=!last;
     for(const section of document.querySelectorAll('[data-legacy-run]'))section.hidden=campaignMode;
-    metrics('comparison-summary',[['Default Director context',comparison.default_context_mode,'emphasis'],['Recommendation basis',comparison.recommendation_basis],['Last suite',last?`<a href="/comparisons/${esc(last.suite_id)}">${esc(last.name)}</a>`:'—'],['Completed / planned',last?`${last.completion_count} / ${last.planned_inference_count}`:'—'],['Total server tokens',last?fmt(last.total_server_tokens):'—'],['Relative cost units',last?Number(last.relative_cost_units||0).toFixed(2):'—']]);
+    metrics('comparison-summary',[['Default Director context',comparison.default_context_mode,'emphasis'],['Recommendation basis',comparison.recommendation_basis],['Last suite',last?`<a href="/comparisons/${esc(last.suite_id)}">${esc(last.name)}</a>`:'—','',last?.name||'—'],['Completed / planned',last?`${last.completion_count} / ${last.planned_inference_count}`:'—'],['Total server tokens',last?fmt(last.total_server_tokens):'—'],['Relative cost units',last?Number(last.relative_cost_units||0).toFixed(2):'—']]);
     const currentFault=campaign.state==='paused_fault'||campaign.state==='infrastructure_failure';
-    metrics('campaign-metrics',[['State',campaign.state||'IDLE',statusTone(campaign.state)],['Campaign',shortId(campaign.campaign_id||'—')],['Target',campaign.target||'erdos_gyarfas'],['Active lanes',campaign.active_lane_count||0],['Effective context',campaign.effective_context_mode||campaign.director_session?.context_mode||'stateless_turns','emphasis'],['Director auth',campaign.auth_imported?'Imported':'Not imported'],['Director connection',campaign.director_session?.state||'Unavailable'],['Current fault',currentFault?(campaign.fault_kind||'Unknown'):'None',currentFault?'bad':''],['Verifier queued / running',`${campaign.verification?.queued||0} / ${campaign.verification?.running||0}`],['Certified',campaign.verification?.certified||0],['Coordinator RSS',`${((campaign.resources?.coordinator_rss_bytes||0)/1048576).toFixed(1)} MiB`],['Database',`${((campaign.resources?.database_bytes||0)/1048576).toFixed(2)} MiB`]]);
+    metrics('campaign-metrics',[['State',campaign.state||'IDLE',statusTone(campaign.state)],['Campaign',shortId(campaign.campaign_id||'—'),'',campaign.campaign_id||'—'],['Target',campaign.target||'erdos_gyarfas'],['Active lanes',campaign.active_lane_count||0],['Effective context',campaign.effective_context_mode||campaign.director_session?.context_mode||'stateless_turns','emphasis'],['Director auth',campaign.auth_imported?'Imported':'Not imported'],['Director connection',campaign.director_session?.state||'Unavailable'],['Current fault',currentFault?(campaign.fault_kind||'Unknown'):'None',currentFault?'bad':''],['Verifier queued / running',`${campaign.verification?.queued||0} / ${campaign.verification?.running||0}`],['Certified',campaign.verification?.certified||0],['Coordinator RSS',`${((campaign.resources?.coordinator_rss_bytes||0)/1048576).toFixed(1)} MiB`],['Database',`${((campaign.resources?.database_bytes||0)/1048576).toFixed(2)} MiB`]]);
     const cumulative=campaign.cumulative_counters||{},attempt=campaign.current_attempt?.live_attempt_counters||campaign.execution_attempts?.[0]?.attempt_counters||{};
-    metrics('attempt-metrics',[['Campaign ID',shortId(campaign.campaign_id||'—'),'emphasis'],['Current attempt',shortId(campaign.current_attempt?.attempt_id||'None')],['Cumulative evaluations',fmt(cumulative.evaluations||0)],['This attempt evaluations',fmt(attempt.evaluations||0)],['Cumulative server tokens',fmt(cumulative.server_tokens||0)],['This attempt server tokens',fmt(attempt.server_tokens||0)]]);
+    metrics('attempt-metrics',[['Campaign ID',shortId(campaign.campaign_id||'—'),'emphasis',campaign.campaign_id||'—'],['Current attempt',shortId(campaign.current_attempt?.attempt_id||'None'),'',campaign.current_attempt?.attempt_id||'None'],['Cumulative evaluations',fmt(cumulative.evaluations||0)],['This attempt evaluations',fmt(attempt.evaluations||0)],['Cumulative server tokens',fmt(cumulative.server_tokens||0)],['This attempt server tokens',fmt(attempt.server_tokens||0)]]);
     boundedList('attempt-history',campaign.execution_attempts||[],attemptCard,8);
     const memory=campaign.scientific_memory;
-    metrics('memory-metrics',[['Snapshot',shortId(memory?.memory_snapshot_id||'Legacy / pending')],['Version',memory?.version??'—'],['Serialized size',memory?`${fmt(memory.byte_size)} B`:'—'],['Estimated client tokens',memory?fmt(memory.estimated_token_count):'—'],['Creation trigger',memory?label(memory.creation_trigger):'—'],['SHA-256',memory?shortId(memory.sha256):'—']]);
+    metrics('memory-metrics',[['Snapshot',shortId(memory?.memory_snapshot_id||'Legacy / pending'),'',memory?.memory_snapshot_id||'Legacy / pending'],['Version',memory?.version??'—'],['Serialized size',memory?`${fmt(memory.byte_size)} B`:'—'],['Estimated client tokens',memory?fmt(memory.estimated_token_count):'—'],['Creation trigger',memory?label(memory.creation_trigger):'—'],['SHA-256',memory?shortId(memory.sha256):'—','',memory?.sha256||'—']]);
     const fault=document.getElementById('campaign-fault');
     fault.hidden=!currentFault;
     replaceHtmlPreservingSelection(fault,currentFault?`<div class="effect bad"><strong>Campaign stopped fail-closed: ${esc(label(campaign.fault_kind||'Unknown fault'))}</strong><p>${esc(campaign.fault_detail||'No failure detail was persisted.')}</p><div class="meta">No additional Director action or exact verification was started after this fault.</div></div>`:'');
     replaceHtmlPreservingSelection(assessment,`<div class="effect"><strong>Current assessment</strong><p>${esc(campaign.assessment?.campaign_assessment||'No Director assessment yet.')}</p></div>`);
-    boundedList('hypotheses',campaign.hypotheses||[],h=>`<article class="card"><div class="card-head"><div><div class="chips">${badge(h.status)}<span class="chip">Confidence ${(100*Number(h.confidence||0)).toFixed(0)}%</span></div><h3>${idText(h.hypothesis_id)}</h3></div><span class="meta">${esc(h.created_at)} · ${copyButton(h.hypothesis_id)}</span></div><p class="clamp">${esc(h.statement)}</p></article>`);
+    boundedList('hypotheses',campaign.hypotheses||[],h=>`<article class="card"><div class="card-head"><div><div class="chips">${badge(h.status)}<span class="chip">Confidence ${(100*Number(h.confidence||0)).toFixed(0)}%</span></div><h3>${idText(h.hypothesis_id)}</h3></div><span class="meta">${esc(h.created_at)}</span></div><p class="clamp">${esc(h.statement)}</p></article>`);
     boundedList('actions',campaign.actions||[],actionCard);
     boundedList('lanes-list',campaign.lanes||[],laneCard);
-    boundedList('revisions',campaign.revisions||[],r=>`<article class="card"><div class="card-head"><div><h3>${idText(r.lane_id)}</h3><span class="meta">Version ${esc(r.old_lane_version)} → ${esc(r.new_lane_version)} · ${esc(r.applied_at)} · ${copyButton(r.lane_id)}</span></div>${badge(r.action_id?'Director action':'Recovery')}</div>${semantic({before:r.old_parameters,after:r.new_parameters})}${technical('Revision record',r,`revision:${r.lane_id}:${r.new_lane_version}`)}</article>`);
+    boundedList('revisions',campaign.revisions||[],r=>`<article class="card"><div class="card-head"><div><h3>${idText(r.lane_id)}</h3><span class="meta">Version ${esc(r.old_lane_version)} → ${esc(r.new_lane_version)} · ${esc(r.applied_at)}</span></div>${badge(r.action_id?'Director action':'Recovery')}</div>${semantic({before:r.old_parameters,after:r.new_parameters})}${technical('Revision record',r,`revision:${r.lane_id}:${r.new_lane_version}`)}</article>`);
     replaceHtmlPreservingSelection(turns,turnsView(campaign.turns||[]));
     for(const details of turns.querySelectorAll('details[data-turn-communication][open]'))loadTurnCommunication(details,viewAnchor);
-    metrics('metrics',[['Status',state.status],['Run',shortId(state.run_id||'—')],['Target',state.target||'—'],['Order',state.configuration?.order??'—'],['Algorithm',label(state.configuration?.algorithm||'—')],['Seed',state.configuration?.seed??'—'],['Elapsed',`${Number(state.elapsed_seconds||0).toFixed(1)} s`],['Candidates / s',Number(state.throughput?.candidates_per_second||0).toFixed(1)],['Candidates',fmt(state.throughput?.candidates||0)],['Workers',`${state.workers?.alive??0} / ${state.workers?.configured??0}`],['Aggregate RSS',`${((state.resources?.aggregate_rss_bytes||0)/1048576).toFixed(1)} MiB`],['Exact queue',state.exact_verification?.queued??0],['Verified candidates',state.exact_verification?.verified_candidates??0],['Best score',JSON.stringify(state.best?.score?.ordering_key||[])]]);
+    metrics('metrics',[['Status',state.status],['Run',shortId(state.run_id||'—'),'',state.run_id||'—'],['Target',state.target||'—'],['Order',state.configuration?.order??'—'],['Algorithm',label(state.configuration?.algorithm||'—')],['Seed',state.configuration?.seed??'—'],['Elapsed',`${Number(state.elapsed_seconds||0).toFixed(1)} s`],['Candidates / s',Number(state.throughput?.candidates_per_second||0).toFixed(1)],['Candidates',fmt(state.throughput?.candidates||0)],['Workers',`${state.workers?.alive??0} / ${state.workers?.configured??0}`],['Aggregate RSS',`${((state.resources?.aggregate_rss_bytes||0)/1048576).toFixed(1)} MiB`],['Exact queue',state.exact_verification?.queued??0],['Verified candidates',state.exact_verification?.verified_candidates??0],['Best score',JSON.stringify(state.best?.score?.ordering_key||[])]]);
     boundedList('logs',logs.lines||[],eventLine);
     boundedList('candidates-list',campaignMode?(campaign.candidates||[]):(candidates.candidates||[]),candidateCard);
     replaceHtmlPreservingSelection('runs',compactTable((runs.runs||[]).slice(0,20),[['Run',r=>id(r.run_id)],['Created',r=>esc(r.created_at)],['Target',r=>esc(r.target)],['Configuration',r=>`${esc(r.parameters?.order??'—')} · ${esc(label(r.parameters?.algorithm||'—'))}`],['Status',r=>badge(r.live_status)],['Candidates',r=>fmt(r.candidates??0)],['Throughput',r=>`${Number(r.candidates_per_second||0).toFixed(1)}/s`],['Best score',r=>esc(JSON.stringify(r.best_score||[]))]]));

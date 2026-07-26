@@ -40,11 +40,13 @@ defers DOM replacement only for a container intersecting that selection. This
 prevents invalidating copy selection without freezing unrelated telemetry or
 the live graph drawing; the selected container catches up on the next polling
 interval after the selection is cleared.
-The six live-frontier summary cards copy their own label and current value on
-a single click. This clipboard interaction is browser-local and issues no API
-request. Clipboard text matches the card's displayed text, including an
-abbreviated graph hash, except that the graph-hash card copies its complete
-SHA-256 value without changing the card layout.
+Dashboard metric and semantic value tiles share one delegated, browser-local
+single-click copy interaction that issues no API request. Clipboard text
+contains the tile label and full value. Abbreviated IDs, hashes, and SHA-256
+values therefore copy their complete underlying value without changing the
+card layout. Standalone abbreviated identifiers use the same mechanism, so
+separate `Copy ID` controls are unnecessary. Enter and Space activate focused
+copyable values.
 The live-frontier inspector derives aggregate campaign throughput by summing
 the latest completed metric window for each running lane. Missing first-batch
 measurements do not erase the available aggregate; the UI exposes measured

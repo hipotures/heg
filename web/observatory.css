@@ -30,8 +30,6 @@
 .observatory-inspector p{margin:.2rem 0}
 .observatory-inspector dl{margin:0}
 .observatory-inspector .semantic{grid-template-columns:repeat(2,minmax(0,1fr))}
-.observatory-inspector [data-copy-observatory-value]{position:relative;cursor:copy}
-.observatory-inspector [data-copy-observatory-value].is-copied::after{content:"Copied";position:absolute;right:.55rem;top:.45rem;padding:.18rem .38rem;border-radius:999px;background:var(--accent-strong);color:var(--surface);font:700 .62rem/1 var(--sans)}
 .layer-controls{display:grid;gap:.45rem;padding-top:.8rem;border-top:1px solid var(--line)}
 .layer-controls label{display:flex;grid-template-columns:none;align-items:center;gap:.5rem;min-height:2.25rem;color:var(--text);font-weight:550}
 .layer-controls input{width:1.05rem;height:1.05rem;padding:0}

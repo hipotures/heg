@@ -41,10 +41,11 @@ active text selection, but a DOM container intersecting that selection is not
 replaced until a later interval. Other dashboard regions continue updating.
 This is a client interaction rule and does not change any HTTP response or
 persistence contract.
-Single-click copying from a live-frontier metric card is likewise client-only
-and makes no HTTP request. Each card copies its own label and displayed value,
-except that the graph-hash card copies its complete SHA-256 value while
-retaining the abbreviated display.
+Single-click copying from dashboard metric and semantic value tiles is
+client-only and makes no HTTP request. The copied text contains the tile label
+and full value; truncated IDs, hashes, and SHA-256 values use their complete
+underlying value. Standalone abbreviated identifiers follow the same
+interaction without separate `Copy ID` buttons.
 
 ## Core write APIs
 

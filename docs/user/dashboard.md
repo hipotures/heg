@@ -77,9 +77,11 @@ The live-frontier inspector reports aggregate campaign throughput: the sum of
 the latest completed throughput measurement for every running lane. Until a
 new lane completes its first batch, the value sums the available running-lane
 measurements and its tooltip reports measurement coverage.
-Click any of the six live-frontier metric cards to copy that card's label and
-current value. Values are copied as displayed, except that the graph-hash card
-keeps its abbreviated display but copies the complete SHA-256 value.
+Click any dashboard metric or semantic value tile to copy its label and full
+value. The same interaction applies to the six live-frontier metrics and the
+execution-attempt resource tiles. Abbreviated IDs, hashes, and SHA-256 values
+copy their complete underlying value. Standalone abbreviated identifiers are
+also directly clickable; separate `Copy ID` buttons are not shown.
 
 [screenshot: ID=USR-DASHBOARD-01; save as docs/assets/screenshots/user/dashboard/scientific-observatory.png; crop the complete “Scientific observatory” or “Search frontier” panel with the graph visualization, legend, current/best candidate selector, lane/frontier points, and any 2D/3D or camera controls; include the panel title and exclude unrelated campaign forms.]
 

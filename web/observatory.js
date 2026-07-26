@@ -23,30 +23,6 @@
       element.innerHTML = html;
       return true;
     };
-    const copyText = async value => {
-      const textarea = document.createElement('textarea');
-      textarea.value = value;
-      textarea.readOnly = true;
-      textarea.style.position = 'fixed';
-      textarea.style.opacity = '0';
-      textarea.style.pointerEvents = 'none';
-      root.appendChild(textarea);
-      textarea.select();
-      textarea.setSelectionRange(0, value.length);
-      try {
-        if (document.execCommand('copy')) return true;
-      } catch {
-        // Fall through to the asynchronous Clipboard API.
-      } finally {
-        textarea.remove();
-      }
-      try {
-        await navigator.clipboard.writeText(value);
-        return true;
-      } catch {
-        return false;
-      }
-    };
     const savedLiveInterval = Number(
       sessionStorage.getItem('sglab-observatory-live-interval')
     );
@@ -550,7 +526,9 @@
         detail = '',
         clipboardValue = displayValue,
       ) =>
-        `<div data-copy-observatory-value="${esc(`${name}: ${clipboardValue}`)}"
+        `<div class="copyable-tile"
+              data-copy-text="${esc(`${name}: ${clipboardValue}`)}"
+              role="button" tabindex="0"
               title="${esc(`Click to copy ${name}`)}">
           <dt>${esc(name)}</dt>
           <dd${detail ? ` title="${esc(detail)}"` : ''}>${esc(displayValue)}</dd>
@@ -875,24 +853,6 @@
           state.transform.scale = clamp(state.transform.scale * factor, .55, 4);
         }
         updateViewport();
-      }
-    });
-    root.addEventListener('click', async event => {
-      const card = event.target.closest('[data-copy-observatory-value]');
-      if (!card || !inspector.contains(card)) return;
-      event.preventDefault();
-      const value = card.dataset.copyObservatoryValue;
-      if (await copyText(value)) {
-        window.getSelection?.()?.removeAllRanges();
-        for (const item of inspector.querySelectorAll('.is-copied')) {
-          item.classList.remove('is-copied');
-        }
-        card.classList.add('is-copied');
-        setTimeout(() => {
-          if (card.isConnected) card.classList.remove('is-copied');
-        }, 900);
-      } else {
-        setStatus('Clipboard access is unavailable in this browser context.');
       }
     });
     svg.addEventListener('click', event => {

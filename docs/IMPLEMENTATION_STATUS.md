@@ -12,11 +12,12 @@ selected container catches up after the selection is cleared. The change is
 browser-only and does not alter campaign execution, scoring, persistence, or
 API payloads.
 
-Each of the six live-frontier inspector metric cards also supports independent
-single-click copy with card-local confirmation. Clipboard text includes the
-card label and value. Values match the display except for the abbreviated
-graph-hash card, which copies its complete SHA-256 value without changing the
-card layout.
+Dashboard metric and semantic value tiles now share independent single-click
+copy with card-local confirmation and keyboard activation. Clipboard text
+includes the tile label and full value, so abbreviated IDs, hashes, and
+SHA-256 values copy without truncation or layout changes. Standalone
+abbreviated identifiers use the same mechanism, replacing separate `Copy ID`
+buttons.
 
 ## Aggregate live-frontier throughput
 

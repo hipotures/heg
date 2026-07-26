@@ -28,19 +28,25 @@ class CampaignVisualizationTests(unittest.TestCase):
         script = (
             Path(__file__).parents[1] / "web" / "observatory.js"
         ).read_text(encoding="utf-8")
+        dashboard = (
+            Path(__file__).parents[1] / "web" / "index.html"
+        ).read_text(encoding="utf-8")
         self.assertIn(
             "options.selectionIntersects || (() => false)",
             script,
         )
         self.assertIn("if (selectionIntersects(element)) return false;", script)
         self.assertNotIn("if (hasActiveTextSelection()) return;", script)
-        self.assertIn("data-copy-observatory-value", script)
-        self.assertIn("root.addEventListener('click', async event => {", script)
+        self.assertIn('class="copyable-tile"', script)
+        self.assertIn("data-copy-text", script)
+        self.assertNotIn("data-copy-observatory-value", script)
+        self.assertNotIn("root.addEventListener('click', async event => {", script)
         self.assertNotIn("root.addEventListener('dblclick'", script)
         self.assertIn("`${name}: ${clipboardValue}`", script)
-        self.assertIn("document.execCommand('copy')", script)
-        self.assertIn("navigator.clipboard.writeText(value)", script)
-        self.assertIn("card.classList.add('is-copied')", script)
+        self.assertIn("document.execCommand('copy')", dashboard)
+        self.assertIn("navigator.clipboard.writeText(value)", dashboard)
+        self.assertIn("target.classList.add('is-copied')", dashboard)
+        self.assertNotIn("Copy ID", dashboard)
 
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()

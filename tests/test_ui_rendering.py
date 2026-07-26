@@ -179,6 +179,14 @@ class SemanticUiRenderingTests(unittest.TestCase):
         self.assertIn("/api/research-campaign/resume", dashboard)
         self.assertIn("Execution attempts", dashboard)
         self.assertIn("Scientific memory", dashboard)
+        self.assertIn("function metricTile(", dashboard)
+        self.assertIn("function copyDashboardTarget(target)", dashboard)
+        self.assertIn('class="metric copyable-tile', dashboard)
+        self.assertIn("data-copy-text", dashboard)
+        self.assertIn("campaign.campaign_id||'—'", dashboard)
+        self.assertIn("attempt.code_commit", dashboard)
+        self.assertNotIn("Copy ID", dashboard)
+        self.assertNotIn("copyButton", dashboard)
         self.assertNotIn('data-campaign-action="RESUME"', dashboard)
         self.assertIn("Math.min(limit,3)", dashboard)
         self.assertIn("function eventLine(line)", dashboard)
@@ -194,12 +202,17 @@ class SemanticUiRenderingTests(unittest.TestCase):
         dashboard = (Path(__file__).parents[1] / "web" / "index.html").read_text(
             encoding="utf-8"
         )
+        self.assertIn(
+            "input,select,button,.copy-id,.section-heading>a,.form-actions>a"
+            "{min-height:2.75rem}",
+            comparison,
+        )
+        self.assertIn(
+            "input,select,button,.section-heading>a,.form-actions>a"
+            "{min-height:2.75rem}",
+            dashboard,
+        )
         for html in (comparison, dashboard):
-            self.assertIn(
-                "input,select,button,.copy-id,.section-heading>a,.form-actions>a"
-                "{min-height:2.75rem}",
-                html,
-            )
             self.assertIn(
                 ".section-heading>a,.form-actions>a"
                 "{display:inline-flex;align-items:center}",
