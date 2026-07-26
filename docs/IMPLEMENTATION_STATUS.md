@@ -17,6 +17,17 @@ full request remained within budget at 53,359 bytes / 13,340 estimated tokens
 against the 16,000-token gate. See
 `docs/reports/M6_DIRECTOR_VERIFICATION_TARGET_SCHEMA.md`.
 
+Production attempt 16 then submitted the repaired live schema at 13,914 bytes
+and the complete request at 53,373 bytes / 13,344 estimated tokens. Its first
+two Director turns were `completed_valid`; verification used only exact enum
+members, four reviewed M4 jobs completed, and four new order-96 lanes ran five
+durable windows totaling 591,338 evaluations. All windows used the persistent
+C++ backend, early exit and `delta_local_v2`, with zero scorer fallbacks or
+parity mismatches. A third independent Director turn reached its 300-second
+App Server timeout, so the campaign paused fail-closed with the four new lanes
+paused and no worker processes left. This timeout is separate from the
+accepted verification-target repair; no automatic further Resume was started.
+
 ## Director repair-turn state identity
 
 Production attempt 11 completed four valid Director turns, then received one
