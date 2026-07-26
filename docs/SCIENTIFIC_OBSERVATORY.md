@@ -23,16 +23,15 @@ The display uses a deterministic layout so an unchanged candidate does not
 jump between polls.
 
 `Live search frontier` reads the newest integrity-checked lane checkpoint and
-shows its current accepted graph. The default browser sampling interval is 10
-seconds. It is an explicit `liveFrontierIntervalSeconds` component parameter
-(and a matching server display-contract value), ready to be connected to a
-future dashboard settings section. Live graphs are labelled transient
-heuristic telemetry: they are neither retained scientific records nor exact
-certification. Checkpoint files are bounded to 1 MiB, read without following
-symlinks, and verified against their stored SHA-256 before decoding.
-When the campaign is not running, the toolbar says `Frontier paused`, shows
-the campaign state/fault, and retains the last checkpoint timestamp instead of
-implying that new graphs are still being produced.
+shows its current accepted graph. A dropdown directly after the graph-source
+selector sets the browser sampling interval to 1, 2, 3, 4, or 5 seconds and
+appears only in live-frontier mode. The default is 5 seconds and the selection
+persists for the browser session. Live graphs are
+labelled transient heuristic telemetry: they are neither retained scientific
+records nor exact certification. Checkpoint files are bounded to 1 MiB, read
+without following symlinks, and verified against their stored SHA-256 before
+decoding. When the campaign is not running, the toolbar says `Frontier paused`
+and shows the campaign state/fault without presenting a stale sample timestamp.
 
 Cycle layers use separate styles for lengths 4, 8, 16, 32, and other relevant
 lengths. Display-cycle examples come from a bounded local scan and are always

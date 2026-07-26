@@ -2,6 +2,8 @@
 .observatory-toolbar{display:flex;align-items:end;justify-content:space-between;gap:1rem;flex-wrap:wrap}
 .observatory-selectors{display:flex;align-items:end;gap:.65rem;flex-wrap:wrap}
 .observatory-selectors label{min-width:12rem}
+.observatory-selectors label[data-observatory-live-interval-label]{min-width:5.5rem}
+.observatory-selectors [data-live-frontier-interval]{width:5.5rem}
 .observatory-status{color:var(--muted);font-size:.78rem;min-height:1.3rem}
 .observatory-layout{display:grid;grid-template-columns:minmax(0,2.15fr) minmax(17rem,.85fr);gap:1rem;align-items:stretch}
 .graph-stage{position:relative;min-height:34rem;overflow:hidden;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);touch-action:none}

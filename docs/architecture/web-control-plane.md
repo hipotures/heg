@@ -29,7 +29,9 @@ Technical JSON remains secondary disclosure.
 
 The dashboard polls bounded APIs and avoids rebuilding unchanged large DOM
 collections. Current visualizations include campaign scientific observatory
-and live search-frontier views.
+and live search-frontier views. The live-frontier graph has an independent
+browser-session sampling control with allowlisted intervals from 1 to 5
+seconds; other dashboard data retains the dashboard-wide polling cadence.
 
 ## Graph visualization
 

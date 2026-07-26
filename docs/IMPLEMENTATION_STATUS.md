@@ -34,9 +34,10 @@ as an explicit capture plan under `docs/user/screenshot-plan.md`.
 ## Scientific observatory
 
 The live campaign dashboard now includes a bounded read-only scientific
-observatory. It renders the global-best graph, a 10-second configurable live
-search-frontier sample, a lane-best graph, the immutable candidate currently
-consumed by M4, or a retained historical candidate.
+observatory. It renders the global-best graph, a live search-frontier sample
+with a browser-session 1–5 second refresh selector, a lane-best graph, the
+immutable candidate currently consumed by M4, or a retained historical
+candidate.
 Server-side `graph6` decoding keeps raw encodings and artifact paths out of the
 browser contract. Distinct overlays show bounded non-certifying cycle examples
 and hash-checked persisted M4 witnesses without conflating heuristic evidence

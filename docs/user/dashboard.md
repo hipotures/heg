@@ -68,6 +68,9 @@ The observatory may include:
 
 The 2D/3D drawing is a visualization of the same abstract graph. Moving or
 rotating vertices does not change graph adjacency or mathematical properties.
+When viewing the live search frontier, use the seconds dropdown immediately
+after the graph-source selector to choose a 1–5 second refresh interval. The
+choice lasts for the current browser session.
 
 [screenshot: ID=USR-DASHBOARD-01; save as docs/assets/screenshots/user/dashboard/scientific-observatory.png; crop the complete “Scientific observatory” or “Search frontier” panel with the graph visualization, legend, current/best candidate selector, lane/frontier points, and any 2D/3D or camera controls; include the panel title and exclude unrelated campaign forms.]
 

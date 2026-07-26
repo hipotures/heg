@@ -12,15 +12,25 @@
     Math.max(minimum, Math.min(maximum, value));
   const numeric = value =>
     typeof value === 'number' && Number.isFinite(value) ? value : null;
-  const DEFAULT_LIVE_FRONTIER_INTERVAL_SECONDS = 10;
+  const LIVE_FRONTIER_INTERVAL_SECONDS = [1, 2, 3, 4, 5];
+  const DEFAULT_LIVE_FRONTIER_INTERVAL_SECONDS = 5;
 
   window.createScientificObservatory = options => {
     const {root, api, esc, fmt, label, shortId, badge} = options;
-    const configuredLiveInterval = Number(
-      options.liveFrontierIntervalSeconds
-        ?? DEFAULT_LIVE_FRONTIER_INTERVAL_SECONDS
+    const savedLiveInterval = Number(
+      sessionStorage.getItem('sglab-observatory-live-interval')
     );
+    const configuredLiveInterval = Number(
+      Number.isFinite(savedLiveInterval) && savedLiveInterval > 0
+        ? savedLiveInterval
+        : options.liveFrontierIntervalSeconds
+    );
+    const liveFrontierIntervalSeconds =
+      LIVE_FRONTIER_INTERVAL_SECONDS.includes(configuredLiveInterval)
+        ? configuredLiveInterval
+        : DEFAULT_LIVE_FRONTIER_INTERVAL_SECONDS;
     const state = {
+      campaign: null,
       campaignId: null,
       campaignState: null,
       campaignFault: null,
@@ -38,15 +48,8 @@
       refreshing: false,
       refreshQueued: false,
       destroyed: false,
-      liveFrontierIntervalSeconds: clamp(
-        Number.isFinite(configuredLiveInterval)
-          ? configuredLiveInterval
-          : DEFAULT_LIVE_FRONTIER_INTERVAL_SECONDS,
-        1,
-        3600,
-      ),
+      liveFrontierIntervalSeconds,
       lastLiveFrontierFetchAt: 0,
-      lastLiveFrontierSampleLabel: '',
       forceGraphRefresh: false,
     };
 
@@ -60,6 +63,13 @@
                 <option value="live_frontier">Live search frontier</option>
                 <option value="lane_best">Best from a lane</option>
                 <option value="m4_active">Candidate currently in M4</option>
+              </select>
+            </label>
+            <label data-observatory-live-interval-label hidden>Refresh
+              <select data-live-frontier-interval>
+                ${LIVE_FRONTIER_INTERVAL_SECONDS.map(seconds =>
+                  `<option value="${seconds}" ${seconds === state.liveFrontierIntervalSeconds ? 'selected' : ''}>${seconds} s</option>`
+                ).join('')}
               </select>
             </label>
             <label data-observatory-lane-label hidden>Search lane
@@ -99,6 +109,9 @@
     const sourceSelect = root.querySelector('[data-observatory-source]');
     const laneSelect = root.querySelector('[data-observatory-lane]');
     const laneLabel = root.querySelector('[data-observatory-lane-label]');
+    const liveIntervalLabel = root.querySelector(
+      '[data-observatory-live-interval-label]'
+    );
     const status = root.querySelector('[data-observatory-status]');
     const svg = root.querySelector('[data-graph-svg]');
     const graphEmpty = root.querySelector('[data-graph-empty]');
@@ -106,6 +119,9 @@
     const inspector = root.querySelector('[data-observatory-inspector]');
     const panel = root.querySelector('[data-observatory-panel]');
     const stage = root.querySelector('[data-graph-stage]');
+    const liveIntervalSelect = root.querySelector(
+      '[data-live-frontier-interval]'
+    );
     if (!TABS.some(([key]) => key === state.tab)) state.tab = 'graph';
     if (!['global_best', 'live_frontier', 'lane_best', 'm4_active'].includes(state.source)) {
       state.source = 'global_best';
@@ -131,6 +147,31 @@
       status.textContent = value;
     };
 
+    let liveRefreshTimer = null;
+    let liveRefreshTimerKey = '';
+    const syncLiveRefreshTimer = () => {
+      const enabled = state.source === 'live_frontier'
+        && state.campaign?.campaign_id
+        && state.campaignState === 'running'
+        && !state.destroyed;
+      const nextKey = enabled
+        ? `${state.campaign.campaign_id}:${state.liveFrontierIntervalSeconds}`
+        : '';
+      if (nextKey === liveRefreshTimerKey) return;
+      if (liveRefreshTimer !== null) clearInterval(liveRefreshTimer);
+      liveRefreshTimer = null;
+      liveRefreshTimerKey = nextKey;
+      if (enabled) {
+        liveRefreshTimer = setInterval(
+          () => {
+            state.forceGraphRefresh = true;
+            refresh(state.campaign);
+          },
+          state.liveFrontierIntervalSeconds * 1000,
+        );
+      }
+    };
+
     const updateSourceControls = data => {
       const lanes = data?.availability?.lanes || state.series?.lanes || [];
       const previousLane = state.laneId;
@@ -144,6 +185,7 @@
         laneSelect.value = state.laneId;
       }
       laneLabel.hidden = state.source !== 'lane_best';
+      liveIntervalLabel.hidden = state.source !== 'live_frontier';
       const m4 = sourceSelect.querySelector('option[value="m4_active"]');
       m4.disabled = !data?.availability?.m4_active;
       if (state.source === 'candidate') {
@@ -162,6 +204,7 @@
     };
 
     const refresh = async campaign => {
+      state.campaign = campaign;
       if (!campaign?.campaign_id) {
         state.campaignId = null;
         state.campaignState = null;
@@ -169,6 +212,7 @@
         state.graph = null;
         state.series = null;
         showEmpty('No research campaign is selected.');
+        syncLiveRefreshTimer();
         return;
       }
       if (state.refreshing) {
@@ -211,23 +255,14 @@
           state.forceGraphRefresh = false;
           if (state.source === 'live_frontier') {
             state.lastLiveFrontierFetchAt = performance.now();
-            state.lastLiveFrontierSampleLabel =
-              graph.selection?.published_at
-              || new Date().toLocaleTimeString();
-            const advertised = Number(
-              graph.display_contract?.live_frontier_interval_seconds
-            );
-            if (Number.isFinite(advertised)) {
-              state.liveFrontierIntervalSeconds = clamp(advertised, 1, 3600);
-            }
           }
         }
         renderActivePanel();
         if (state.source === 'live_frontier') {
           const running = state.campaignState === 'running';
           setStatus(running
-            ? `Live frontier · ${fmt(state.liveFrontierIntervalSeconds)} s sampling · sample ${state.lastLiveFrontierSampleLabel}`
-            : `Frontier paused · ${label(state.campaignState || 'not running')}${state.campaignFault ? ` · ${label(state.campaignFault)}` : ''} · last sample ${state.lastLiveFrontierSampleLabel}`);
+            ? `Live frontier · ${fmt(state.liveFrontierIntervalSeconds)} s sampling`
+            : `Frontier paused · ${label(state.campaignState || 'not running')}${state.campaignFault ? ` · ${label(state.campaignFault)}` : ''}`);
         } else {
           setStatus(`Updated · ${new Date().toLocaleTimeString()}`);
         }
@@ -236,6 +271,7 @@
         if (!state.graph) showEmpty(error.message);
       } finally {
         state.refreshing = false;
+        syncLiveRefreshTimer();
         if (state.refreshQueued) {
           state.refreshQueued = false;
           refresh(campaign);
@@ -707,10 +743,12 @@
       state.forceGraphRefresh = true;
       if (source === 'live_frontier') state.lastLiveFrontierFetchAt = 0;
       laneLabel.hidden = source !== 'lane_best';
+      liveIntervalLabel.hidden = source !== 'live_frontier';
       persistSelection();
+      syncLiveRefreshTimer();
       if (state.campaignId) {
         state.renderKey = '';
-        await refresh({campaign_id: state.campaignId});
+        await refresh(state.campaign);
       }
     };
 
@@ -722,6 +760,20 @@
       selectSource('lane_best', state.laneId);
     });
     root.addEventListener('change', event => {
+      if (event.target === liveIntervalSelect) {
+        state.liveFrontierIntervalSeconds = Number(liveIntervalSelect.value);
+        sessionStorage.setItem(
+          'sglab-observatory-live-interval',
+          String(state.liveFrontierIntervalSeconds),
+        );
+        state.lastLiveFrontierFetchAt = 0;
+        state.forceGraphRefresh = true;
+        syncLiveRefreshTimer();
+        if (state.source === 'live_frontier' && state.campaignId) {
+          refresh(state.campaign);
+        }
+        return;
+      }
       const toggle = event.target.closest('[data-cycle-toggle]');
       if (!toggle) return;
       state.layers.set(String(toggle.dataset.cycleToggle), toggle.checked);
@@ -809,6 +861,7 @@
       showLane: laneId => selectSource('lane_best', laneId),
       destroy: () => {
         state.destroyed = true;
+        syncLiveRefreshTimer();
       },
     };
   };

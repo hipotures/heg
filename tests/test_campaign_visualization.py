@@ -402,7 +402,7 @@ class CampaignVisualizationTests(unittest.TestCase):
             ],
             17,
         )
-        self.assertEqual(DEFAULT_LIVE_FRONTIER_INTERVAL_SECONDS, 10)
+        self.assertEqual(DEFAULT_LIVE_FRONTIER_INTERVAL_SECONDS, 5)
 
     def test_live_frontier_rejects_symlinked_checkpoint_directory(
         self,
@@ -510,7 +510,7 @@ class CampaignVisualizationTests(unittest.TestCase):
                 live["display_contract"][
                     "live_frontier_interval_seconds"
                 ],
-                10,
+                5,
             )
             connection.request(
                 "GET",
@@ -542,9 +542,16 @@ class CampaignVisualizationTests(unittest.TestCase):
             self.assertIn(b"Live search frontier", javascript)
             self.assertIn(b"Frontier paused", javascript)
             self.assertIn(
-                b"DEFAULT_LIVE_FRONTIER_INTERVAL_SECONDS = 10",
+                b"DEFAULT_LIVE_FRONTIER_INTERVAL_SECONDS = 5",
                 javascript,
             )
+            self.assertIn(b"data-live-frontier-interval", javascript)
+            self.assertIn(
+                b"LIVE_FRONTIER_INTERVAL_SECONDS = [1, 2, 3, 4, 5]",
+                javascript,
+            )
+            self.assertNotIn(b"last sample", javascript)
+            self.assertNotIn(b"sampling \xc2\xb7 sample", javascript)
         finally:
             connection.close()
             server.shutdown()
