@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from random import Random
 from time import perf_counter, perf_counter_ns
 from typing import Any
 import math
 
-from ..model import BitGraph, find_cycle_of_length, find_cycles_of_length_bounded
+from ..model import (
+    BitGraph,
+    CycleCountWorkspace,
+    count_cycles_of_length_bounded_into,
+    find_cycle_of_length,
+    find_cycles_of_length_bounded,
+)
 from ..external import canonical_graph6
 from .base import ScoreResult, ValidationResult, VerifyResult, Witness
 
@@ -17,6 +24,39 @@ def forbidden_lengths(n: int) -> tuple[int, ...]:
         values.append(current)
         current *= 2
     return tuple(values)
+
+
+PROFILED_CYCLE_LENGTHS = (4, 8, 16, 32, 64, 128)
+
+
+@dataclass(slots=True)
+class ScoreProfileAccumulator:
+    """One batch's in-memory score counters."""
+
+    graph_validation_ns: int = 0
+    witness_counting_ns: int = 0
+    score_calculation_ns: int = 0
+    cycle_ns: list[int] = field(
+        default_factory=lambda: [0] * len(PROFILED_CYCLE_LENGTHS)
+    )
+    cycle_nodes: list[int] = field(
+        default_factory=lambda: [0] * len(PROFILED_CYCLE_LENGTHS)
+    )
+
+    def reset(self) -> None:
+        self.graph_validation_ns = 0
+        self.witness_counting_ns = 0
+        self.score_calculation_ns = 0
+        for index in range(len(PROFILED_CYCLE_LENGTHS)):
+            self.cycle_ns[index] = 0
+            self.cycle_nodes[index] = 0
+
+    def payload(self) -> dict[str, int]:
+        result: dict[str, int] = {}
+        for index, length in enumerate(PROFILED_CYCLE_LENGTHS):
+            result[f"cycle_{length}_ns"] = self.cycle_ns[index]
+            result[f"cycle_{length}_nodes"] = self.cycle_nodes[index]
+        return result
 
 
 def verify_reference(graph: BitGraph) -> VerifyResult:
@@ -88,6 +128,14 @@ class ErdosGyarfasPlugin:
         if graph.minimum_degree() < 3:
             return ValidationResult(False, "minimum degree is below 3")
         return ValidationResult(True, "valid structural candidate")
+
+    @staticmethod
+    def new_score_workspace(order: int) -> CycleCountWorkspace:
+        return CycleCountWorkspace.for_order(order)
+
+    @staticmethod
+    def new_score_profile() -> ScoreProfileAccumulator:
+        return ScoreProfileAccumulator()
 
     def generate_seed(self, rng: Random, config: dict[str, Any]) -> BitGraph:
         n = int(config["order"])
@@ -279,84 +327,91 @@ class ErdosGyarfasPlugin:
         return None
 
     def cheap_score(self, graph: BitGraph, cap: int) -> ScoreResult:
-        validation = self.validate_graph(graph)
+        return self.cheap_score_with_workspace(
+            graph,
+            cap,
+            CycleCountWorkspace.for_order(graph.n),
+            None,
+        )
+
+    def cheap_score_profiled(
+        self,
+        graph: BitGraph,
+        cap: int,
+        workspace: CycleCountWorkspace,
+        profile: ScoreProfileAccumulator,
+    ) -> ScoreResult:
+        """Accumulate one score into batch-local integer counters."""
+
+        return self.cheap_score_with_workspace(graph, cap, workspace, profile)
+
+    def cheap_score_with_workspace(
+        self,
+        graph: BitGraph,
+        cap: int,
+        workspace: CycleCountWorkspace,
+        profile: ScoreProfileAccumulator | None,
+    ) -> ScoreResult:
+        if profile is None:
+            validation = self.validate_graph(graph)
+        else:
+            started = perf_counter_ns()
+            validation = self.validate_graph(graph)
+            profile.graph_validation_ns += perf_counter_ns() - started
         if not validation.valid:
-            return ScoreResult(False, (), 10**9, True, simplicity=graph.size())
+            score_started = perf_counter_ns() if profile is not None else 0
+            score = ScoreResult(
+                False, (), 10**9, True, simplicity=graph.size()
+            )
+            if profile is not None:
+                profile.score_calculation_ns += (
+                    perf_counter_ns() - score_started
+                )
+            return score
+
         counts: list[tuple[int, int]] = []
         weighted = 0
         complete = True
         node_budget = max(4_096, min(50_000, cap * 1_024))
-        for length in self.forbidden_lengths(graph.n):
-            witnesses, search_complete = find_cycles_of_length_bounded(
-                graph,
-                length,
-                cap + 1,
-                node_budget,
-            )
-            count = min(len(witnesses), cap)
+        for index, length in enumerate(self.forbidden_lengths(graph.n)):
+            if profile is None:
+                count_cycles_of_length_bounded_into(
+                    graph, length, cap + 1, node_budget, workspace
+                )
+            else:
+                witness_started = perf_counter_ns()
+                count_cycles_of_length_bounded_into(
+                    graph, length, cap + 1, node_budget, workspace
+                )
+                elapsed = perf_counter_ns() - witness_started
+                profile.witness_counting_ns += elapsed
+                profile.cycle_ns[index] += elapsed
+                profile.cycle_nodes[index] += workspace.visited_nodes
+
+            score_started = perf_counter_ns() if profile is not None else 0
+            count = min(workspace.count, cap)
             counts.append((length, count))
             weighted += count * max(1, 64 // length)
-            if len(witnesses) > cap or not search_complete:
+            if workspace.count > cap or not workspace.complete:
                 complete = False
-        return ScoreResult(
+            if profile is not None:
+                profile.score_calculation_ns += (
+                    perf_counter_ns() - score_started
+                )
+
+        score_started = perf_counter_ns() if profile is not None else 0
+        score = ScoreResult(
             True,
             tuple(counts),
             weighted,
             complete,
             simplicity=graph.size(),
         )
-
-    def cheap_score_profiled(
-        self, graph: BitGraph, cap: int
-    ) -> tuple[ScoreResult, dict[str, int]]:
-        """Return the ordinary score plus non-overlapping stage timings."""
-
-        started = perf_counter_ns()
-        validation = self.validate_graph(graph)
-        validation_done = perf_counter_ns()
-        witness_ns = 0
-        score_ns = 0
-        if not validation.valid:
-            score_started = perf_counter_ns()
-            score = ScoreResult(
-                False, (), 10**9, True, simplicity=graph.size()
+        if profile is not None:
+            profile.score_calculation_ns += (
+                perf_counter_ns() - score_started
             )
-            score_ns += perf_counter_ns() - score_started
-        else:
-            counts: list[tuple[int, int]] = []
-            weighted = 0
-            complete = True
-            node_budget = max(4_096, min(50_000, cap * 1_024))
-            for length in self.forbidden_lengths(graph.n):
-                witness_started = perf_counter_ns()
-                witnesses, search_complete = find_cycles_of_length_bounded(
-                    graph,
-                    length,
-                    cap + 1,
-                    node_budget,
-                )
-                witness_ns += perf_counter_ns() - witness_started
-                score_started = perf_counter_ns()
-                count = min(len(witnesses), cap)
-                counts.append((length, count))
-                weighted += count * max(1, 64 // length)
-                if len(witnesses) > cap or not search_complete:
-                    complete = False
-                score_ns += perf_counter_ns() - score_started
-            score_started = perf_counter_ns()
-            score = ScoreResult(
-                True,
-                tuple(counts),
-                weighted,
-                complete,
-                simplicity=graph.size(),
-            )
-            score_ns += perf_counter_ns() - score_started
-        return score, {
-            "graph_validation_ns": validation_done - started,
-            "witness_counting_ns": witness_ns,
-            "score_calculation_ns": score_ns,
-        }
+        return score
 
     def exact_verify(self, graph: BitGraph) -> VerifyResult:
         return verify_reference(graph)

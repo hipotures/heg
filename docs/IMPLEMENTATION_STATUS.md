@@ -2,6 +2,22 @@
 
 Last implementation audit: **2026-07-26**.
 
+## Count-only hot-loop scorer and batch-local profiling
+
+The Erdős–Gyárfás ranking path now uses a reusable lane-local iterative
+integer-bitset DFS workspace. It preserves the bounded reference traversal's
+counts, completeness flags and deterministic search trajectory without
+constructing witness tuples in the candidate hot loop. Witness-returning
+diagnostics and both M4 paths remain unchanged.
+
+Per-length nanoseconds and DFS-node counts accumulate only in memory and are
+serialized once per completed batch. Profiling can be switched off
+independently; an alternating five-pair `n=64`, cap-2000 comparison measured
+0.27% median overhead and identical graph, score and trajectory. Against
+commit `11a2903`, median unprofiled throughput increased from 18.53 to 24.41
+candidates/s (31.7%). See
+`docs/reports/M6_SCORE_KERNEL_OPTIMIZATION.md`.
+
 ## Director scientific-memory compaction ordering repair
 
 The first real graph campaign reached a 31,593-byte scientific-memory snapshot,

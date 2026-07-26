@@ -33,6 +33,9 @@ every hot-loop score.
 ## Separation of concerns
 
 - `cheap_score` may be incomplete but must say so.
+- A target may provide lane-local score-workspace and batch-profile hooks.
+  Hot-loop profile hooks update an existing accumulator and return only the
+  ordinary `ScoreResult`; they do not return per-candidate telemetry objects.
 - `exact_verify` must be complete to return `VERIFIED` or `REJECTED`.
 - search algorithms do not inspect target-specific internal fields beyond the documented score tuple.
 - SAT encoding is an optional separate protocol.

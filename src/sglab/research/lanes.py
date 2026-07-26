@@ -146,16 +146,41 @@ class _LaneKernel:
         fork_seed: int | None,
         *,
         instrumentation_enabled: bool = True,
+        score_profiling_enabled: bool = True,
     ):
         self.spec = spec
         self.plugin = TARGETS[spec.target]
         self.parameters = dict(spec.parameters)
         self.mode = GRAPH_FAMILIES[spec.graph_family]
         self.instrumentation_enabled = instrumentation_enabled
+        self.score_profiling_enabled = (
+            instrumentation_enabled and score_profiling_enabled
+        )
         self.timing_ns = (
             {name: 0 for name in TIMING_COUNTER_NAMES}
             if instrumentation_enabled
             else None
+        )
+        workspace_factory = getattr(
+            self.plugin, "new_score_workspace", None
+        )
+        self.score_workspace = (
+            workspace_factory(int(self.parameters["order"]))
+            if workspace_factory is not None
+            else None
+        )
+        profile_factory = getattr(self.plugin, "new_score_profile", None)
+        self.score_profile = (
+            profile_factory()
+            if self.score_profiling_enabled
+            and profile_factory is not None
+            else None
+        )
+        self._workspace_score = getattr(
+            self.plugin, "cheap_score_with_workspace", None
+        )
+        self._profiled_score = getattr(
+            self.plugin, "cheap_score_profiled", None
         )
         self.accepted_ancestry: deque[dict[str, Any]] = deque(
             maxlen=ANCESTRY_LIMIT
@@ -234,9 +259,7 @@ class _LaneKernel:
             self.rng,
             {"order": int(self.parameters["order"]), "mode": self.mode},
         )
-        self.score = self.plugin.cheap_score(
-            self.graph, int(self.parameters["witness_cap"])
-        )
+        self.score = self._score(self.graph)
         self.best_graph = self.graph
         self.best_score = self.score
         self.current_candidate_id = _candidate_id(
@@ -325,6 +348,8 @@ class _LaneKernel:
         if self.timing_ns is not None:
             for name in self.timing_ns:
                 self.timing_ns[name] = 0
+        if self.score_profile is not None:
+            self.score_profile.reset()
         started = time.perf_counter()
         deadline = (
             started + max_wall_seconds
@@ -591,12 +616,27 @@ class _LaneKernel:
             "end_high_water": self.high_water,
         }
         if self.timing_ns is not None:
+            if self.score_profile is not None:
+                self.timing_ns["graph_validation"] = (
+                    self.score_profile.graph_validation_ns
+                )
+                self.timing_ns["witness_counting"] = (
+                    self.score_profile.witness_counting_ns
+                )
+                self.timing_ns["score_calculation"] = (
+                    self.score_profile.score_calculation_ns
+                )
             self.timing_ns["telemetry_construction"] += (
                 time.perf_counter_ns() - telemetry_started
             )
             result["timing"] = _timing_payload(
                 self.timing_ns,
                 search_loop_seconds=elapsed,
+                score_profile=(
+                    self.score_profile.payload()
+                    if self.score_profile is not None
+                    else None
+                ),
             )
         return result
 
@@ -651,27 +691,26 @@ class _LaneKernel:
 
     def _score(self, graph: BitGraph) -> ScoreResult:
         cap = int(self.parameters["witness_cap"])
-        if self.timing_ns is None:
-            return self.plugin.cheap_score(graph, cap)
-        profiled = getattr(self.plugin, "cheap_score_profiled", None)
-        if profiled is None:
+        if (
+            self.score_profile is not None
+            and self._profiled_score is not None
+            and self.score_workspace is not None
+        ):
+            return self._profiled_score(
+                graph, cap, self.score_workspace, self.score_profile
+            )
+        if self._workspace_score is not None and self.score_workspace is not None:
+            return self._workspace_score(
+                graph, cap, self.score_workspace, None
+            )
+        if self.timing_ns is not None and self.score_profiling_enabled:
             started = time.perf_counter_ns()
             score = self.plugin.cheap_score(graph, cap)
             self.timing_ns["score_calculation"] += (
                 time.perf_counter_ns() - started
             )
             return score
-        score, timings = profiled(graph, cap)
-        self.timing_ns["graph_validation"] += int(
-            timings["graph_validation_ns"]
-        )
-        self.timing_ns["witness_counting"] += int(
-            timings["witness_counting_ns"]
-        )
-        self.timing_ns["score_calculation"] += int(
-            timings["score_calculation_ns"]
-        )
-        return score
+        return self.plugin.cheap_score(graph, cap)
 
     def checkpoint(self, lane_version: int) -> dict[str, Any]:
         payload = {
@@ -715,10 +754,16 @@ def _lane_worker(
     checkpoint: dict[str, Any] | None,
     fork_seed: int | None,
     memory_limit_bytes: int | None,
+    score_profiling_enabled: bool,
 ) -> None:
     try:
         set_address_space_limit(memory_limit_bytes)
-        kernel = _LaneKernel(spec, checkpoint, fork_seed)
+        kernel = _LaneKernel(
+            spec,
+            checkpoint,
+            fork_seed,
+            score_profiling_enabled=score_profiling_enabled,
+        )
         lane_version = spec.lane_version
         resource_share = spec.resource_share
         current_checkpoint = kernel.checkpoint(lane_version)
@@ -943,6 +988,7 @@ class LaneManager:
         checkpoints_per_lane: int = 8,
         pinned_checkpoints: int = 128,
         memory_limit_bytes: int | None = 512 * 1024 * 1024,
+        score_profiling_enabled: bool = True,
     ):
         if checkpoints_per_lane < 2:
             raise ValueError("checkpoints_per_lane must be at least 2")
@@ -957,6 +1003,7 @@ class LaneManager:
         self.checkpoints_per_lane = checkpoints_per_lane
         self.pinned_checkpoints = pinned_checkpoints
         self.memory_limit_bytes = memory_limit_bytes
+        self.score_profiling_enabled = score_profiling_enabled
         self.context = get_context("spawn")
         self.events = self.context.Queue(maxsize=event_capacity)
         self.lanes: dict[str, LaneRuntime] = {}
@@ -994,6 +1041,7 @@ class LaneManager:
                 checkpoint,
                 fork_seed,
                 self.memory_limit_bytes,
+                self.score_profiling_enabled,
             ),
             name=f"sglab-lane-{spec.lane_id}",
         )
@@ -1451,6 +1499,7 @@ def _timing_payload(
     timings_ns: dict[str, int],
     *,
     search_loop_seconds: float,
+    score_profile: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     counters = {
         name: value / 1_000_000_000
@@ -1466,10 +1515,11 @@ def _timing_payload(
         "ancestry_construction",
     )
     accounted_search = sum(counters[name] for name in search_names)
-    return {
+    result = {
         "enabled": True,
         "counters_seconds": counters,
         "search_loop_seconds": search_loop_seconds,
+        "candidate_evaluation_seconds": search_loop_seconds,
         "accounted_search_seconds": accounted_search,
         "unattributed_search_seconds": max(
             0.0, search_loop_seconds - accounted_search
@@ -1481,6 +1531,9 @@ def _timing_payload(
             + counters["exact_final_verification"]
         ),
     }
+    if score_profile is not None:
+        result["score_profile"] = score_profile
+    return result
 
 
 def add_external_timing(
@@ -1563,6 +1616,7 @@ def run_bounded_lane_batch(
     max_evaluations: int,
     max_wall_seconds: float,
     instrumentation_enabled: bool = True,
+    score_profiling_enabled: bool = True,
 ) -> dict[str, Any]:
     """Run exactly one bounded batch in the coordinator process."""
 
@@ -1576,6 +1630,7 @@ def run_bounded_lane_batch(
         checkpoint=None,
         fork_seed=None,
         instrumentation_enabled=instrumentation_enabled,
+        score_profiling_enabled=score_profiling_enabled,
     )
     metrics = kernel.run_batch(
         _NeverStop(),

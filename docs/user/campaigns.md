@@ -90,6 +90,10 @@ Measure progress with:
 
 Do not use only the final best score.
 
+Operator diagnostics may include one aggregated score profile per completed
+lane batch. These timing and DFS-node counters explain throughput; they are not
+candidate evidence and do not affect heuristic scores or M4 verification.
+
 [screenshot: ID=USR-CAMPAIGN-01; save as docs/assets/screenshots/user/campaigns/director-assessment.png; crop the “Director assessment & hypotheses” section from a running or stopped campaign, include the latest campaign assessment, at least two hypothesis cards with confidence/evidence, and the adjacent current Director decision summary; exclude raw JSON technical details.]
 
 [screenshot: ID=USR-CAMPAIGN-02; save as docs/assets/screenshots/user/campaigns/lane-trajectories.png; crop the live lane visualization or lane cards showing at least three lanes with distinct statuses or algorithms, checkpoint markers, and one fork/restart/parameter revision indicator; include the section heading and legend.]

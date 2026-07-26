@@ -52,6 +52,13 @@ Actions apply between bounded micro-batches. Each micro-batch produces:
 - checkpoint before matching high-water telemetry;
 - candidate improvements.
 
+Erdős–Gyárfás score profiling is optional and independent of ancestry
+instrumentation. When enabled, each worker keeps per-length elapsed
+nanoseconds and DFS-node counts in one batch-local accumulator. No
+per-candidate profile dictionary, JSON, event, SQLite row or log line is
+created. The aggregated `timing.score_profile` is emitted and persisted once
+with the completed batch.
+
 ## Checkpoints
 
 Checkpoint content includes enough state to reproduce continuation:

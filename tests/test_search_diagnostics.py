@@ -100,6 +100,43 @@ class SearchDiagnosticsTests(unittest.TestCase):
             + counters["exact_final_verification"],
             places=9,
         )
+        profile = timing["score_profile"]
+        self.assertEqual(
+            sum(
+                int(profile[f"cycle_{length}_ns"])
+                for length in (4, 8)
+            ),
+            round(counters["witness_counting"] * 1_000_000_000),
+        )
+        self.assertGreater(profile["cycle_4_nodes"], 0)
+        self.assertGreater(profile["cycle_8_nodes"], 0)
+
+    def test_score_profiling_can_be_disabled_without_changing_search(
+        self,
+    ) -> None:
+        enabled = run_bounded_lane_batch(
+            _spec(evaluations=200),
+            max_evaluations=200,
+            max_wall_seconds=10,
+            score_profiling_enabled=True,
+        )
+        with patch(
+            "sglab.targets.erdos_gyarfas.perf_counter_ns",
+            side_effect=AssertionError("score profiling entered disabled path"),
+        ):
+            disabled = run_bounded_lane_batch(
+                _spec(evaluations=200),
+                max_evaluations=200,
+                max_wall_seconds=10,
+                score_profiling_enabled=False,
+            )
+        self.assertNotIn("score_profile", disabled["timing"])
+        self.assertEqual(enabled["best_graph6"], disabled["best_graph6"])
+        self.assertEqual(enabled["best_score"], disabled["best_score"])
+        self.assertEqual(
+            enabled["score_trajectory_summary"],
+            disabled["score_trajectory_summary"],
+        )
 
     def test_disabled_instrumentation_preserves_result_and_hot_path(
         self,

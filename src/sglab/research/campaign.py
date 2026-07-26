@@ -290,6 +290,7 @@ def prepare_campaign_plan(
                 "telemetry_windows_per_lane": 120,
                 "checkpoints_per_lane": 8,
                 "pinned_checkpoints": 128,
+                "score_profiling_enabled": True,
             },
             "scientific_memory": {
                 "scientific_state_soft_limit_bytes": (
@@ -1022,6 +1023,13 @@ class ResearchCampaignRunner:
                 ),
             )
         search_plan = (durable_plan or {}).get("search_limits", {})
+        score_profiling_enabled = search_plan.get(
+            "score_profiling_enabled", True
+        )
+        if not isinstance(score_profiling_enabled, bool):
+            raise CampaignPlanError(
+                "score_profiling_enabled must be a boolean"
+            )
         resources = CampaignResources.from_plan(
             durable_plan,
             overrides=self.resume_resource_overrides,
@@ -1074,6 +1082,7 @@ class ResearchCampaignRunner:
             memory_limit_bytes=int(
                 resources.lane_memory_bytes
             ),
+            score_profiling_enabled=score_profiling_enabled,
         )
         dispatcher = LaneActionDispatcher(
             store=store, manager=manager, campaign_id=campaign_id

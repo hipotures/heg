@@ -1,7 +1,10 @@
 import unittest
+from random import Random
 
 from sglab.model import (
     BitGraph,
+    CycleCountWorkspace,
+    count_cycles_of_length_bounded,
     find_cycle_of_length,
     find_cycles_of_length_bounded,
 )
@@ -35,6 +38,51 @@ class BitGraphTests(unittest.TestCase):
         self.assertEqual(witnesses, ())
         self.assertFalse(complete)
 
+    def test_count_only_cycle_search_matches_witness_enumerator(self) -> None:
+        rng = Random(20260726)
+        workspace = CycleCountWorkspace.for_order(12)
+        for n in range(4, 13):
+            graph = BitGraph.from_edges(
+                n,
+                (
+                    (u, v)
+                    for u in range(n)
+                    for v in range(u + 1, n)
+                    if rng.random() < 0.3
+                ),
+            )
+            for length in range(4, n + 1, 4):
+                for limit, budget in ((1, 1), (3, 32), (16, 4096)):
+                    witnesses, complete = find_cycles_of_length_bounded(
+                        graph, length, limit, budget
+                    )
+                    count, counted_complete, nodes = (
+                        count_cycles_of_length_bounded(
+                            graph,
+                            length,
+                            limit,
+                            budget,
+                            workspace,
+                        )
+                    )
+                    self.assertEqual(count, len(witnesses))
+                    self.assertEqual(counted_complete, complete)
+                    self.assertGreater(nodes, 0)
+
+    def test_count_only_workspace_is_reusable(self) -> None:
+        graph = BitGraph.from_edges(
+            4, ((u, v) for u in range(4) for v in range(u + 1, 4))
+        )
+        workspace = CycleCountWorkspace.for_order(graph.n)
+        first = count_cycles_of_length_bounded(
+            graph, 4, 4, 4096, workspace
+        )
+        second = count_cycles_of_length_bounded(
+            graph, 4, 2, 4096, workspace
+        )
+        self.assertEqual(first[:2], (3, True))
+        self.assertEqual(second[:2], (2, False))
+
     def test_k4_is_rejected(self) -> None:
         graph = BitGraph.from_edges(
             4,
@@ -46,6 +94,32 @@ class BitGraphTests(unittest.TestCase):
         score = PLUGIN.cheap_score(graph, cap=1)
         self.assertEqual(score.witness_counts, ((4, 1),))
         self.assertFalse(score.complete)
+
+    def test_cheap_score_matches_bounded_witness_reference(self) -> None:
+        graph = PLUGIN.generate_seed(
+            Random(7262027), {"order": 64, "mode": "cubic_first"}
+        )
+        cap = 2000
+        node_budget = 50_000
+        counts = []
+        weighted = 0
+        complete = True
+        for length in forbidden_lengths(graph.n):
+            witnesses, search_complete = find_cycles_of_length_bounded(
+                graph, length, cap + 1, node_budget
+            )
+            count = min(len(witnesses), cap)
+            counts.append((length, count))
+            weighted += count * max(1, 64 // length)
+            complete = (
+                complete
+                and len(witnesses) <= cap
+                and search_complete
+            )
+        score = PLUGIN.cheap_score(graph, cap)
+        self.assertEqual(score.witness_counts, tuple(counts))
+        self.assertEqual(score.weighted_penalty, weighted)
+        self.assertEqual(score.complete, complete)
 
     def test_forbidden_lengths(self) -> None:
         self.assertEqual(forbidden_lengths(31), (4, 8, 16))

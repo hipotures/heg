@@ -37,7 +37,16 @@ The hot-loop cycle counter is intentionally incomplete. It caps witnesses per
 forbidden length and also caps deterministic DFS work at
 `max(4096, min(50000, cap * 1024))` visited search nodes per length. Exhausting
 either bound sets `ScoreResult.complete = false`; it never implies absence.
-Every archived finalist still goes through uncapped exact verification.
+The ranking path counts with an iterative integer-bitset DFS and reuses one
+lane-local traversal workspace; witness-returning diagnostics keep the
+separate reference enumerator. Every archived finalist still goes through
+uncapped exact verification.
+
+Optional score profiling uses batch-local integer accumulators for nanoseconds
+and visited DFS nodes per forbidden length. It creates no candidate record,
+event, log entry or persistence write. The counters are serialized once at the
+micro-batch boundary and can be disabled independently of search
+instrumentation.
 
 ## Iterated local search
 

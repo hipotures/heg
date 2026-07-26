@@ -35,6 +35,14 @@ Attempt-local override fields include:
 - verifier concurrency/memory;
 - reviewed queue bounds.
 
+## Search profiling
+
+`search_limits.score_profiling_enabled` controls per-forbidden-length
+nanosecond and DFS-node counters. It defaults to enabled for newly prepared
+campaigns. Disabling it removes the score timers and profile accumulator
+updates without changing the scorer, RNG, acceptance policy or durable
+scientific contract.
+
 ## Scientific memory defaults
 
 ```text
