@@ -46,6 +46,12 @@ from .research.campaign import (
 )
 from .research.continuity import repository_commit
 from .research.resume import build_resume_preview
+from .research.visualization import (
+    VisualizationNotFoundError,
+    VisualizationUnavailableError,
+    campaign_graph_visualization,
+    campaign_visualization_series,
+)
 from .search import ALGORITHMS, MODES
 from .state import atomic_write_json, next_control, read_json, utc_now
 
@@ -699,6 +705,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
         self.send_header(
             "Content-Security-Policy",
             "default-src 'self'; style-src 'self' 'unsafe-inline'; "
@@ -916,6 +923,48 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/research-campaign":
             self._json(200, campaign_status(self.server.workspace))
+            return
+        if parsed.path == "/api/research-campaign/visualization/graph":
+            query = parse_qs(parsed.query)
+            source = query.get("source", ["global_best"])
+            lane_id = query.get("lane_id", [None])
+            candidate_id = query.get("candidate_id", [None])
+            if (
+                len(source) != 1
+                or len(lane_id) != 1
+                or len(candidate_id) != 1
+                or any(
+                    value is not None and len(value) > 128
+                    for value in (source[0], lane_id[0], candidate_id[0])
+                )
+            ):
+                self._json(400, {"error": "invalid visualization query"})
+                return
+            try:
+                value = campaign_graph_visualization(
+                    self.server.workspace,
+                    source=source[0],
+                    lane_id=lane_id[0],
+                    candidate_id=candidate_id[0],
+                )
+            except VisualizationNotFoundError as error:
+                self._json(404, {"error": str(error.args[0])})
+                return
+            except VisualizationUnavailableError as error:
+                self._json(409, {"error": str(error)})
+                return
+            except ValueError as error:
+                self._json(400, {"error": str(error)})
+                return
+            self._json(200, value)
+            return
+        if parsed.path == "/api/research-campaign/visualization/series":
+            try:
+                value = campaign_visualization_series(self.server.workspace)
+            except VisualizationNotFoundError as error:
+                self._json(404, {"error": str(error.args[0])})
+                return
+            self._json(200, value)
             return
         if parsed.path == "/api/logs":
             limit = _query_limit(parsed.query, default=50, maximum=500)

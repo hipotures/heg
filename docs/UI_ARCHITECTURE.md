@@ -12,6 +12,8 @@ The research dashboard keeps the operational domains in one control-room page
 with anchored sections:
 
 - campaign controls and coordinator state;
+- a read-only scientific observatory for graph structure, score progression,
+  lanes, exact verification, and retained-candidate history;
 - Director assessment, hypotheses, and decisions;
 - measured decision effects and parameter revisions;
 - search lanes and retained candidates;
@@ -44,6 +46,14 @@ Lists are bounded before rendering. Tables use semantic headers, top-aligned
 compact rows, and local overflow containment. At narrow viewports, operational
 tables become labelled row cards; decision, lane, candidate, and suite content
 already uses responsive cards.
+
+The scientific observatory is a separate static JavaScript component mounted
+inside the same page. Its graph and series view models are server-bounded and
+read-only. The component updates in place during the five-second dashboard
+poll, preserving the selected source, tab, layers, pan/zoom, selected vertex,
+and page scroll position. Exact M4 witness paths and bounded display-only cycle
+examples have deliberately different labels and styles. See
+`docs/SCIENTIFIC_OBSERVATORY.md`.
 
 ## Theme contract
 

@@ -2,6 +2,24 @@
 
 Last implementation audit: **2026-07-26**.
 
+## Scientific observatory
+
+The live campaign dashboard now includes a bounded read-only scientific
+observatory. It renders the global-best graph, a lane-best graph, the immutable
+candidate currently consumed by M4, or a retained historical candidate.
+Server-side `graph6` decoding keeps raw encodings and artifact paths out of the
+browser contract. Distinct overlays show bounded non-certifying cycle examples
+and hash-checked persisted M4 witnesses without conflating heuristic evidence
+with certification.
+
+Supporting tabs show weighted-penalty history, cycle profiles, lane telemetry,
+verification state, and retained-candidate history. SQLite reads and browser
+lists are bounded. Desktop and phone Playwright-CDP checks confirm responsive
+layout, no page-wide horizontal overflow, and preservation of the selected
+tab, graph viewport, and scroll position across repeated dashboard polls. The
+observatory is read-only and creates no model, search, action, or verifier side
+effect. See `docs/SCIENTIFIC_OBSERVATORY.md`.
+
 ## Campaign execution attempts, candidate lifetime, and scientific memory
 
 SQLite schema v15 separates a durable scientific campaign from immutable

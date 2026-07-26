@@ -441,6 +441,19 @@ class CampaignContinuityTests(unittest.TestCase):
             f"file:{database.resolve()}?mode=ro",
             uri=True,
         ) as connection:
+            campaign_state = str(
+                connection.execute(
+                    """
+                    SELECT state FROM research_campaigns
+                    WHERE campaign_id=?
+                    """,
+                    ("campaign-b68ec445388e49b2be0b6fabf8ff6600",),
+                ).fetchone()[0]
+            )
+            if campaign_state == "running":
+                self.skipTest(
+                    "real campaign is active; Resume preview is not applicable"
+                )
             expected_attempt_index = int(
                 connection.execute(
                     """

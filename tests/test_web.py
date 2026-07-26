@@ -16,7 +16,11 @@ class WebAssetsTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         page = root / "web" / "index.html"
         self.assertTrue(page.is_file())
-        self.assertIn("Structural Graph Lab", page.read_text(encoding="utf-8"))
+        dashboard = page.read_text(encoding="utf-8")
+        self.assertIn("Structural Graph Lab", dashboard)
+        self.assertIn("Scientific observatory", dashboard)
+        self.assertIn("/observatory.css", dashboard)
+        self.assertIn("/observatory.js", dashboard)
 
     def test_http_api_smoke_and_control_validation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
