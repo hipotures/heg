@@ -2,6 +2,23 @@
 
 Last implementation audit: **2026-07-27**.
 
+## Director evidence-reference schema
+
+The dynamic Director output schema now restricts
+`hypothesis_updates[].evidence_for`,
+`hypothesis_updates[].evidence_against`, and `actions[].evidence_ids` to the
+exact evidence registry submitted for that turn. The enum is stored once in
+`$defs` and reused by reference, avoiding per-action duplication in the
+client-owned request. An empty evidence registry forces all three arrays to
+remain empty, while semantic validation retains the same independent
+membership check.
+
+This closes the attempt-21 repair failure in which the first response was
+rejected for stale lane versions, then the otherwise reduced repair invented a
+historical candidate-summary evidence ID absent from the committed snapshot.
+Both rejected turns remain immutable evidence and no action from either turn
+was executed.
+
 ## Attempt-scoped throughput after Resume
 
 Current per-lane and aggregate throughput now ignore metric windows completed

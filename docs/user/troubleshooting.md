@@ -53,6 +53,13 @@ accepted a syntactically valid but unknown
 `schedule_verification.candidate_ids` value from structured output, upgrade
 before Resume; the rejected turns remain preserved evidence.
 
+Current builds also constrain hypothesis and action evidence references to
+the exact registry submitted with that turn. If the repair detail names
+`hypothesis_updates[*].evidence_for`, `evidence_against`, or
+`actions[*].evidence_ids` as an unknown reference, upgrade before Resume. The
+new attempt receives a newly generated schema; the invalid response and its
+repair remain immutable evidence.
+
 ## `scientific_state_overflow`
 
 The deterministic compacted state could not fit below the hard limit without

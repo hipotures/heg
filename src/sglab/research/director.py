@@ -487,6 +487,7 @@ class ActiveDirector:
             output_schema = director_decision_schema(
                 prepared_state.state["allowed_action_space"],
                 existing_hypothesis_ids=validation_context.hypothesis_ids,
+                submitted_evidence_ids=validation_context.evidence_ids,
                 action_id_prefix=action_identity_contract(
                     snapshot_id
                 )["recommended_prefix"],

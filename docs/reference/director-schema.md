@@ -70,6 +70,18 @@ The generated schema binds `promote_candidate.candidate_id`,
 An unseen, historical-only, or truncated candidate ID is therefore outside
 the structured-output contract and remains invalid under semantic validation.
 
+The generated schema also binds every hypothesis and action evidence
+reference to the exact submitted evidence-registry enum:
+
+- `hypothesis_updates[].evidence_for`;
+- `hypothesis_updates[].evidence_against`;
+- `actions[].evidence_ids`.
+
+The enum is defined once under `$defs` and referenced from each array. If the
+submitted registry is empty, these arrays have `maxItems: 0`. Unknown,
+historical-only, and invented evidence IDs remain independently rejected by
+semantic validation.
+
 ## Validation
 
 Validation covers:

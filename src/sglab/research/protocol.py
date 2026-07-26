@@ -156,6 +156,9 @@ def hypothesis_updates_match_schema_contract(
 
 def _hypothesis_update_schema(
     existing_hypothesis_ids: Any,
+    *,
+    evidence_item_schema: dict[str, Any],
+    evidence_max_items: int,
 ) -> dict[str, Any]:
     existing = sorted(
         {
@@ -177,23 +180,13 @@ def _hypothesis_update_schema(
         },
         "evidence_for": {
             "type": "array",
-            "maxItems": 32,
-            "items": {
-                "type": "string",
-                "description": (
-                    "Exact submitted evidence-registry ID; never prose."
-                ),
-            },
+            "maxItems": evidence_max_items,
+            "items": evidence_item_schema,
         },
         "evidence_against": {
             "type": "array",
-            "maxItems": 32,
-            "items": {
-                "type": "string",
-                "description": (
-                    "Exact submitted evidence-registry ID; never prose."
-                ),
-            },
+            "maxItems": evidence_max_items,
+            "items": evidence_item_schema,
         },
     }
 
@@ -246,6 +239,9 @@ def _hypothesis_update_schema(
 
 def _common_action_properties(
     action_id_prefix: str | None = None,
+    *,
+    evidence_item_schema: dict[str, Any],
+    evidence_max_items: int,
 ) -> dict[str, Any]:
     action_id: dict[str, Any] = {
         "type": "string",
@@ -268,8 +264,8 @@ def _common_action_properties(
         },
         "evidence_ids": {
             "type": "array",
-            "maxItems": 32,
-            "items": {"type": "string"},
+            "maxItems": evidence_max_items,
+            "items": evidence_item_schema,
         },
         "rationale": {"type": "string", "minLength": 1, "maxLength": 4000},
         "expected_effect": {
@@ -322,6 +318,7 @@ def director_decision_schema(
     allowed_action_space: dict[str, Any] | None = None,
     *,
     existing_hypothesis_ids: Any = (),
+    submitted_evidence_ids: Any | None = None,
     action_id_prefix: str | None = None,
 ) -> dict[str, Any]:
     """Return the structured schema for the submitted applicable actions."""
@@ -348,7 +345,36 @@ def director_decision_schema(
         if isinstance(allowed_action_space, dict)
         else []
     )
-    common = _common_action_properties(action_id_prefix)
+    exact_evidence_ids = (
+        sorted(
+            {
+                value
+                for value in submitted_evidence_ids
+                if isinstance(value, str) and value
+            }
+        )
+        if submitted_evidence_ids is not None
+        else None
+    )
+    evidence_item_schema: dict[str, Any] = {
+        "type": "string",
+        "description": "Exact submitted evidence-registry ID; never prose.",
+    }
+    evidence_max_items = 32
+    schema_defs: dict[str, Any] = {}
+    if exact_evidence_ids:
+        schema_defs["submittedEvidenceId"] = {
+            "type": "string",
+            "enum": exact_evidence_ids,
+        }
+        evidence_item_schema = {"$ref": "#/$defs/submittedEvidenceId"}
+    elif exact_evidence_ids == []:
+        evidence_max_items = 0
+    common = _common_action_properties(
+        action_id_prefix,
+        evidence_item_schema=evidence_item_schema,
+        evidence_max_items=evidence_max_items,
+    )
     common_required = [
         "action_id",
         "type",
@@ -646,7 +672,7 @@ def director_decision_schema(
         for value in action_variants
         if value["properties"]["type"]["const"] in applicable_actions
     ]
-    return {
+    schema = {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "title": "SglabDirectorDecisionBatchV1",
         "type": "object",
@@ -671,7 +697,9 @@ def director_decision_schema(
                 "type": "array",
                 "maxItems": 32,
                 "items": _hypothesis_update_schema(
-                    existing_hypothesis_ids
+                    existing_hypothesis_ids,
+                    evidence_item_schema=evidence_item_schema,
+                    evidence_max_items=evidence_max_items,
                 ),
             },
             "actions": {
@@ -683,6 +711,9 @@ def director_decision_schema(
             "next_review": _review_schema(),
         },
     }
+    if schema_defs:
+        schema["$defs"] = schema_defs
+    return schema
 
 
 def _review_schema() -> dict[str, Any]:

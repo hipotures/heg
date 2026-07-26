@@ -2076,6 +2076,9 @@ def import_campaign_snapshot_fixture(
                     prepared.evidence_registry,
                     kinds=frozenset({"hypothesis"}),
                 ),
+                submitted_evidence_ids=evidence_registry_ids(
+                    prepared.evidence_registry
+                ),
             ),
             "applicable_action_space": state["allowed_action_space"],
             "evidence_registry": prepared.evidence_registry,

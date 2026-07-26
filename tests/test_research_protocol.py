@@ -290,6 +290,57 @@ class ResearchProtocolTests(unittest.TestCase):
             {"type": "string"},
         )
 
+    def test_schema_only_allows_submitted_evidence_references(self) -> None:
+        evidence_ids = [
+            "candidate-summary:candidate-current",
+            "lane-summary:lane-current",
+        ]
+        schema = director_decision_schema(
+            submitted_evidence_ids=evidence_ids
+        )
+        self.assertEqual(
+            schema["$defs"]["submittedEvidenceId"],
+            {"type": "string", "enum": sorted(evidence_ids)},
+        )
+        evidence_ref = {"$ref": "#/$defs/submittedEvidenceId"}
+        hypothesis_branches = schema["properties"]["hypothesis_updates"][
+            "items"
+        ]["anyOf"]
+        for branch in hypothesis_branches:
+            self.assertEqual(
+                branch["properties"]["evidence_for"]["items"],
+                evidence_ref,
+            )
+            self.assertEqual(
+                branch["properties"]["evidence_against"]["items"],
+                evidence_ref,
+            )
+        for variant in schema["properties"]["actions"]["items"]["anyOf"]:
+            self.assertEqual(
+                variant["properties"]["evidence_ids"]["items"],
+                evidence_ref,
+            )
+        self.assertNotIn(
+            "candidate-summary:candidate-historical",
+            json.dumps(schema, sort_keys=True),
+        )
+
+        empty = director_decision_schema(submitted_evidence_ids=[])
+        self.assertNotIn("$defs", empty)
+        for branch in empty["properties"]["hypothesis_updates"]["items"][
+            "anyOf"
+        ]:
+            self.assertEqual(
+                branch["properties"]["evidence_for"]["maxItems"], 0
+            )
+            self.assertEqual(
+                branch["properties"]["evidence_against"]["maxItems"], 0
+            )
+        for variant in empty["properties"]["actions"]["items"]["anyOf"]:
+            self.assertEqual(
+                variant["properties"]["evidence_ids"]["maxItems"], 0
+            )
+
     def test_parameter_semantics_are_normalized_and_unsupported_rejected(
         self,
     ) -> None:
@@ -705,6 +756,7 @@ class StubDecisionClient:
         self.closed = False
         self.thread_count = 0
         self.prompts: list[str] = []
+        self.output_schemas: list[dict] = []
 
     async def start(self) -> None:
         return None
@@ -744,6 +796,7 @@ class StubDecisionClient:
         on_event=None,
     ):
         self.prompts.append(prompt)
+        self.output_schemas.append(output_schema)
         decision = self.decisions.pop(0)
         return AppServerTurnResult(
             thread_id=session.thread_id,
@@ -864,6 +917,27 @@ class ActiveDirectorTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(
                     evidence.decision["actions"][0]["action_id"],
                     "action-fixed-start",
+                )
+                self.assertEqual(len(client.output_schemas), 2)
+                self.assertEqual(
+                    client.output_schemas[0]["$defs"][
+                        "submittedEvidenceId"
+                    ],
+                    client.output_schemas[1]["$defs"][
+                        "submittedEvidenceId"
+                    ],
+                )
+                self.assertIn(
+                    "snapshot-1",
+                    client.output_schemas[0]["$defs"][
+                        "submittedEvidenceId"
+                    ]["enum"],
+                )
+                self.assertNotIn(
+                    "candidate-summary:candidate-historical",
+                    client.output_schemas[0]["$defs"][
+                        "submittedEvidenceId"
+                    ]["enum"],
                 )
             finally:
                 await director.close()

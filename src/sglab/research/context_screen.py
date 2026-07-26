@@ -118,6 +118,9 @@ def prepare_context_screen_phase_a(
                 prepared.evidence_registry,
                 kinds=frozenset({"hypothesis"}),
             ),
+            submitted_evidence_ids=evidence_registry_ids(
+                prepared.evidence_registry
+            ),
         )
         schema_bytes = canonical_json(schema, max_bytes=1024 * 1024)
         prompt = build_context_screen_prompt(snapshot)
@@ -1019,6 +1022,9 @@ def _measurement_turn(
             prepared.evidence_registry,
             kinds=frozenset({"hypothesis"}),
         ),
+        submitted_evidence_ids=evidence_registry_ids(
+            prepared.evidence_registry
+        ),
     )
     schema_bytes = canonical_json(output_schema, max_bytes=1024 * 1024)
     action = (
@@ -1193,6 +1199,9 @@ def _incomplete_measurement_turn(
         existing_hypothesis_ids=evidence_registry_ids(
             prepared.evidence_registry,
             kinds=frozenset({"hypothesis"}),
+        ),
+        submitted_evidence_ids=evidence_registry_ids(
+            prepared.evidence_registry
         ),
     )
     schema_bytes = canonical_json(output_schema, max_bytes=1024 * 1024)

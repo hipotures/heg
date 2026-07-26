@@ -65,6 +65,14 @@ ID list. This includes each item of
 `schedule_verification.candidate_ids`; semantic validation repeats the same
 membership check as defense in depth.
 
+Every evidence reference in `hypothesis_updates[].evidence_for`,
+`hypothesis_updates[].evidence_against`, and `actions[].evidence_ids` is
+likewise restricted to the exact submitted evidence registry. The generated
+schema stores that enum once in `$defs` so the complete request does not
+multiply the registry across action variants. An empty submitted registry
+forces all evidence-reference arrays to remain empty. Semantic membership
+validation remains authoritative defense in depth.
+
 ## Validation layers
 
 1. JSON/schema validation.
