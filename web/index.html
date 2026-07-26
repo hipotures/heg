@@ -48,7 +48,7 @@
     .theme-toggle{min-width:9.25rem;white-space:nowrap;flex:0 0 auto}
     main{max-width:1600px;margin:auto;padding:1.4rem 1.5rem 4rem}
     .hero{display:flex;justify-content:space-between;gap:1rem;align-items:end;margin-bottom:1.2rem}.hero h1{font-size:clamp(1.8rem,3vw,2.65rem);line-height:1.05;letter-spacing:-.03em;margin:.2rem 0}.hero p{margin:.3rem 0;color:var(--muted);max-width:70ch}
-    .section-nav{display:flex;gap:.35rem;overflow-x:auto;padding:.4rem;margin:0 0 1rem;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow)}
+    .section-nav{display:flex;flex-wrap:wrap;gap:.35rem;padding:.4rem;margin:0 0 1rem;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow)}
     .section-nav a{white-space:nowrap;padding:.45rem .62rem;color:var(--muted);font-size:.83rem;font-weight:700;text-decoration:none;border-radius:7px}.section-nav a:hover{background:var(--surface-2);color:var(--text)}
     .workspace-grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:1rem}
     section{grid-column:span 6;min-width:0;padding:1.05rem;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);scroll-margin-top:6rem}
@@ -98,7 +98,23 @@
   </header>
   <main>
     <div class="hero"><div><span class="eyebrow">Engineering telemetry</span><h1>Graph-search operations</h1><p>Campaign state, Director decisions, search lanes, verification, and retained scientific evidence. This interface reports software state—not a mathematical claim.</p></div></div>
-    <nav class="section-nav" aria-label="Dashboard sections"><a href="#campaign">Campaign</a><a href="#visuals">Visuals</a><a href="#decisions">Decisions</a><a href="#lanes">Lanes</a><a href="#candidates">Candidates</a><a href="#events" data-legacy-run>Events</a></nav>
+    <nav class="section-nav" aria-label="Dashboard sections">
+      <a href="#comparisons-overview" data-comparisons-nav>Comparisons</a>
+      <a href="#campaign">Campaign</a>
+      <a href="#campaign-status">Status</a>
+      <a href="#visuals" data-visuals-nav>Visuals</a>
+      <a href="#attempts-section">Attempts</a>
+      <a href="#memory-section">Memory</a>
+      <a href="#assessment-section">Assessment</a>
+      <a href="#decisions">Decisions</a>
+      <a href="#lanes">Lanes</a>
+      <a href="#revisions-section">Revisions</a>
+      <a href="#turns-section">Turns</a>
+      <a href="#candidates">Candidates</a>
+      <a href="#events" data-legacy-run>Events</a>
+      <a href="#telemetry-section" data-legacy-run>Telemetry</a>
+      <a href="#runs-section" data-legacy-run>Runs</a>
+    </nav>
     <div class="workspace-grid">
       <section class="wide" id="comparisons-overview"><div class="section-heading"><div><h2>Controlled comparisons</h2><p>Measured model, effort, and context-mode evidence.</p></div><a href="/comparisons">Open comparisons →</a></div><div id="comparison-summary" class="metrics"></div></section>
       <section class="span-4" id="campaign">
@@ -107,19 +123,19 @@
         <div class="controls"><button id="start-campaign" class="primary">Start campaign</button><button id="pause-campaign" data-campaign-action="PAUSE">Pause</button><button id="resume-campaign">Resume</button><button id="stop-campaign" data-campaign-action="STOP" class="danger-button">Stop</button></div><p id="notice" class="notice" role="status" aria-live="polite"></p>
         <details id="resume-panel" data-persist-details="campaign:resume" hidden><summary>Resume with a new execution attempt</summary><form id="resume-form"><label>Additional duration<input name="additional_time" value="1h" pattern="[0-9.]+[smhd]?" required></label><label>CPU worker slots<input name="cpu_workers" type="number" min="1" max="1024" value="8" required></label><label>Maximum active lanes<input name="maximum_active_lanes" type="number" min="1" max="1024" value="8" required></label><label>Lane memory (bytes)<input name="lane_memory_bytes" type="number" min="16777216" value="536870912" required></label><label>Verifier concurrency<input name="verifier_concurrency" type="number" min="1" max="128" value="1" required></label><label>Repair acknowledgement<input name="repair_acknowledgement" placeholder="Required after a fault"></label></form><div class="controls"><button id="preview-resume">Preview continuity</button><button id="confirm-resume" class="primary">Start new attempt</button></div><div id="resume-preview" class="stack"></div></details>
       </section>
-      <section class="span-8"><div class="section-heading"><div><h2>Campaign status</h2><p>Current coordinator, verifier, and resource state.</p></div></div><div id="campaign-metrics" class="metrics"></div><div id="campaign-fault" hidden></div></section>
+      <section class="span-8" id="campaign-status"><div class="section-heading"><div><h2>Campaign status</h2><p>Current coordinator, verifier, and resource state.</p></div></div><div id="campaign-metrics" class="metrics"></div><div id="campaign-fault" hidden></div></section>
       <section class="wide" id="visuals"><div class="section-heading"><div><h2>Scientific observatory</h2><p>Structure, score progression, lane evidence, and exact-verifier witnesses for retained campaign candidates.</p></div></div><div id="scientific-observatory"></div></section>
       <section class="wide" id="attempts-section"><div class="section-heading"><div><h2>Execution attempts</h2><p>One scientific campaign, with immutable process attempts and per-attempt resources.</p></div></div><div id="attempt-metrics" class="metrics"></div><div id="attempt-history" class="stack"></div></section>
       <section class="wide" id="memory-section"><div class="section-heading"><div><h2>Scientific memory</h2><p>Bounded Director projection; full raw history remains in durable storage.</p></div></div><div id="memory-metrics" class="metrics"></div></section>
-      <section class="wide"><div class="section-heading"><div><h2>Director assessment & hypotheses</h2><p>Current interpretation and reviewed scientific hypotheses.</p></div></div><div id="assessment"></div><div id="hypotheses" class="stack"></div></section>
+      <section class="wide" id="assessment-section"><div class="section-heading"><div><h2>Director assessment & hypotheses</h2><p>Current interpretation and reviewed scientific hypotheses.</p></div></div><div id="assessment"></div><div id="hypotheses" class="stack"></div></section>
       <section class="wide" id="decisions"><div class="section-heading"><div><h2>AI decisions & measured effects</h2><p>Recent actions rendered semantically; raw records remain secondary.</p></div><span class="badge neutral">Latest 20</span></div><div id="actions" class="stack"></div></section>
       <section class="wide" id="lanes"><div class="section-heading"><div><h2>Search lanes</h2><p>Bounded strategy, telemetry, and lifecycle state.</p></div></div><div id="lanes-list" class="stack"></div></section>
-      <section class="wide"><div class="section-heading"><div><h2>Parameter revision timeline</h2><p>Before/after controls with source action correlation.</p></div></div><div id="revisions" class="stack"></div></section>
-      <section class="wide"><div class="section-heading"><div><h2>Persistent App Server turns</h2><p>Lifecycle, latency, and authoritative usage without double-counting.</p></div><span class="badge neutral">Newest first · local time</span></div><div id="turns" class="table-wrap responsive"></div></section>
+      <section class="wide" id="revisions-section"><div class="section-heading"><div><h2>Parameter revision timeline</h2><p>Before/after controls with source action correlation.</p></div></div><div id="revisions" class="stack"></div></section>
+      <section class="wide" id="turns-section"><div class="section-heading"><div><h2>Persistent App Server turns</h2><p>Lifecycle, latency, and authoritative usage without double-counting.</p></div><span class="badge neutral">Newest first · local time</span></div><div id="turns" class="table-wrap responsive"></div></section>
       <section id="events" data-legacy-run><div class="section-heading"><div><h2>Recent events</h2><p>Bounded operational log for the legacy single-run worker.</p></div></div><div id="logs" class="log-list" aria-live="polite">Loading…</div></section>
-      <section data-legacy-run><div class="section-heading"><div><h2>Legacy run telemetry</h2><p>Separate single-run worker and exact-verifier status.</p></div></div><div id="metrics" class="metrics"></div></section>
+      <section id="telemetry-section" data-legacy-run><div class="section-heading"><div><h2>Legacy run telemetry</h2><p>Separate single-run worker and exact-verifier status.</p></div></div><div id="metrics" class="metrics"></div></section>
       <section class="wide" id="candidates"><div class="section-heading"><div><h2>Campaign candidates</h2><p>Bounded retained candidates and exact-verifier status from this Director campaign.</p></div><span class="badge neutral">Latest 24</span></div><div id="candidates-list" class="stack"></div></section>
-      <section class="wide" data-legacy-run><div class="section-heading"><div><h2>Legacy experiments</h2><p>Bounded history from the separate single-run worker.</p></div></div><div id="runs" class="table-wrap responsive"></div></section>
+      <section class="wide" id="runs-section" data-legacy-run><div class="section-heading"><div><h2>Legacy experiments</h2><p>Bounded history from the separate single-run worker.</p></div></div><div id="runs" class="table-wrap responsive"></div></section>
     </div>
   </main>
 <script src="/observatory.js"></script>
@@ -139,10 +155,10 @@ const localDateTime=value=>{
   if(!value)return'Unavailable';
   const date=new Date(value);
   if(Number.isNaN(date.getTime()))return String(value);
-  return new Intl.DateTimeFormat(undefined,{
-    year:'numeric',month:'short',day:'numeric',
+  return new Intl.DateTimeFormat('pl-PL',{
+    year:'numeric',month:'2-digit',day:'2-digit',
     hour:'2-digit',minute:'2-digit',second:'2-digit',
-    timeZoneName:'short',
+    hourCycle:'h23',timeZoneName:'short',
   }).format(date);
 };
 const shortIdText=v=>v?`<span class="id" title="${esc(v)}">${esc(shortId(v))}</span>`:'—';
@@ -464,6 +480,8 @@ async function refresh(){
     }
     document.getElementById('resume-form').elements.repair_acknowledgement.required=campaign.state==='paused_fault';
     document.getElementById('comparisons-overview').hidden=!last;
+    document.querySelector('[data-comparisons-nav]').hidden=!last;
+    document.querySelector('[data-visuals-nav]').hidden=!campaignMode;
     for(const section of document.querySelectorAll('[data-legacy-run]'))section.hidden=campaignMode;
     metrics('comparison-summary',[['Default Director context',comparison.default_context_mode,'emphasis'],['Recommendation basis',comparison.recommendation_basis],['Last suite',last?`<a href="/comparisons/${esc(last.suite_id)}">${esc(last.name)}</a>`:'—','',last?.name||'—'],['Completed / planned',last?`${last.completion_count} / ${last.planned_inference_count}`:'—'],['Total server tokens',last?fmt(last.total_server_tokens):'—'],['Relative cost units',last?Number(last.relative_cost_units||0).toFixed(2):'—']]);
     const currentFault=campaign.state==='paused_fault'||campaign.state==='infrastructure_failure';

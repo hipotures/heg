@@ -49,7 +49,10 @@ interaction without separate `Copy ID` buttons.
 The research-campaign response supplies Director turns in descending
 `started_at` order. Timestamps remain persisted and transported as UTC; the
 dashboard alone formats each turn's start time in the browser's local
-timezone.
+timezone with European day-month-year order and a 24-hour clock.
+Section navigation is entirely client-side. One-word anchors target every
+main dashboard section, and conditional anchors are hidden together with
+their target sections; no API contract is involved.
 
 ## Core write APIs
 

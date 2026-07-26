@@ -161,6 +161,27 @@ class SemanticUiRenderingTests(unittest.TestCase):
         self.assertIn("replaceHtmlPreservingSelection", dashboard)
         self.assertIn("badge,selectionIntersects", dashboard)
         self.assertIn("document.getElementById('comparisons-overview').hidden=!last", dashboard)
+        self.assertIn("document.querySelector('[data-comparisons-nav]').hidden=!last", dashboard)
+        self.assertIn("document.querySelector('[data-visuals-nav]').hidden=!campaignMode", dashboard)
+        for anchor, text in (
+            ("#comparisons-overview", "Comparisons"),
+            ("#campaign", "Campaign"),
+            ("#campaign-status", "Status"),
+            ("#visuals", "Visuals"),
+            ("#attempts-section", "Attempts"),
+            ("#memory-section", "Memory"),
+            ("#assessment-section", "Assessment"),
+            ("#decisions", "Decisions"),
+            ("#lanes", "Lanes"),
+            ("#revisions-section", "Revisions"),
+            ("#turns-section", "Turns"),
+            ("#candidates", "Candidates"),
+            ("#events", "Events"),
+            ("#telemetry-section", "Telemetry"),
+            ("#runs-section", "Runs"),
+        ):
+            self.assertIn(f'<a href="{anchor}"', dashboard)
+            self.assertIn(f">{text}</a>", dashboard)
         self.assertIn("data-legacy-run", dashboard)
         self.assertIn("section.hidden=campaignMode", dashboard)
         self.assertIn("Campaign candidates", dashboard)
@@ -187,6 +208,8 @@ class SemanticUiRenderingTests(unittest.TestCase):
         self.assertIn("attempt.code_commit", dashboard)
         self.assertIn("Newest first · local time", dashboard)
         self.assertIn("new Intl.DateTimeFormat", dashboard)
+        self.assertIn("new Intl.DateTimeFormat('pl-PL'", dashboard)
+        self.assertIn("hourCycle:'h23'", dashboard)
         self.assertIn("Started locally · ${esc(localDateTime(started))}", dashboard)
         self.assertIn("Stored UTC: ${started||'Unavailable'}", dashboard)
         self.assertNotIn("Copy ID", dashboard)

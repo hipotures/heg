@@ -21,8 +21,13 @@ buttons.
 
 Persistent App Server turn cards now state that their order is newest first
 and show each persisted `started_at` timestamp in the browser's local
-timezone. The raw UTC value remains available in the timestamp tooltip and is
-unchanged in the database and API.
+timezone with European day-month-year order and a 24-hour clock. The raw UTC
+value remains available in the timestamp tooltip and is unchanged in the
+database and API.
+
+The dashboard section navigation now exposes one-word anchors for every main
+section. Comparison, visualization, and legacy-only links share the
+visibility of their target section, preventing dead navigation entries.
 
 ## Aggregate live-frontier throughput
 

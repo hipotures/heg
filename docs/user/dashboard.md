@@ -11,6 +11,10 @@ sglab serve   --workspace <workspace>   --host 127.0.0.1   --port 8788
 
 ## Main areas
 
+The section navigation includes one-word links for every main dashboard
+section. Links for comparisons, live visuals, and legacy-only sections appear
+only while their corresponding section is available.
+
 ### Campaign status
 
 Shows:
@@ -84,8 +88,9 @@ copy their complete underlying value. Standalone abbreviated identifiers are
 also directly clickable; separate `Copy ID` buttons are not shown.
 
 Persistent App Server turns are listed newest first. Each turn shows its
-start time converted by the browser to the operator's local timezone. Hover
-the local timestamp to inspect the original persisted UTC value.
+start time converted by the browser to the operator's local timezone, using
+European day-month-year order and a 24-hour clock. Hover the local timestamp
+to inspect the original persisted UTC value.
 
 [screenshot: ID=USR-DASHBOARD-01; save as docs/assets/screenshots/user/dashboard/scientific-observatory.png; crop the complete “Scientific observatory” or “Search frontier” panel with the graph visualization, legend, current/best candidate selector, lane/frontier points, and any 2D/3D or camera controls; include the panel title and exclude unrelated campaign forms.]
 
