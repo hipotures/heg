@@ -17,6 +17,36 @@
 
   window.createScientificObservatory = options => {
     const {root, api, esc, fmt, label, shortId, badge} = options;
+    const selectionIntersects = options.selectionIntersects || (() => false);
+    const setHtml = (element, html) => {
+      if (selectionIntersects(element)) return false;
+      element.innerHTML = html;
+      return true;
+    };
+    const copyText = async value => {
+      const textarea = document.createElement('textarea');
+      textarea.value = value;
+      textarea.readOnly = true;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      textarea.style.pointerEvents = 'none';
+      root.appendChild(textarea);
+      textarea.select();
+      textarea.setSelectionRange(0, value.length);
+      try {
+        if (document.execCommand('copy')) return true;
+      } catch {
+        // Fall through to the asynchronous Clipboard API.
+      } finally {
+        textarea.remove();
+      }
+      try {
+        await navigator.clipboard.writeText(value);
+        return true;
+      } catch {
+        return false;
+      }
+    };
     const savedLiveInterval = Number(
       sessionStorage.getItem('sglab-observatory-live-interval')
     );
@@ -283,8 +313,8 @@
       svg.setAttribute('hidden', '');
       graphEmpty.hidden = false;
       graphEmpty.textContent = message;
-      inspector.innerHTML = `<div class="empty">${esc(message)}</div>`;
-      panel.innerHTML = `<div class="empty">${esc(message)}</div>`;
+      setHtml(inspector, `<div class="empty">${esc(message)}</div>`);
+      setHtml(panel, `<div class="empty">${esc(message)}</div>`);
     };
 
     const updateGraph = data => {
@@ -509,6 +539,17 @@
       const throughputTitle = measuredLaneRates.length
         ? `Sum of latest completed measurements from ${measuredLaneRates.length} of ${activeLanes.length} running lanes`
         : 'No completed throughput measurement is available for a running lane';
+      const scoreCoverage = score.complete === false
+        ? 'Approximate / truncated'
+        : score.complete === true
+          ? 'Complete'
+          : 'Unrecorded';
+      const metricCard = (name, displayValue, detail = '') =>
+        `<div data-copy-observatory-value="${esc(`${name}: ${displayValue}`)}"
+              title="${esc(`Click to copy ${name}`)}">
+          <dt>${esc(name)}</dt>
+          <dd${detail ? ` title="${esc(detail)}"` : ''}>${esc(displayValue)}</dd>
+        </div>`;
       const lengths = [...new Set([
         ...data.cycle_examples.map(item => Number(item.length)),
         ...(exact?.witnesses || []).map(item => Number(item.length)),
@@ -535,7 +576,7 @@
              <span class="cycle-key key-exact"></span>
              Exact M4 witness · cycle ${exact.witnesses[0].length}</label>`
         : '<div class="meta">No exact M4 witness is available for this candidate.</div>';
-      inspector.innerHTML = `
+      setHtml(inspector, `
         <div>
           <div class="chips">${badge(selection.state)}
             ${selection.transient ? badge('transient heuristic') : ''}
@@ -545,12 +586,12 @@
           <p class="meta">From ${esc(shortId(selection.lane_id))} · ${esc(selection.published_at || selection.created_at)}</p>
         </div>
         <dl class="semantic">
-          <div><dt>Order / edges</dt><dd>${fmt(data.graph.order)} / ${fmt(data.graph.size)}</dd></div>
-          <div><dt>Weighted penalty</dt><dd>${fmt(score.weighted_penalty)}</dd></div>
-          <div><dt>Score coverage</dt><dd>${score.complete === false ? 'Approximate / truncated' : score.complete === true ? 'Complete' : 'Unrecorded'}</dd></div>
-          ${selection.transient ? `<div><dt>Lane evaluations</dt><dd>${fmt(selection.high_water)}</dd></div>` : ''}
-          <div><dt>Graph SHA-256</dt><dd title="${esc(selection.graph_sha256)}">${esc(shortId(selection.graph_sha256))}</dd></div>
-          ${selection.transient ? `<div><dt>Aggregate throughput</dt><dd title="${esc(throughputTitle)}">${throughputLabel}</dd></div>` : ''}
+          ${metricCard('Order / edges', `${fmt(data.graph.order)} / ${fmt(data.graph.size)}`)}
+          ${metricCard('Weighted penalty', fmt(score.weighted_penalty))}
+          ${metricCard('Score coverage', scoreCoverage)}
+          ${selection.transient ? metricCard('Lane evaluations', fmt(selection.high_water)) : ''}
+          ${metricCard('Graph SHA-256', shortId(selection.graph_sha256), selection.graph_sha256)}
+          ${selection.transient ? metricCard('Aggregate throughput', throughputLabel, throughputTitle) : ''}
         </dl>
         ${selection.transient
           ? '<div class="observatory-warning">Live frontier is transient heuristic telemetry. It is not a retained scientific record or exact certification.</div>'
@@ -561,7 +602,7 @@
         <div class="layer-controls">
           <strong>Visible cycle layers</strong>
           ${layerRows}${exactRow}
-        </div>`;
+        </div>`);
     };
 
     const applyLayerVisibility = () => {
@@ -574,7 +615,7 @@
 
     const renderGraphSummary = () => {
       if (!state.graph) {
-        panel.innerHTML = '<div class="empty">No graph selected yet.</div>';
+        setHtml(panel, '<div class="empty">No graph selected yet.</div>');
         return;
       }
       const graph = state.graph.graph;
@@ -604,7 +645,7 @@
           .filter(item => item.vertices?.includes(vertex))
           .map(item => Number(item.length))
           .sort((a, b) => a - b);
-      panel.innerHTML = `
+      setHtml(panel, `
         <div class="observatory-legend">
           <span><span class="cycle-key"></span>Bounded display examples</span>
           <span><span class="cycle-key key-exact"></span>Persisted exact M4 witness</span>
@@ -622,7 +663,7 @@
                 <div><dt>Bounded display cycles</dt><dd>${displayMemberships.length ? displayMemberships.map(length => `length ${fmt(length)}`).join(', ') : 'None shown'}</dd></div>
                 <div><dt>Exact M4 witness</dt><dd>${exactMemberships.length ? exactMemberships.map(length => `length ${fmt(length)}`).join(', ') : 'Not on the persisted witness'}</dd></div>
               </dl>
-            </div>`}`;
+            </div>`}`);
     };
 
     const lineChart = points => {
@@ -670,7 +711,7 @@
       const points = (state.series?.candidate_history || [])
         .filter(item => numeric(item.weighted_penalty) !== null)
         .map(item => ({...item, value: item.weighted_penalty}));
-      panel.innerHTML = lineChart(points);
+      setHtml(panel, lineChart(points));
     };
 
     const renderCycles = () => {
@@ -680,11 +721,11 @@
         .filter(([, count]) => Number.isFinite(count))
         .sort((a, b) => a[0] - b[0]);
       if (!entries.length) {
-        panel.innerHTML = '<div class="empty">No cycle-count profile was retained.</div>';
+        setHtml(panel, '<div class="empty">No cycle-count profile was retained.</div>');
         return;
       }
       const maximum = Math.max(1, ...entries.map(([, count]) => count));
-      panel.innerHTML = `<div class="cycle-bars">${entries.map(([length, count]) =>
+      setHtml(panel, `<div class="cycle-bars">${entries.map(([length, count]) =>
         `<div class="cycle-bar-row">
           <strong>Cycle ${length}</strong>
           <div class="cycle-bar-track" aria-label="${count} retained witnesses">
@@ -695,14 +736,14 @@
       ).join('')}</div>
       <p class="meta">${state.graph.score.complete === false
         ? 'Counts are approximate or truncated by the witness cap.'
-        : 'The retained score marks this count profile complete.'}</p>`;
+        : 'The retained score marks this count profile complete.'}</p>`);
     };
 
     const renderLanes = () => {
       const latest = new Map();
       for (const window of state.series?.lane_windows || []) latest.set(window.lane_id, window);
       const lanes = state.series?.lanes || [];
-      panel.innerHTML = lanes.length
+      setHtml(panel, lanes.length
         ? `<div class="lane-viz-list">${lanes.map(lane => {
             const metric = latest.get(lane.lane_id) || {};
             return `<div class="lane-viz-row">
@@ -713,12 +754,12 @@
               <button type="button" data-show-lane="${esc(lane.lane_id)}">Show lane best</button>
             </div>`;
           }).join('')}</div>`
-        : '<div class="empty">No search lanes have been persisted.</div>';
+        : '<div class="empty">No search lanes have been persisted.</div>');
     };
 
     const renderVerification = () => {
       const jobs = state.series?.verifications || [];
-      panel.innerHTML = jobs.length
+      setHtml(panel, jobs.length
         ? `<div class="verification-viz-list">${jobs.map(job =>
             `<div class="verification-viz-row">
               <div class="viz-value"><span>${badge(job.state)}</span><strong title="${esc(job.verification_job_id)}">${esc(shortId(job.verification_job_id))}</strong></div>
@@ -726,12 +767,12 @@
               <div class="viz-value"><span>Result / input</span><strong>${esc(label(job.certification_status || 'pending'))}</strong><span>${job.immutable_snapshot ? 'Immutable snapshot' : 'Legacy candidate reference'}</span></div>
             </div>`
           ).join('')}</div>`
-        : '<div class="empty">No M4 verification jobs have been persisted.</div>';
+        : '<div class="empty">No M4 verification jobs have been persisted.</div>');
     };
 
     const renderHistory = () => {
       const history = [...(state.series?.candidate_history || [])].reverse().slice(0, 40);
-      panel.innerHTML = history.length
+      setHtml(panel, history.length
         ? `<div class="history-viz-list">${history.map(item =>
             `<div class="history-viz-row">
               <div class="viz-value"><span>${badge(item.state)}</span><strong title="${esc(item.candidate_id)}">${esc(shortId(item.candidate_id))}</strong><span>${esc(item.created_at)}</span></div>
@@ -740,7 +781,7 @@
               <button type="button" data-show-candidate="${esc(item.candidate_id)}">Show graph</button>
             </div>`
           ).join('')}</div>`
-        : '<div class="empty">No retained candidate history is available.</div>';
+        : '<div class="empty">No retained candidate history is available.</div>');
     };
 
     const renderActivePanel = () => {
@@ -829,6 +870,24 @@
           state.transform.scale = clamp(state.transform.scale * factor, .55, 4);
         }
         updateViewport();
+      }
+    });
+    root.addEventListener('click', async event => {
+      const card = event.target.closest('[data-copy-observatory-value]');
+      if (!card || !inspector.contains(card)) return;
+      event.preventDefault();
+      const value = card.dataset.copyObservatoryValue;
+      if (await copyText(value)) {
+        window.getSelection?.()?.removeAllRanges();
+        for (const item of inspector.querySelectorAll('.is-copied')) {
+          item.classList.remove('is-copied');
+        }
+        card.classList.add('is-copied');
+        setTimeout(() => {
+          if (card.isConnected) card.classList.remove('is-copied');
+        }, 900);
+      } else {
+        setStatus('Clipboard access is unavailable in this browser context.');
       }
     });
     svg.addEventListener('click', event => {

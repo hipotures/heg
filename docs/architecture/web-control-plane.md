@@ -35,6 +35,15 @@ seconds; other dashboard data retains the dashboard-wide polling cadence.
 The server prefers the lane's 64 KiB transient live-frontier file and falls
 back to the latest integrity-checked durable checkpoint. Reading the preview
 does not trigger scoring, checkpoint creation, or a database write.
+The browser continues polling while the user has an active text selection but
+defers DOM replacement only for a container intersecting that selection. This
+prevents invalidating copy selection without freezing unrelated telemetry or
+the live graph drawing; the selected container catches up on the next polling
+interval after the selection is cleared.
+The six live-frontier summary cards copy their own label and current value on
+a single click. This clipboard interaction is browser-local and issues no API
+request. Clipboard text matches the card's displayed text, including an
+abbreviated graph hash.
 The live-frontier inspector derives aggregate campaign throughput by summing
 the latest completed metric window for each running lane. Missing first-batch
 measurements do not erase the available aggregate; the UI exposes measured

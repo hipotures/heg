@@ -77,6 +77,8 @@ The live-frontier inspector reports aggregate campaign throughput: the sum of
 the latest completed throughput measurement for every running lane. Until a
 new lane completes its first batch, the value sums the available running-lane
 measurements and its tooltip reports measurement coverage.
+Click any of the six live-frontier metric cards to copy that card's label and
+current value exactly as displayed, including the abbreviated graph hash.
 
 [screenshot: ID=USR-DASHBOARD-01; save as docs/assets/screenshots/user/dashboard/scientific-observatory.png; crop the complete “Scientific observatory” or “Search frontier” panel with the graph visualization, legend, current/best candidate selector, lane/frontier points, and any 2D/3D or camera controls; include the panel title and exclude unrelated campaign forms.]
 
@@ -99,6 +101,10 @@ Shows:
 
 The UI polls bounded summary endpoints. It should update scientific state
 without rendering thousands of rows. Lists use bounded pages or “Show more”.
+While text is selected, automatic updates preserve only the selected panel so
+that the selection remains stable for copying. Polling and unrelated panels,
+including the live graph drawing, continue to update. The selected panel
+catches up automatically after the selection is cleared.
 
 ## Controls
 

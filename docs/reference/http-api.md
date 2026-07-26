@@ -36,6 +36,15 @@ completed metric windows. The dashboard sums the latest completed throughput
 window for every lane whose current state is `running`; lane-specific values
 remain separate evidence.
 
+Browser rendering is selection-aware: polling continues while the user has an
+active text selection, but a DOM container intersecting that selection is not
+replaced until a later interval. Other dashboard regions continue updating.
+This is a client interaction rule and does not change any HTTP response or
+persistence contract.
+Single-click copying from a live-frontier metric card is likewise client-only
+and makes no HTTP request. Each card copies its own label and displayed value,
+including the abbreviated display form of the graph hash.
+
 ## Core write APIs
 
 ```text

@@ -24,6 +24,24 @@ CAMPAIGN_ID = "campaign-visualization-test"
 
 
 class CampaignVisualizationTests(unittest.TestCase):
+    def test_live_refresh_preserves_active_text_selection(self) -> None:
+        script = (
+            Path(__file__).parents[1] / "web" / "observatory.js"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "options.selectionIntersects || (() => false)",
+            script,
+        )
+        self.assertIn("if (selectionIntersects(element)) return false;", script)
+        self.assertNotIn("if (hasActiveTextSelection()) return;", script)
+        self.assertIn("data-copy-observatory-value", script)
+        self.assertIn("root.addEventListener('click', async event => {", script)
+        self.assertNotIn("root.addEventListener('dblclick'", script)
+        self.assertIn("`${name}: ${displayValue}`", script)
+        self.assertIn("document.execCommand('copy')", script)
+        self.assertIn("navigator.clipboard.writeText(value)", script)
+        self.assertIn("card.classList.add('is-copied')", script)
+
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.workspace = Path(self.temporary.name)
@@ -637,7 +655,10 @@ class CampaignVisualizationTests(unittest.TestCase):
                 b"LIVE_FRONTIER_INTERVAL_SECONDS = [1, 2, 3, 4, 5]",
                 javascript,
             )
-            self.assertIn(b"<dt>Aggregate throughput</dt>", javascript)
+            self.assertIn(
+                b"metricCard('Aggregate throughput'",
+                javascript,
+            )
             self.assertIn(
                 b".filter(lane => lane.state === 'running')",
                 javascript,
@@ -655,7 +676,7 @@ class CampaignVisualizationTests(unittest.TestCase):
                 javascript,
             )
             self.assertIn(
-                b'<dt>Graph SHA-256</dt><dd title="',
+                b"metricCard('Graph SHA-256', shortId(selection.graph_sha256)",
                 javascript,
             )
             self.assertNotIn(b"last sample", javascript)

@@ -139,6 +139,20 @@ const copyButton=v=>v?`<button type="button" class="copy-id" data-copy="${esc(v)
 const id=v=>v?`<span class="id-value">${idText(v)}${copyButton(v)}</span>`:'—';
 const statusTone=v=>{const s=String(v??'').toLowerCase();if(/complete|valid|pass|applied|running|active|certified/.test(s))return'good';if(/fail|invalid|reject|error|abort|disagree/.test(s))return'bad';if(/time|stop|block|pause|unknown|pressure/.test(s))return'warn';return'neutral'};
 const badge=v=>`<span class="badge ${statusTone(v)}">${esc(label(v??'unknown'))}</span>`;
+const selectionIntersects=element=>{
+  const selection=window.getSelection?.();
+  if(!element||!selection?.rangeCount||selection.isCollapsed)return false;
+  for(let index=0;index<selection.rangeCount;index+=1){
+    try{if(selection.getRangeAt(index).intersectsNode(element))return true}catch{}
+  }
+  return false;
+};
+function replaceHtmlPreservingSelection(target,html){
+  const element=typeof target==='string'?document.getElementById(target):target;
+  if(selectionIntersects(element))return false;
+  element.innerHTML=html;
+  return true;
+}
 const expandedDetails=new Set();
 const detailScrollPositions=new Map();
 const refreshDetailsSelector='details[data-persist-details][open],details[data-turn-communication][open]';
@@ -215,11 +229,11 @@ function semanticValue(value,key=''){
 }
 const semantic=(obj)=>`<dl class="semantic">${Object.entries(obj||{}).filter(([,v])=>v!==null&&v!==undefined&&v!=='').map(([k,v])=>`<div><dt>${esc(label(k))}</dt><dd>${semanticValue(v,k)}</dd></div>`).join('')}</dl>`;
 async function api(path,options={}){const response=await fetch(path,{...options,headers:{...headers,...(options.headers||{})},cache:'no-store'});let body;try{body=await response.json()}catch{body={error:`HTTP ${response.status}`}}if(!response.ok)throw new Error(body.error||`HTTP ${response.status}`);return body}
-const observatory=createScientificObservatory({root:document.getElementById('scientific-observatory'),api,esc,fmt,label,shortId,badge});
+const observatory=createScientificObservatory({root:document.getElementById('scientific-observatory'),api,esc,fmt,label,shortId,badge,selectionIntersects});
 function setThemeLabel(){const dark=document.documentElement.dataset.theme==='dark';const button=document.getElementById('theme-toggle');button.textContent=dark?'☀ Light theme':'☾ Dark theme';button.setAttribute('aria-pressed',String(dark))}
 document.getElementById('theme-toggle').addEventListener('click',()=>{const next=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=next;localStorage.setItem('sglab-theme',next);setThemeLabel()});setThemeLabel();
 document.addEventListener('click',async event=>{const button=event.target.closest('[data-copy]');if(!button)return;try{await navigator.clipboard.writeText(button.dataset.copy);const old=button.textContent;button.textContent='Copied';setTimeout(()=>button.textContent=old,900)}catch{button.title='Copy unavailable in this browser context'}});
-function metrics(target,items){document.getElementById(target).innerHTML=items.map(([name,value,tone=''])=>`<div class="metric ${tone}"><span>${esc(name)}</span><strong>${value&&String(value).includes('<')?value:esc(value)}</strong></div>`).join('')}
+function metrics(target,items){replaceHtmlPreservingSelection(target,items.map(([name,value,tone=''])=>`<div class="metric ${tone}"><span>${esc(name)}</span><strong>${value&&String(value).includes('<')?value:esc(value)}</strong></div>`).join(''))}
 function actionTitle(type){return ({start_lane:'Start search lane',request_diagnostic:'Request diagnostic',set_review_trigger:'Set review trigger',promote_candidate:'Promote candidate',schedule_verification:'Schedule verification',stop_lane:'Stop search lane',patch_lane:'Change lane strategy',restart_lane:'Restart lane',fork_lane:'Fork lane',reallocate_resources:'Reallocate resources'})[type]||label(type)}
 function parameters(action){
   const p=action.parameters||{},source=p.spec||p.patch||p.review_trigger||p;
@@ -299,9 +313,9 @@ function turnsView(rows){
 async function loadTurnCommunication(details,refreshView=null){
   const key=details.dataset.turnCommunication,body=details.querySelector('[data-communication-body]');
   const cached=turnCommunicationCache.get(key);
-  if(cached&&cached.response!==null&&cached.response!==undefined){body.innerHTML=communicationContent(cached,key);if(refreshView)requestAnimationFrame(()=>restoreRefreshView(refreshView));return}
-  body.innerHTML='<div class="empty">Loading persisted communication…</div>';
-  try{const value=await api(`/api/research-campaign/turn/${encodeURIComponent(key)}/communication`);turnCommunicationCache.set(key,value);if(details.isConnected&&details.open){body.innerHTML=communicationContent(value,key);if(refreshView)requestAnimationFrame(()=>restoreRefreshView(refreshView))}}catch(error){if(details.isConnected)body.innerHTML=`<div class="empty">${esc(error.message)}</div>`}
+  if(cached&&cached.response!==null&&cached.response!==undefined){replaceHtmlPreservingSelection(body,communicationContent(cached,key));if(refreshView)requestAnimationFrame(()=>restoreRefreshView(refreshView));return}
+  replaceHtmlPreservingSelection(body,'<div class="empty">Loading persisted communication…</div>');
+  try{const value=await api(`/api/research-campaign/turn/${encodeURIComponent(key)}/communication`);turnCommunicationCache.set(key,value);if(details.isConnected&&details.open){replaceHtmlPreservingSelection(body,communicationContent(value,key));if(refreshView)requestAnimationFrame(()=>restoreRefreshView(refreshView))}}catch(error){if(details.isConnected)replaceHtmlPreservingSelection(body,`<div class="empty">${esc(error.message)}</div>`)}
 }
 const expandedLists=new Set();
 function boundedList(targetId,rows,renderer,limit=6){
@@ -309,7 +323,7 @@ function boundedList(targetId,rows,renderer,limit=6){
   const visibleLimit=matchMedia('(max-width:700px)').matches?Math.min(limit,3):limit;
   const draw=()=>{
     const expanded=expandedLists.has(targetId),visible=expanded?rows:rows.slice(0,visibleLimit);
-    target.innerHTML=visible.map(renderer).join('')||'<div class="empty">No records yet.</div>';
+    if(!replaceHtmlPreservingSelection(target,visible.map(renderer).join('')||'<div class="empty">No records yet.</div>'))return;
     if(rows.length>visibleLimit){
       const button=document.createElement('button');
       button.type='button';button.className='show-more';
@@ -368,18 +382,18 @@ async function refresh(){
     metrics('memory-metrics',[['Snapshot',shortId(memory?.memory_snapshot_id||'Legacy / pending')],['Version',memory?.version??'—'],['Serialized size',memory?`${fmt(memory.byte_size)} B`:'—'],['Estimated client tokens',memory?fmt(memory.estimated_token_count):'—'],['Creation trigger',memory?label(memory.creation_trigger):'—'],['SHA-256',memory?shortId(memory.sha256):'—']]);
     const fault=document.getElementById('campaign-fault');
     fault.hidden=!currentFault;
-    fault.innerHTML=currentFault?`<div class="effect bad"><strong>Campaign stopped fail-closed: ${esc(label(campaign.fault_kind||'Unknown fault'))}</strong><p>${esc(campaign.fault_detail||'No failure detail was persisted.')}</p><div class="meta">No additional Director action or exact verification was started after this fault.</div></div>`:'';
-    assessment.innerHTML=`<div class="effect"><strong>Current assessment</strong><p>${esc(campaign.assessment?.campaign_assessment||'No Director assessment yet.')}</p></div>`;
+    replaceHtmlPreservingSelection(fault,currentFault?`<div class="effect bad"><strong>Campaign stopped fail-closed: ${esc(label(campaign.fault_kind||'Unknown fault'))}</strong><p>${esc(campaign.fault_detail||'No failure detail was persisted.')}</p><div class="meta">No additional Director action or exact verification was started after this fault.</div></div>`:'');
+    replaceHtmlPreservingSelection(assessment,`<div class="effect"><strong>Current assessment</strong><p>${esc(campaign.assessment?.campaign_assessment||'No Director assessment yet.')}</p></div>`);
     boundedList('hypotheses',campaign.hypotheses||[],h=>`<article class="card"><div class="card-head"><div><div class="chips">${badge(h.status)}<span class="chip">Confidence ${(100*Number(h.confidence||0)).toFixed(0)}%</span></div><h3>${idText(h.hypothesis_id)}</h3></div><span class="meta">${esc(h.created_at)} · ${copyButton(h.hypothesis_id)}</span></div><p class="clamp">${esc(h.statement)}</p></article>`);
     boundedList('actions',campaign.actions||[],actionCard);
     boundedList('lanes-list',campaign.lanes||[],laneCard);
     boundedList('revisions',campaign.revisions||[],r=>`<article class="card"><div class="card-head"><div><h3>${idText(r.lane_id)}</h3><span class="meta">Version ${esc(r.old_lane_version)} → ${esc(r.new_lane_version)} · ${esc(r.applied_at)} · ${copyButton(r.lane_id)}</span></div>${badge(r.action_id?'Director action':'Recovery')}</div>${semantic({before:r.old_parameters,after:r.new_parameters})}${technical('Revision record',r,`revision:${r.lane_id}:${r.new_lane_version}`)}</article>`);
-    turns.innerHTML=turnsView(campaign.turns||[]);
+    replaceHtmlPreservingSelection(turns,turnsView(campaign.turns||[]));
     for(const details of turns.querySelectorAll('details[data-turn-communication][open]'))loadTurnCommunication(details,viewAnchor);
     metrics('metrics',[['Status',state.status],['Run',shortId(state.run_id||'—')],['Target',state.target||'—'],['Order',state.configuration?.order??'—'],['Algorithm',label(state.configuration?.algorithm||'—')],['Seed',state.configuration?.seed??'—'],['Elapsed',`${Number(state.elapsed_seconds||0).toFixed(1)} s`],['Candidates / s',Number(state.throughput?.candidates_per_second||0).toFixed(1)],['Candidates',fmt(state.throughput?.candidates||0)],['Workers',`${state.workers?.alive??0} / ${state.workers?.configured??0}`],['Aggregate RSS',`${((state.resources?.aggregate_rss_bytes||0)/1048576).toFixed(1)} MiB`],['Exact queue',state.exact_verification?.queued??0],['Verified candidates',state.exact_verification?.verified_candidates??0],['Best score',JSON.stringify(state.best?.score?.ordering_key||[])]]);
     boundedList('logs',logs.lines||[],eventLine);
     boundedList('candidates-list',campaignMode?(campaign.candidates||[]):(candidates.candidates||[]),candidateCard);
-    document.getElementById('runs').innerHTML=compactTable((runs.runs||[]).slice(0,20),[['Run',r=>id(r.run_id)],['Created',r=>esc(r.created_at)],['Target',r=>esc(r.target)],['Configuration',r=>`${esc(r.parameters?.order??'—')} · ${esc(label(r.parameters?.algorithm||'—'))}`],['Status',r=>badge(r.live_status)],['Candidates',r=>fmt(r.candidates??0)],['Throughput',r=>`${Number(r.candidates_per_second||0).toFixed(1)}/s`],['Best score',r=>esc(JSON.stringify(r.best_score||[]))]]);
+    replaceHtmlPreservingSelection('runs',compactTable((runs.runs||[]).slice(0,20),[['Run',r=>id(r.run_id)],['Created',r=>esc(r.created_at)],['Target',r=>esc(r.target)],['Configuration',r=>`${esc(r.parameters?.order??'—')} · ${esc(label(r.parameters?.algorithm||'—'))}`],['Status',r=>badge(r.live_status)],['Candidates',r=>fmt(r.candidates??0)],['Throughput',r=>`${Number(r.candidates_per_second||0).toFixed(1)}/s`],['Best score',r=>esc(JSON.stringify(r.best_score||[]))]]));
     requestAnimationFrame(()=>restoreRefreshView(viewAnchor));
   }catch(error){notice.textContent=error.message}
 }

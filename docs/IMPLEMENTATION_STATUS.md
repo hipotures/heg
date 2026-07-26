@@ -2,6 +2,21 @@
 
 Last implementation audit: **2026-07-26**.
 
+## Selection-safe dashboard refresh
+
+Periodic dashboard and live-frontier refresh no longer replaces the specific
+DOM container intersecting an active text selection. A selection that crosses
+a polling boundary therefore remains available for copying while polling,
+unrelated telemetry, and the live graph drawing continue normally. The
+selected container catches up after the selection is cleared. The change is
+browser-only and does not alter campaign execution, scoring, persistence, or
+API payloads.
+
+Each of the six live-frontier inspector metric cards also supports independent
+single-click copy with card-local confirmation. Clipboard text includes the
+card label and value exactly as displayed, including an abbreviated graph
+hash.
+
 ## Aggregate live-frontier throughput
 
 The live-frontier inspector now labels throughput as a campaign aggregate and
