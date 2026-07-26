@@ -19,6 +19,7 @@ from sglab.research.continuity import (
 from sglab.research.campaign import campaign_status
 from sglab.research.providers import SyntheticControlProvider
 from sglab.research.resume import build_resume_preview
+from sglab.research.snapshot import _exact_verifier_continuity_fact
 from sglab.research.store import ResearchStore
 from sglab.research.validation import DecisionContext
 
@@ -449,6 +450,84 @@ class CampaignContinuityTests(unittest.TestCase):
         impossible["exact_verifier"] = {"certificate": "z" * 20_000}
         with self.assertRaises(ScientificStateOverflow):
             compactor.project(impossible)
+
+    def test_continuity_merge_does_not_regrow_bounded_ledgers(self) -> None:
+        compactor = ScientificMemoryCompactor(ScientificMemoryPolicy())
+        current = self._memory_state()
+        previous = self._memory_state()
+        current["continuity"] = {
+            "exact_verifier_outcomes": [
+                {
+                    "candidate_id": f"candidate-{index:02d}",
+                    "state": "completed",
+                    "certification_status": "INVALID_CANDIDATE",
+                }
+                for index in range(10, 42)
+            ],
+        }
+        previous["continuity"] = {
+            "exact_verifier_outcomes": [
+                {
+                    "candidate_id": f"candidate-{index:02d}",
+                    "state": "completed",
+                    "certification_status": "INVALID_CANDIDATE",
+                }
+                for index in range(36)
+            ],
+        }
+
+        projected = compactor.project(current, previous=previous)
+        outcomes = projected["continuity"]["exact_verifier_outcomes"]
+
+        self.assertEqual(len(outcomes), 32)
+        self.assertEqual(
+            [item["candidate_id"] for item in outcomes],
+            [f"candidate-{index:02d}" for index in range(10, 42)],
+        )
+        self.assertTrue(
+            all(
+                item["certification_status"] == "INVALID_CANDIDATE"
+                for item in outcomes
+            )
+        )
+
+    def test_exact_verifier_continuity_fact_omits_durable_artifact_path(
+        self,
+    ) -> None:
+        completed = _exact_verifier_continuity_fact(
+            {
+                "candidate_id": "candidate-1",
+                "state": "completed",
+                "certification_status": "INVALID_CANDIDATE",
+                "certification_artifact_ref": (
+                    "verifications/job-1/manifest.json"
+                ),
+            }
+        )
+        unknown = _exact_verifier_continuity_fact(
+            {
+                "candidate_id": "candidate-2",
+                "state": "unknown",
+                "certification_status": None,
+                "certification_artifact_ref": None,
+            }
+        )
+
+        self.assertEqual(
+            completed,
+            {
+                "candidate_id": "candidate-1",
+                "certification_status": "INVALID_CANDIDATE",
+            },
+        )
+        self.assertEqual(
+            unknown,
+            {
+                "candidate_id": "candidate-2",
+                "certification_status": None,
+                "state": "unknown",
+            },
+        )
 
     def test_real_shape_resume_preview_has_no_side_effects(self) -> None:
         root = Path("workspace/first-real-graph-campaign-01")

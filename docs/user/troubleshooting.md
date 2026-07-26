@@ -60,6 +60,10 @@ dropping non-droppable exact facts or current executable IDs. No model turn was
 started.
 
 Inspect the latest scientific-memory snapshot and source counts.
+If the projection grows after every Resume despite bounded source queries,
+upgrade to a build that preserves continuity-ledger limits during snapshot
+merges. Older exact-verifier outcomes remain in SQLite and artifacts rather
+than being re-appended to every Director request.
 
 ## `DirectorContextBudgetExceeded`
 

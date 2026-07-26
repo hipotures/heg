@@ -2,6 +2,19 @@
 
 Last implementation audit: **2026-07-26**.
 
+## Bounded continuity ledgers across Resume
+
+Scientific-memory merge now preserves the same fixed windows used by snapshot
+construction: 32 exact-verifier outcomes, 64 hypotheses, candidates, and
+lane/checkpoint entries, and four validation-feedback entries. Previously,
+each merge appended older unique entries after the bounded current window, so
+the exact-verifier ledger grew from 32 to 36 and then 41 entries and caused a
+33,197-byte `ScientificStateOverflow`. Full rows and verifier artifacts remain
+durable; only the model-facing projection is bounded. Repeated verifier
+manifest paths and lane checkpoint paths/hashes are also omitted from the
+projection while their logical IDs and exact results remain present, providing
+headroom below the hard limit.
+
 ## Zero current throughput outside running state
 
 The live-frontier aggregate and per-lane cards now show `0/s` whenever the

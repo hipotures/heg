@@ -57,6 +57,15 @@ reduction has had an opportunity to remove bounded historical detail.
 Section-specific ancestry and outcome limits are applied before that reduction.
 The final submitted state is then rebuilt from the reduced projection and
 checked again before registries, prompt material, or inference are created.
+Continuity ledgers remain fixed windows across snapshot merges: 32 latest
+exact-verifier outcomes, 64 hypotheses, candidates, and lane/checkpoint
+entries, and four validation-feedback entries. A merge fills missing entries
+from the prior snapshot only within those bounds; it never regrows a window.
+Model-facing completed verifier facts contain the candidate ID and exact
+certification result; unknown/failed facts also retain their state. Lane
+checkpoint facts use logical checkpoint IDs. Filesystem references, verifier
+manifests, and checkpoint hashes remain in durable storage rather than being
+repeated in every Director request.
 
 ## High-water marks
 

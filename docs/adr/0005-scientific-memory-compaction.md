@@ -18,6 +18,14 @@ budget/Resume.
 
 No separate LLM call is required for compaction.
 
+Bounded continuity ledgers keep their source-window limits when merged with a
+previous snapshot. Current entries take precedence and older entries fill only
+unused capacity. In particular, the exact-verifier window contains the latest
+32 outcomes; full older outcomes remain in SQLite and verifier artifacts.
+The projection represents completed verifier facts by candidate ID and exact
+result, and lane checkpoints by logical checkpoint ID. Durable artifact paths
+and integrity hashes are not repeated in model context.
+
 ## Consequences
 
 - Full raw history remains available.

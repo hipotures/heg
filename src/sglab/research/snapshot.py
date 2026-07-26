@@ -471,14 +471,7 @@ class SnapshotBuilder:
             (self.campaign_id,),
         ).fetchone()
         verifier = [
-            {
-                "candidate_id": row["candidate_id"],
-                "state": row["state"],
-                "certification_status": row["certification_status"],
-                "certification_artifact_ref": row[
-                    "certification_artifact_ref"
-                ],
-            }
+            _exact_verifier_continuity_fact(row)
             for row in self.store.connection.execute(
                 """
                 SELECT candidate_id, state, certification_status,
@@ -516,8 +509,9 @@ class SnapshotBuilder:
                 "algorithm": row["algorithm"],
                 "graph_family": row["graph_family"],
                 "parameters": json.loads(row["current_parameters_json"]),
-                "checkpoint_ref": row["checkpoint_ref"],
-                "checkpoint_sha256": row["checkpoint_sha256"],
+                "checkpoint_id": _checkpoint_id_from_ref(
+                    row["checkpoint_ref"]
+                ),
                 "telemetry_high_water": int(
                     row["telemetry_high_water"] or 0
                 ),
@@ -757,6 +751,17 @@ def _checkpoint_id_from_ref(value: Any) -> str | None:
     if not value:
         return None
     return Path(str(value)).stem
+
+
+def _exact_verifier_continuity_fact(row: Any) -> dict[str, Any]:
+    status = row["certification_status"]
+    fact = {
+        "candidate_id": row["candidate_id"],
+        "certification_status": status,
+    }
+    if status is None:
+        fact["state"] = row["state"]
+    return fact
 
 
 def _compact_observed_effect(

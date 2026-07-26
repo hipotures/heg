@@ -15,6 +15,13 @@ from .protocol import canonical_json
 DEFAULT_SCIENTIFIC_STATE_SOFT_BYTES = 24_576
 DEFAULT_SCIENTIFIC_STATE_HARD_BYTES = 32_768
 DEFAULT_SCIENTIFIC_SNAPSHOT_INTERVAL = 5
+CONTINUITY_LEDGER_LIMITS = {
+    "hypothesis_ledger": 64,
+    "exact_verifier_outcomes": 32,
+    "candidate_ledger": 64,
+    "lane_and_checkpoint_ledger": 64,
+    "validation_feedback": 4,
+}
 RESUMABLE_CAMPAIGN_STATES = frozenset(
     {
         "paused_by_operator",
@@ -239,7 +246,7 @@ class ScientificMemoryCompactor:
                 if identity and identity not in seen:
                     seen.add(identity)
                     merged.append(item)
-            current[key] = merged
+            current[key] = merged[:CONTINUITY_LEDGER_LIMITS[key]]
         current["current_executable_candidate_ids"] = sorted(
             {
                 str(item)
