@@ -5,7 +5,12 @@ from random import Random
 import unittest
 
 from sglab.model import find_cycles_of_length_bounded
-from sglab.research.lanes import LaneSpec, run_bounded_lane_batch
+from sglab.research.lanes import (
+    LaneSpec,
+    _LaneKernel,
+    _NeverStop,
+    run_bounded_lane_batch,
+)
 from sglab.targets import TARGETS
 
 
@@ -28,7 +33,117 @@ def _spec(*, evaluations: int = 1_000) -> LaneSpec:
     )
 
 
+def _random_restart_spec(*, evaluations: int = 400) -> LaneSpec:
+    return LaneSpec(
+        lane_id="lane-independent-samples",
+        campaign_id="diagnostic-tests",
+        target="erdos_gyarfas",
+        algorithm="random_restart",
+        graph_family="connected_cubic",
+        seed=29,
+        parameters={
+            "order": 16,
+            "batch_candidates": evaluations,
+            "witness_cap": 16,
+        },
+        resource_share=1.0,
+        seed_lineage=(29,),
+    )
+
+
 class SearchDiagnosticsTests(unittest.TestCase):
+    def test_random_restart_uses_independent_sample_provenance(self) -> None:
+        optimized = run_bounded_lane_batch(
+            _random_restart_spec(),
+            max_evaluations=400,
+            max_wall_seconds=10,
+            independent_sample_provenance=True,
+        )
+        legacy = run_bounded_lane_batch(
+            _random_restart_spec(),
+            max_evaluations=400,
+            max_wall_seconds=10,
+            independent_sample_provenance=False,
+        )
+        self.assertEqual(
+            optimized["best_graph6"], legacy["best_graph6"]
+        )
+        self.assertEqual(
+            optimized["best_score"], legacy["best_score"]
+        )
+        self.assertEqual(
+            optimized["score_trajectory_summary"],
+            legacy["score_trajectory_summary"],
+        )
+        self.assertEqual(
+            optimized["checkpoint"]["rng_state"],
+            legacy["checkpoint"]["rng_state"],
+        )
+        self.assertEqual(
+            optimized["mutation_ancestry"][
+                "global_record_improvements"
+            ],
+            [],
+        )
+        provenance = optimized["candidate_provenance"]
+        self.assertEqual(
+            provenance["provenance_kind"], "independent_sample"
+        )
+        self.assertEqual(provenance["seed_lineage"], [29])
+        self.assertGreater(provenance["evaluation_index"], 0)
+        self.assertEqual(
+            optimized["checkpoint"]["current_provenance"][
+                "provenance_kind"
+            ],
+            "independent_sample",
+        )
+
+    def test_independent_sample_checkpoint_resume_continuation_is_exact(
+        self,
+    ) -> None:
+        spec = _random_restart_spec(evaluations=200)
+        original = _LaneKernel(spec, None, None)
+        try:
+            initial = original.checkpoint(0)
+            original.run_batch(
+                _NeverStop(),
+                max_evaluations=200,
+                source_checkpoint_id=initial["checkpoint_id"],
+            )
+            midpoint = original.checkpoint(0)
+            original.run_batch(
+                _NeverStop(),
+                max_evaluations=200,
+                source_checkpoint_id=midpoint["checkpoint_id"],
+            )
+            expected = original.checkpoint(0)
+        finally:
+            original.close()
+        restored = _LaneKernel(spec, midpoint, None)
+        try:
+            restored.run_batch(
+                _NeverStop(),
+                max_evaluations=200,
+                source_checkpoint_id=midpoint["checkpoint_id"],
+            )
+            actual = restored.checkpoint(0)
+        finally:
+            restored.close()
+        for field in (
+            "graph6",
+            "score",
+            "best_graph6",
+            "best_score",
+            "rng_state",
+            "algorithm_evaluated",
+            "high_water",
+            "current_candidate_id",
+            "best_candidate_id",
+            "current_provenance",
+            "best_provenance",
+        ):
+            self.assertEqual(actual[field], expected[field], field)
+
     def test_ancestry_is_bounded_and_parent_child_ids_correlate(self) -> None:
         result = run_bounded_lane_batch(
             _spec(),

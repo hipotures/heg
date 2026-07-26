@@ -5,7 +5,7 @@ from typing import Any, Iterable
 import json
 import sqlite3
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 MAX_METRIC_ROWS = 100_000
 
 BASE_SCHEMA_SQL = """
@@ -211,6 +211,7 @@ CREATE TABLE IF NOT EXISTS campaign_candidates (
     graph6 TEXT NOT NULL,
     graph_sha256 TEXT NOT NULL,
     score_json TEXT NOT NULL,
+    provenance_json TEXT NOT NULL DEFAULT '{}',
     state TEXT NOT NULL,
     artifact_ref TEXT NOT NULL,
     artifact_sha256 TEXT NOT NULL,
@@ -955,6 +956,7 @@ CREATE TABLE IF NOT EXISTS campaign_candidate_snapshots (
     graph_sha256 TEXT NOT NULL,
     artifact_sha256 TEXT NOT NULL,
     score_json TEXT NOT NULL,
+    provenance_json TEXT NOT NULL DEFAULT '{}',
     score_semantics TEXT NOT NULL,
     lane_id TEXT NOT NULL,
     lane_version INTEGER NOT NULL,
@@ -989,7 +991,7 @@ CREATE TABLE IF NOT EXISTS campaign_candidate_pins (
 CREATE INDEX IF NOT EXISTS idx_campaign_candidate_pins_active
     ON campaign_candidate_pins(campaign_id, candidate_id, state);
 
-PRAGMA user_version=15;
+PRAGMA user_version=16;
 """
 
 
@@ -1032,6 +1034,7 @@ def migrate(connection: sqlite3.Connection) -> None:
     _ensure_comparison_resource_schema(connection)
     _ensure_comparison_arm_policy_schema(connection)
     _ensure_campaign_continuity_schema(connection)
+    _ensure_candidate_provenance_schema(connection)
 
 
 def _ensure_m6_lane_columns(connection: sqlite3.Connection) -> None:
@@ -1459,6 +1462,34 @@ def _ensure_campaign_continuity_schema(
                     f"ALTER TABLE {table} ADD COLUMN {name} {definition}"
                 )
     connection.execute("PRAGMA user_version=15")
+    connection.commit()
+
+
+def _ensure_candidate_provenance_schema(
+    connection: sqlite3.Connection,
+) -> None:
+    for table in (
+        "campaign_candidates",
+        "campaign_candidate_snapshots",
+    ):
+        exists = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (table,),
+        ).fetchone()
+        if exists is None:
+            continue
+        present = {
+            str(row[1])
+            for row in connection.execute(f"PRAGMA table_info({table})")
+        }
+        if "provenance_json" not in present:
+            connection.execute(
+                f"""
+                ALTER TABLE {table}
+                ADD COLUMN provenance_json TEXT NOT NULL DEFAULT '{{}}'
+                """
+            )
+    connection.execute("PRAGMA user_version=16")
     connection.commit()
 
 

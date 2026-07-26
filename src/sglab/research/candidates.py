@@ -36,6 +36,18 @@ class CandidateArchive:
         if graph.to_graph6() != graph6:
             raise ValueError("candidate graph6 is not canonical")
         graph_sha256 = hashlib.sha256(graph6.encode("ascii")).hexdigest()
+        raw_provenance = event.get("provenance")
+        provenance = (
+            dict(raw_provenance)
+            if isinstance(raw_provenance, dict)
+            else {}
+        )
+        provenance_graph_sha256 = provenance.get("graph_sha256")
+        if (
+            provenance_graph_sha256 is not None
+            and provenance_graph_sha256 != graph_sha256
+        ):
+            raise ValueError("candidate provenance graph hash mismatch")
         identity = hashlib.sha256(
             f"{self.campaign_id}:{graph_sha256}".encode("ascii")
         ).hexdigest()
@@ -55,6 +67,7 @@ class CandidateArchive:
             score=dict(event["score"]),
             artifact_ref=str(relative),
             artifact_sha256=artifact_sha256,
+            provenance=provenance,
         )
         if inserted:
             self._prune()
@@ -91,6 +104,12 @@ class CandidateArchive:
                 "checkpoint_id": checkpoint["checkpoint_id"],
                 "graph6": graph6,
                 "score": score,
+                "provenance": {
+                    **dict(checkpoint.get("best_provenance") or {}),
+                    "retaining_checkpoint_id": checkpoint[
+                        "checkpoint_id"
+                    ],
+                },
             }
         )
 

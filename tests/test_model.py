@@ -148,6 +148,27 @@ class BitGraphTests(unittest.TestCase):
         restored = BitGraph.from_graph6(graph.to_graph6())
         self.assertEqual(graph.stable_hash(), restored.stable_hash())
 
+    def test_graph6_reusable_buffer_matches_canonical_encoding(self) -> None:
+        buffer = bytearray(b"stale")
+        rng = Random(20260726)
+        for n in (0, 1, 6, 62, 63, 96, 128):
+            graph = BitGraph.from_edges(
+                n,
+                (
+                    (u, v)
+                    for u in range(n)
+                    for v in range(u + 1, n)
+                    if rng.random() < 0.08
+                ),
+            )
+            expected = graph.to_graph6().encode("ascii")
+            graph.encode_graph6_into(buffer)
+            self.assertEqual(bytes(buffer), expected)
+            self.assertEqual(
+                graph.stable_hash(buffer),
+                graph.stable_hash(),
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

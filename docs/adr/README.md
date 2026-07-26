@@ -13,6 +13,7 @@ ADRs explain durable architectural decisions and their consequences.
 | [0007](0007-sqlite-single-writer.md) | Workspace SQLite uses a single authoritative writer |
 | [0008](0008-fail-closed-runtime.md) | Runtime failures preserve evidence and stop safely |
 | [0009](0009-persistent-heuristic-score-worker.md) | Heuristic cycle counting may use a persistent audited C++ worker |
+| [0010](0010-versioned-duplicate-keys-and-independent-provenance.md) | Duplicate keys are checkpoint-versioned and random restart uses independent provenance |
 
 ADRs are not implementation reports. They describe why the current design was
 chosen.

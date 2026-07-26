@@ -55,8 +55,14 @@ TIMING_COUNTER_NAMES = (
 LIVE_FRONTIER_INTERVAL_SECONDS = 1.0
 LIVE_FRONTIER_PAYLOAD_LIMIT_BYTES = 64 * 1024
 SCORE_BACKENDS = frozenset({"python", "shadow", "cpp"})
-LEGACY_GRAPH_KEY_SCHEME = "sha256_graph6_v1"
-FAST_GRAPH_KEY_SCHEME = "zobrist256_v1"
+LEGACY_GRAPH_KEY_SCHEME = "legacy_sha_graph6_v1"
+FAST_GRAPH_KEY_SCHEME = "delta_local_v2"
+_LEGACY_GRAPH_KEY_ALIAS = "sha256_graph6_v1"
+_FAST_GRAPH_KEY_ALIAS = "zobrist256_v1"
+PROVENANCE_SCHEMA_VERSION = 2
+MUTATION_CHAIN_PROVENANCE = "mutation_chain"
+INDEPENDENT_SAMPLE_PROVENANCE = "independent_sample"
+GENERATOR_VERSION = "erdos_gyarfas.generate_seed_v1"
 _UINT64_MASK = (1 << 64) - 1
 
 
@@ -99,6 +105,23 @@ def _zobrist_update_key(
         u, v = sorted(edge)
         value ^= _zobrist_token((u << 32) | v)
     return f"{value:064x}"
+
+
+def _normalize_duplicate_key_scheme(value: object) -> str:
+    scheme = str(value)
+    if scheme in {LEGACY_GRAPH_KEY_SCHEME, _LEGACY_GRAPH_KEY_ALIAS}:
+        return LEGACY_GRAPH_KEY_SCHEME
+    if scheme in {FAST_GRAPH_KEY_SCHEME, _FAST_GRAPH_KEY_ALIAS}:
+        return FAST_GRAPH_KEY_SCHEME
+    raise ValueError(f"unsupported duplicate key scheme: {scheme}")
+
+
+def _duplicate_key_compatibility_alias(scheme: str) -> str:
+    return (
+        _FAST_GRAPH_KEY_ALIAS
+        if scheme == FAST_GRAPH_KEY_SCHEME
+        else _LEGACY_GRAPH_KEY_ALIAS
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,12 +227,19 @@ class _LaneKernel:
         score_profiling_enabled: bool = True,
         score_worker_memory_bytes: int = DEFAULT_WORKER_MEMORY_BYTES,
         score_worker_enabled: bool = True,
+        optimized_legacy_key: bool = True,
+        independent_sample_provenance: bool = True,
     ):
         self.spec = spec
         self.plugin = TARGETS[spec.target]
         self.parameters = dict(spec.parameters)
         self.mode = GRAPH_FAMILIES[spec.graph_family]
         self.instrumentation_enabled = instrumentation_enabled
+        self.optimized_legacy_key = optimized_legacy_key
+        self.independent_sample_provenance = (
+            independent_sample_provenance
+        )
+        self.graph6_workspace = bytearray()
         self.score_profiling_enabled = (
             instrumentation_enabled and score_profiling_enabled
         )
@@ -303,8 +333,13 @@ class _LaneKernel:
             maxlen=ANCESTRY_LIMIT
         )
         self.best_ancestry: list[dict[str, Any]] = []
-        self.current_candidate_id = ""
+        self.current_candidate_id: str | None = None
         self.best_candidate_id = ""
+        self.current_provenance: dict[str, Any] | None = None
+        self.best_provenance: dict[str, Any] | None = None
+        self.current_evaluation_index = 0
+        self.best_evaluation_index = 0
+        self.batch_source_checkpoint_id: str | None = None
         self.rng = Random(spec.seed)
         self.algorithm_evaluated = 0
         self.stagnation = 0
@@ -315,21 +350,25 @@ class _LaneKernel:
         self.actual_restarts = 0
         self.recent_hashes: deque[str] = deque(maxlen=4096)
         self.recent_hash_set: set[str] = set()
-        checkpoint_key_scheme = (
-            str(checkpoint.get("tabu_key_scheme"))
-            if checkpoint is not None
-            and checkpoint.get("tabu_key_scheme") is not None
-            else LEGACY_GRAPH_KEY_SCHEME
-        )
-        self.tabu_key_scheme = (
-            FAST_GRAPH_KEY_SCHEME
-            if self.fast_duplicate_key_enabled
-            and (
-                checkpoint is None
-                or fork_seed is not None
-                or self.algorithm == "random_restart"
+        checkpoint_key_scheme = LEGACY_GRAPH_KEY_SCHEME
+        if checkpoint is not None:
+            raw_scheme = checkpoint.get(
+                "duplicate_key_scheme",
+                checkpoint.get(
+                    "tabu_key_scheme", _LEGACY_GRAPH_KEY_ALIAS
+                ),
             )
-            else checkpoint_key_scheme
+            checkpoint_key_scheme = _normalize_duplicate_key_scheme(
+                raw_scheme
+            )
+        self.tabu_key_scheme = (
+            checkpoint_key_scheme
+            if checkpoint is not None
+            else (
+                FAST_GRAPH_KEY_SCHEME
+                if self.fast_duplicate_key_enabled
+                else LEGACY_GRAPH_KEY_SCHEME
+            )
         )
         if checkpoint is None:
             self._new_seed(spec.seed)
@@ -374,16 +413,43 @@ class _LaneKernel:
                 dict(value)
                 for value in checkpoint.get("best_ancestry", [])
             ][-ANCESTRY_LIMIT:]
-            self.current_candidate_id = str(
-                checkpoint.get(
-                    "current_candidate_id",
-                    _candidate_id(self.spec.campaign_id, self.graph),
+            restored_current_id = checkpoint.get("current_candidate_id")
+            self.current_candidate_id = (
+                str(restored_current_id)
+                if restored_current_id is not None
+                else (
+                    None
+                    if self.algorithm == "random_restart"
+                    and self.independent_sample_provenance
+                    else self._candidate_id(self.graph)
                 )
             )
             self.best_candidate_id = str(
                 checkpoint.get(
                     "best_candidate_id",
-                    _candidate_id(self.spec.campaign_id, self.best_graph),
+                    self._candidate_id(self.best_graph),
+                )
+            )
+            current_provenance = checkpoint.get("current_provenance")
+            best_provenance = checkpoint.get("best_provenance")
+            self.current_provenance = (
+                dict(current_provenance)
+                if isinstance(current_provenance, dict)
+                else None
+            )
+            self.best_provenance = (
+                dict(best_provenance)
+                if isinstance(best_provenance, dict)
+                else None
+            )
+            self.current_evaluation_index = int(
+                checkpoint.get(
+                    "current_evaluation_index", self.high_water
+                )
+            )
+            self.best_evaluation_index = int(
+                checkpoint.get(
+                    "best_evaluation_index", self.high_water
                 )
             )
         self.live_frontier_state = (
@@ -407,10 +473,13 @@ class _LaneKernel:
         self.score = self._score(self.graph)
         self.best_graph = self.graph
         self.best_score = self.score
-        self.current_candidate_id = _candidate_id(
-            self.spec.campaign_id, self.graph
-        )
+        self.current_candidate_id = self._candidate_id(self.graph)
         self.best_candidate_id = self.current_candidate_id
+        self.current_provenance = None
+        self.best_provenance = None
+        self.current_evaluation_index = 0
+        self.best_evaluation_index = 0
+        self.batch_source_checkpoint_id = None
         self.accepted_ancestry.clear()
         self.best_ancestry = []
         self.algorithm_evaluated = 0
@@ -434,10 +503,10 @@ class _LaneKernel:
         self, checkpoint: dict[str, Any], seed: int
     ) -> None:
         self.graph = BitGraph.from_graph6(str(checkpoint["graph6"]))
-        self.tabu_key_scheme = str(
-            checkpoint.get(
-                "tabu_key_scheme", LEGACY_GRAPH_KEY_SCHEME
-            )
+        self.tabu_key_scheme = (
+            FAST_GRAPH_KEY_SCHEME
+            if self.fast_duplicate_key_enabled
+            else LEGACY_GRAPH_KEY_SCHEME
         )
         self.current_graph_key = self._full_search_key(self.graph)
         self.score = _score_from_payload(checkpoint["score"])
@@ -457,18 +526,23 @@ class _LaneKernel:
         self.best_ancestry = [
             dict(value) for value in checkpoint.get("best_ancestry", [])
         ][-ANCESTRY_LIMIT:]
-        self.current_candidate_id = str(
-            checkpoint.get(
-                "current_candidate_id",
-                _candidate_id(self.spec.campaign_id, self.graph),
-            )
+        restored_current_id = checkpoint.get("current_candidate_id")
+        self.current_candidate_id = (
+            str(restored_current_id)
+            if restored_current_id is not None
+            else self._candidate_id(self.graph)
         )
         self.best_candidate_id = str(
             checkpoint.get(
                 "best_candidate_id",
-                _candidate_id(self.spec.campaign_id, self.best_graph),
+                self._candidate_id(self.best_graph),
             )
         )
+        self.current_provenance = None
+        self.best_provenance = None
+        self.current_evaluation_index = 0
+        self.best_evaluation_index = 0
+        self.batch_source_checkpoint_id = None
         self.rng = Random(seed)
         self.algorithm_evaluated = 0
         self.stagnation = 0
@@ -498,6 +572,7 @@ class _LaneKernel:
         *,
         max_evaluations: int | None = None,
         max_wall_seconds: float | None = None,
+        source_checkpoint_id: str | None = None,
     ) -> dict[str, Any]:
         target = min(
             int(self.parameters["batch_candidates"]),
@@ -509,6 +584,7 @@ class _LaneKernel:
             raise ValueError("batch evaluation limit must be positive")
         if max_wall_seconds is not None and max_wall_seconds <= 0:
             raise ValueError("batch wall limit must be positive")
+        self.batch_source_checkpoint_id = source_checkpoint_id
         if self.timing_ns is not None:
             for name in self.timing_ns:
                 self.timing_ns[name] = 0
@@ -665,19 +741,33 @@ class _LaneKernel:
                     time.perf_counter_ns() - tabu_started
                 )
             mutation_record: dict[str, Any] | None = None
-            if self.instrumentation_enabled and (accept or global_record):
+            build_mutation_chain = not (
+                self.algorithm == "random_restart"
+                and self.independent_sample_provenance
+            )
+            if (
+                self.instrumentation_enabled
+                and build_mutation_chain
+                and (accept or global_record)
+            ):
                 ancestry_started = time.perf_counter_ns()
                 mutation_record = _mutation_record(
                     campaign_id=self.spec.campaign_id,
                     parent=self.graph,
                     child=candidate,
-                    parent_candidate_id=self.current_candidate_id,
+                    parent_candidate_id=str(self.current_candidate_id),
                     score_before=self.score,
                     score_after=candidate_score,
                     evaluation=evaluated,
                     accepted=accept,
                     global_record=global_record,
                     mutation_operator=mutation_operator,
+                    child_graph_sha256=(
+                        key
+                        if self.tabu_key_scheme
+                        == LEGACY_GRAPH_KEY_SCHEME
+                        else None
+                    ),
                 )
                 if self.timing_ns is not None:
                     self.timing_ns["ancestry_construction"] += (
@@ -689,19 +779,67 @@ class _LaneKernel:
                 self.graph = candidate
                 self.score = candidate_score
                 self.current_graph_key = key
+                self.current_evaluation_index = (
+                    self.high_water + evaluated
+                )
                 if mutation_record is not None:
                     self.accepted_ancestry.append(mutation_record)
                     self.current_candidate_id = str(
                         mutation_record["candidate_id"]
                     )
+                elif (
+                    self.algorithm == "random_restart"
+                    and self.independent_sample_provenance
+                ):
+                    self.current_candidate_id = None
+                    self.current_provenance = None
                 accepted += 1
                 self.total_accepted += 1
             if global_record:
                 self.best_graph = candidate
                 self.best_score = candidate_score
-                self.best_candidate_id = _candidate_id(
-                    self.spec.campaign_id, candidate
-                )
+                self.best_evaluation_index = self.high_water + evaluated
+                if (
+                    self.algorithm == "random_restart"
+                    and self.independent_sample_provenance
+                ):
+                    provenance_started = (
+                        time.perf_counter_ns()
+                        if self.timing_ns is not None
+                        else 0
+                    )
+                    graph_sha256 = self._graph_sha256(candidate)
+                    self.best_candidate_id = (
+                        _candidate_id_from_graph_sha256(
+                            self.spec.campaign_id, graph_sha256
+                        )
+                    )
+                    self.best_provenance = (
+                        self._independent_sample_provenance(
+                            graph_sha256=graph_sha256,
+                            score=candidate_score,
+                            evaluation_index=self.high_water + evaluated,
+                            record_status="global_record",
+                        )
+                    )
+                    if accept:
+                        self.current_candidate_id = self.best_candidate_id
+                        self.current_provenance = dict(
+                            self.best_provenance
+                        )
+                    if self.timing_ns is not None:
+                        self.timing_ns[
+                            "ancestry_construction"
+                        ] += (
+                            time.perf_counter_ns()
+                            - provenance_started
+                        )
+                elif mutation_record is not None:
+                    self.best_candidate_id = str(
+                        mutation_record["candidate_id"]
+                    )
+                else:
+                    self.best_candidate_id = self._candidate_id(candidate)
                 if mutation_record is not None:
                     if accept:
                         self.best_ancestry = list(self.accepted_ancestry)
@@ -732,7 +870,7 @@ class _LaneKernel:
                 (
                     self.current_candidate_id
                     if self.instrumentation_enabled
-                    else _candidate_id(self.spec.campaign_id, self.graph)
+                    else self._candidate_id(self.graph)
                 ),
                 self.high_water + evaluated,
             )
@@ -832,6 +970,11 @@ class _LaneKernel:
                 current_accepted_ancestry=list(self.accepted_ancestry),
                 maximum_evaluations=target,
             ),
+            "candidate_provenance": (
+                dict(self.best_provenance)
+                if self.best_provenance is not None
+                else None
+            ),
             "termination_reason": termination_reason,
             "end_high_water": self.high_water,
             "score_backend": {
@@ -917,7 +1060,7 @@ class _LaneKernel:
     def _full_search_key(self, graph: BitGraph) -> str:
         if self.tabu_key_scheme == FAST_GRAPH_KEY_SCHEME:
             return _zobrist_graph_key(graph)
-        return graph.stable_hash()
+        return self._graph_sha256(graph)
 
     def _candidate_search_key(
         self,
@@ -925,7 +1068,7 @@ class _LaneKernel:
         mutation_delta: Any | None,
     ) -> str:
         if self.tabu_key_scheme != FAST_GRAPH_KEY_SCHEME:
-            return graph.stable_hash()
+            return self._graph_sha256(graph)
         if (
             mutation_delta is not None
             and mutation_delta.graph == graph
@@ -940,6 +1083,65 @@ class _LaneKernel:
                 added_edges=mutation_delta.added_edges,
             )
         return _zobrist_graph_key(graph)
+
+    def _graph_sha256(self, graph: BitGraph) -> str:
+        if self.optimized_legacy_key:
+            return graph.stable_hash(self.graph6_workspace)
+        return _legacy_graph_key_reference(graph)
+
+    def _candidate_id(self, graph: BitGraph) -> str:
+        return _candidate_id_from_graph_sha256(
+            self.spec.campaign_id, self._graph_sha256(graph)
+        )
+
+    def _independent_sample_provenance(
+        self,
+        *,
+        graph_sha256: str,
+        score: ScoreResult,
+        evaluation_index: int,
+        record_status: str,
+    ) -> dict[str, Any]:
+        return {
+            "schema_version": PROVENANCE_SCHEMA_VERSION,
+            "provenance_kind": INDEPENDENT_SAMPLE_PROVENANCE,
+            "lane_id": self.spec.lane_id,
+            "source_checkpoint_id": self.batch_source_checkpoint_id,
+            "retaining_checkpoint_id": None,
+            "seed_lineage": list(
+                self.spec.seed_lineage or (self.spec.seed,)
+            ),
+            "evaluation_index": evaluation_index,
+            "generator_version": GENERATOR_VERSION,
+            "graph_sha256": graph_sha256,
+            "score": _score_payload(score),
+            "record_status": record_status,
+        }
+
+    def retained_best_provenance(
+        self, retaining_checkpoint_id: str
+    ) -> dict[str, Any]:
+        if self.best_provenance is not None:
+            return {
+                **self.best_provenance,
+                "retaining_checkpoint_id": retaining_checkpoint_id,
+            }
+        return {
+            "schema_version": PROVENANCE_SCHEMA_VERSION,
+            "provenance_kind": MUTATION_CHAIN_PROVENANCE,
+            "lane_id": self.spec.lane_id,
+            "source_checkpoint_id": self.batch_source_checkpoint_id,
+            "retaining_checkpoint_id": retaining_checkpoint_id,
+            "seed_lineage": list(
+                self.spec.seed_lineage or (self.spec.seed,)
+            ),
+            "evaluation_index": self.best_evaluation_index,
+            "generator_version": GENERATOR_VERSION,
+            "graph_sha256": self._graph_sha256(self.best_graph),
+            "score": _score_payload(self.best_score),
+            "record_status": "global_record",
+            "mutation_ancestry": list(self.best_ancestry),
+        }
 
     def _remember_hash(self, key: str) -> None:
         if len(self.recent_hashes) == self.recent_hashes.maxlen:
@@ -1150,6 +1352,54 @@ class _LaneKernel:
             self.score_worker = None
 
     def checkpoint(self, lane_version: int) -> dict[str, Any]:
+        current_candidate_id = self.current_candidate_id
+        current_provenance = self.current_provenance
+        best_provenance = self.best_provenance
+        if (
+            self.algorithm == "random_restart"
+            and self.independent_sample_provenance
+        ):
+            current_graph_sha256 = self._graph_sha256(self.graph)
+            current_candidate_id = _candidate_id_from_graph_sha256(
+                self.spec.campaign_id, current_graph_sha256
+            )
+            current_provenance = self._independent_sample_provenance(
+                graph_sha256=current_graph_sha256,
+                score=self.score,
+                evaluation_index=self.current_evaluation_index,
+                record_status="checkpoint_current",
+            )
+            if best_provenance is None:
+                best_graph_sha256 = (
+                    current_graph_sha256
+                    if self.best_graph == self.graph
+                    else self._graph_sha256(self.best_graph)
+                )
+                best_provenance = self._independent_sample_provenance(
+                    graph_sha256=best_graph_sha256,
+                    score=self.best_score,
+                    evaluation_index=self.best_evaluation_index,
+                    record_status="checkpoint_best",
+                )
+        else:
+            if current_candidate_id is None:
+                current_candidate_id = self._candidate_id(self.graph)
+            current_provenance = {
+                "schema_version": PROVENANCE_SCHEMA_VERSION,
+                "provenance_kind": MUTATION_CHAIN_PROVENANCE,
+                "lane_id": self.spec.lane_id,
+                "evaluation_index": self.current_evaluation_index,
+                "candidate_id": current_candidate_id,
+                "ancestry_field": "accepted_ancestry",
+            }
+            best_provenance = {
+                "schema_version": PROVENANCE_SCHEMA_VERSION,
+                "provenance_kind": MUTATION_CHAIN_PROVENANCE,
+                "lane_id": self.spec.lane_id,
+                "evaluation_index": self.best_evaluation_index,
+                "candidate_id": self.best_candidate_id,
+                "ancestry_field": "best_ancestry",
+            }
         payload = {
             "lane_id": self.spec.lane_id,
             "lane_version": lane_version,
@@ -1161,21 +1411,24 @@ class _LaneKernel:
             "algorithm_evaluated": self.algorithm_evaluated,
             "stagnation": self.stagnation,
             "tabu": list(self.tabu),
-            "tabu_key_scheme": self.tabu_key_scheme,
+            "duplicate_key_scheme": self.tabu_key_scheme,
+            "tabu_key_scheme": _duplicate_key_compatibility_alias(
+                self.tabu_key_scheme
+            ),
             "parameters": dict(self.parameters),
             "high_water": self.high_water,
             "accepted_ancestry": list(self.accepted_ancestry),
             "best_ancestry": list(self.best_ancestry),
-            "current_candidate_id": (
-                self.current_candidate_id
-                if self.instrumentation_enabled
-                else _candidate_id(self.spec.campaign_id, self.graph)
-            ),
+            "current_candidate_id": current_candidate_id,
             "best_candidate_id": (
                 self.best_candidate_id
                 if self.instrumentation_enabled
-                else _candidate_id(self.spec.campaign_id, self.best_graph)
+                else self._candidate_id(self.best_graph)
             ),
+            "current_evaluation_index": self.current_evaluation_index,
+            "best_evaluation_index": self.best_evaluation_index,
+            "current_provenance": current_provenance,
+            "best_provenance": best_provenance,
         }
         digest = hashlib.sha256(
             canonical_json(payload, max_bytes=1024 * 1024)
@@ -1189,7 +1442,7 @@ def _live_frontier_payload(
     lane_version: int,
     graph: BitGraph,
     score: ScoreResult,
-    candidate_id: str,
+    candidate_id: str | None,
     high_water: int,
 ) -> dict[str, Any]:
     payload = {
@@ -1336,7 +1589,12 @@ def _lane_worker(
                 time.sleep(0.02)
                 continue
             batch_started = time.perf_counter()
-            metrics = kernel.run_batch(stop_event)
+            metrics = kernel.run_batch(
+                stop_event,
+                source_checkpoint_id=str(
+                    current_checkpoint["checkpoint_id"]
+                ),
+            )
             current_checkpoint = kernel.checkpoint(lane_version)
             _emit(
                 events,
@@ -1368,6 +1626,9 @@ def _lane_worker(
                         "graph6": kernel.best_graph.to_graph6(),
                         "score": _score_payload(kernel.best_score),
                         "checkpoint_id": current_checkpoint["checkpoint_id"],
+                        "provenance": kernel.retained_best_provenance(
+                            str(current_checkpoint["checkpoint_id"])
+                        ),
                         "at": utc_now(),
                     },
                     important=True,
@@ -1953,14 +2214,50 @@ def _score_payload(score: ScoreResult) -> dict[str, Any]:
     }
 
 
-def _candidate_id(campaign_id: str, graph: BitGraph) -> str:
-    graph_sha256 = hashlib.sha256(
-        graph.to_graph6().encode("ascii")
-    ).hexdigest()
+def _legacy_graph_key_reference(graph: BitGraph) -> str:
+    if graph.n <= 62:
+        prefix = bytes((graph.n + 63,))
+    elif graph.n <= 258047:
+        prefix = bytes(
+            (
+                126,
+                ((graph.n >> 12) & 63) + 63,
+                ((graph.n >> 6) & 63) + 63,
+                (graph.n & 63) + 63,
+            )
+        )
+    else:
+        raise ValueError("graph6 export supports at most 258047 vertices")
+    bits = [
+        int(graph.has_edge(u, v))
+        for v in range(1, graph.n)
+        for u in range(v)
+    ]
+    bits.extend([0] * ((-len(bits)) % 6))
+    data = bytes(
+        sum(
+            bits[offset + bit] << (5 - bit)
+            for bit in range(6)
+        )
+        + 63
+        for offset in range(0, len(bits), 6)
+    )
+    return hashlib.sha256(prefix + data).hexdigest()
+
+
+def _candidate_id_from_graph_sha256(
+    campaign_id: str, graph_sha256: str
+) -> str:
     identity = hashlib.sha256(
         f"{campaign_id}:{graph_sha256}".encode("ascii")
     ).hexdigest()
     return f"candidate-{identity[:24]}"
+
+
+def _candidate_id(campaign_id: str, graph: BitGraph) -> str:
+    return _candidate_id_from_graph_sha256(
+        campaign_id, graph.stable_hash()
+    )
 
 
 def _mutation_record(
@@ -1975,6 +2272,7 @@ def _mutation_record(
     accepted: bool,
     global_record: bool,
     mutation_operator: str,
+    child_graph_sha256: str | None = None,
 ) -> dict[str, Any]:
     parent_edges = set(parent.edges())
     child_edges = set(child.edges())
@@ -1984,7 +2282,13 @@ def _mutation_record(
         {vertex for edge in (*removed, *added) for vertex in edge}
     )
     return {
-        "candidate_id": _candidate_id(campaign_id, child),
+        "candidate_id": (
+            _candidate_id_from_graph_sha256(
+                campaign_id, child_graph_sha256
+            )
+            if child_graph_sha256 is not None
+            else _candidate_id(campaign_id, child)
+        ),
         "parent_candidate_id": parent_candidate_id,
         "mutation_operator": mutation_operator,
         "mutated_vertices": mutated_vertices,
@@ -2175,6 +2479,8 @@ def run_bounded_lane_batch(
     max_wall_seconds: float,
     instrumentation_enabled: bool = True,
     score_profiling_enabled: bool = True,
+    optimized_legacy_key: bool = True,
+    independent_sample_provenance: bool = True,
 ) -> dict[str, Any]:
     """Run exactly one bounded batch in the coordinator process."""
 
@@ -2189,6 +2495,8 @@ def run_bounded_lane_batch(
         fork_seed=None,
         instrumentation_enabled=instrumentation_enabled,
         score_profiling_enabled=score_profiling_enabled,
+        optimized_legacy_key=optimized_legacy_key,
+        independent_sample_provenance=independent_sample_provenance,
     )
     try:
         metrics = kernel.run_batch(
@@ -2231,6 +2539,7 @@ def run_bounded_lane_batch(
             ],
             "operator_statistics": metrics["operator_statistics"],
             "mutation_ancestry": metrics["mutation_ancestry"],
+            "candidate_provenance": metrics["candidate_provenance"],
             "timing": metrics.get(
                 "timing",
                 {"enabled": False, "counters_seconds": {}},

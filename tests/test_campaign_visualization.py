@@ -324,6 +324,7 @@ class CampaignVisualizationTests(unittest.TestCase):
         graph: BitGraph,
         lane_id: str = "lane-2",
         high_water: int = 654,
+        candidate_id: str | None = "candidate-live-preview",
     ) -> Path:
         payload = {
             "schema_version": 1,
@@ -339,7 +340,7 @@ class CampaignVisualizationTests(unittest.TestCase):
                 "complete": False,
                 "ordering_key": [0, 1, 16, 0, graph.size()],
             },
-            "current_candidate_id": "candidate-live-preview",
+            "current_candidate_id": candidate_id,
             "high_water": high_water,
             "published_at": "2026-07-26T12:34:56Z",
             "transient": True,
@@ -476,6 +477,19 @@ class CampaignVisualizationTests(unittest.TestCase):
             "candidate-live-frontier",
         )
         self.assertEqual(fallback["selection"]["high_water"], 321)
+
+    def test_live_frontier_allows_unretained_independent_sample(
+        self,
+    ) -> None:
+        self._write_live_preview(
+            graph=self.second_graph,
+            candidate_id=None,
+        )
+        selected = campaign_graph_visualization(
+            self.workspace, source="live_frontier"
+        )
+        self.assertIsNone(selected["selection"]["candidate_id"])
+        self.assertTrue(selected["selection"]["transient"])
 
     def test_live_frontier_rejects_symlinked_checkpoint_directory(
         self,

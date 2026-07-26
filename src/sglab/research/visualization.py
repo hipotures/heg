@@ -108,11 +108,16 @@ def campaign_graph_visualization(
             dict(item)
             for item in _bounded_cycle_examples(graph6, target)
         ]
+        selected_candidate_id = selected.get("candidate_id")
         exact = _exact_verification(
             connection,
             campaign_root=root / "research-campaigns" / campaign_id,
             campaign_id=campaign_id,
-            candidate_id=str(selected["candidate_id"]),
+            candidate_id=(
+                selected_candidate_id
+                if isinstance(selected_candidate_id, str)
+                else ""
+            ),
             graph=graph,
             graph6=graph6,
         )
@@ -144,7 +149,7 @@ def campaign_graph_visualization(
             "campaign_id": campaign_id,
             "source": source,
             "selection": {
-                "candidate_id": str(selected["candidate_id"]),
+                "candidate_id": selected_candidate_id,
                 "candidate_snapshot_id": selected.get("candidate_snapshot_id"),
                 "lane_id": str(selected["lane_id"]),
                 "lane_version": int(selected["lane_version"]),
@@ -587,8 +592,13 @@ def _live_checkpoint_selection(
     if (
         not isinstance(graph6, str)
         or not isinstance(score, dict)
-        or not isinstance(candidate_id, str)
-        or not candidate_id
+        or (
+            candidate_id is not None
+            and (
+                not isinstance(candidate_id, str)
+                or not candidate_id
+            )
+        )
         or not isinstance(lane_id, str)
         or not lane_id
     ):

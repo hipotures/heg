@@ -239,7 +239,14 @@ class FastDuplicateKeyTests(unittest.TestCase):
                 checkpoint = original.checkpoint(0)
             finally:
                 original.close()
-        checkpoint.pop("tabu_key_scheme")
+        self.assertEqual(
+            checkpoint["duplicate_key_scheme"],
+            LEGACY_GRAPH_KEY_SCHEME,
+        )
+        self.assertEqual(
+            checkpoint["tabu_key_scheme"], "sha256_graph6_v1"
+        )
+        checkpoint.pop("duplicate_key_scheme")
         with patch.dict(
             os.environ,
             {
@@ -260,6 +267,46 @@ class FastDuplicateKeyTests(unittest.TestCase):
                 )
             finally:
                 restored.close()
+
+    def test_fork_inherits_parent_scheme_and_explicit_restart_upgrades(
+        self,
+    ) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "SGLAB_SCORE_BACKEND": "python",
+                "SGLAB_FAST_DUPLICATE_KEY": "0",
+            },
+        ):
+            original = _LaneKernel(_spec(evaluations=10), None, None)
+            try:
+                checkpoint = original.checkpoint(0)
+            finally:
+                original.close()
+        with patch.dict(
+            os.environ,
+            {
+                "SGLAB_SCORE_BACKEND": "python",
+                "SGLAB_FAST_DUPLICATE_KEY": "1",
+            },
+        ):
+            forked = _LaneKernel(
+                _spec(evaluations=10),
+                checkpoint,
+                fork_seed=909,
+            )
+            try:
+                self.assertEqual(
+                    forked.tabu_key_scheme,
+                    LEGACY_GRAPH_KEY_SCHEME,
+                )
+                forked.restart_from_checkpoint(checkpoint, seed=910)
+                self.assertEqual(
+                    forked.tabu_key_scheme,
+                    FAST_GRAPH_KEY_SCHEME,
+                )
+            finally:
+                forked.close()
 
 
 if __name__ == "__main__":

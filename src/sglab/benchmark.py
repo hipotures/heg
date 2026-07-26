@@ -390,6 +390,8 @@ def _run_score_case(
     early_exit: bool,
     fast_duplicate_key: bool,
     profiling: bool,
+    optimized_legacy_key: bool = True,
+    independent_sample_provenance: bool = True,
 ) -> dict[str, Any]:
     with _score_environment(
         SGLAB_SCORE_BACKEND=backend,
@@ -406,6 +408,10 @@ def _run_score_case(
             fork_seed=None,
             instrumentation_enabled=True,
             score_profiling_enabled=profiling,
+            optimized_legacy_key=optimized_legacy_key,
+            independent_sample_provenance=(
+                independent_sample_provenance
+            ),
         )
         try:
             metrics = kernel.run_batch(
@@ -532,6 +538,41 @@ def score_kernel_benchmark(
             "fast_duplicate_key": True,
         },
     )
+    legacy_key = _alternating_score_comparison(
+        iterations=iterations,
+        left={
+            **search_common,
+            "early_exit": True,
+            "fast_duplicate_key": False,
+            "optimized_legacy_key": False,
+        },
+        right={
+            **search_common,
+            "early_exit": True,
+            "fast_duplicate_key": False,
+            "optimized_legacy_key": True,
+        },
+    )
+    independent_common = {
+        "order": 96,
+        "evaluations": search_evaluations,
+        "algorithm": "random_restart",
+        "backend": "cpp",
+        "early_exit": False,
+        "fast_duplicate_key": True,
+        "profiling": True,
+    }
+    independent_provenance = _alternating_score_comparison(
+        iterations=iterations,
+        left={
+            **independent_common,
+            "independent_sample_provenance": False,
+        },
+        right={
+            **independent_common,
+            "independent_sample_provenance": True,
+        },
+    )
     profiling_common = {
         "order": 96,
         "evaluations": search_evaluations,
@@ -546,6 +587,12 @@ def score_kernel_benchmark(
         right={**profiling_common, "profiling": True},
     )
     profiling_overhead = 1.0 - profiling["right_over_left"]
+    legacy_duplicate_reduction = _timing_counter_reduction(
+        legacy_key, "duplicate_detection"
+    )
+    independent_ancestry_reduction = _timing_counter_reduction(
+        independent_provenance, "ancestry_construction"
+    )
     completeness_run = profiling["right_runs"][-1]
     timing = completeness_run.get("timing") or {}
     raw_score_profile = timing.get("score_profile") or {}
@@ -590,6 +637,30 @@ def score_kernel_benchmark(
         "backend_comparison": backend,
         "early_exit_comparison": early_exit,
         "duplicate_key_comparison": duplicate_key,
+        "legacy_key_comparison": {
+            **legacy_key,
+            "duplicate_time_reduction_fraction": (
+                legacy_duplicate_reduction
+            ),
+            "duplicate_time_reduction_gate_at_least_20_percent": (
+                legacy_duplicate_reduction >= 0.20
+            ),
+            "throughput_gate_at_least_10_percent": (
+                legacy_key["right_over_left"] >= 1.10
+            ),
+        },
+        "independent_provenance_comparison": {
+            **independent_provenance,
+            "ancestry_time_reduction_fraction": (
+                independent_ancestry_reduction
+            ),
+            "ancestry_time_reduction_gate_at_least_80_percent": (
+                independent_ancestry_reduction >= 0.80
+            ),
+            "throughput_gate_at_least_25_percent": (
+                independent_provenance["right_over_left"] >= 1.25
+            ),
+        },
         "profiling_comparison": {
             **profiling,
             "overhead_fraction": profiling_overhead,
@@ -624,6 +695,24 @@ def score_kernel_benchmark(
             "duplicate_key_trajectory_equal": duplicate_key[
                 "logical_trajectory_equal"
             ],
+            "legacy_key_trajectory_equal": legacy_key[
+                "logical_trajectory_equal"
+            ],
+            "independent_provenance_trajectory_equal": (
+                independent_provenance["logical_trajectory_equal"]
+            ),
+            "legacy_duplicate_time_reduction_at_least_20_percent": (
+                legacy_duplicate_reduction >= 0.20
+            ),
+            "legacy_total_throughput_gain_at_least_10_percent": (
+                legacy_key["right_over_left"] >= 1.10
+            ),
+            "independent_ancestry_time_reduction_at_least_80_percent": (
+                independent_ancestry_reduction >= 0.80
+            ),
+            "independent_total_throughput_gain_at_least_25_percent": (
+                independent_provenance["right_over_left"] >= 1.25
+            ),
             "profiling_trajectory_equal": profiling[
                 "logical_trajectory_equal"
             ],
@@ -633,6 +722,20 @@ def score_kernel_benchmark(
         * 1024,
         "peak_rss_source": "resource.getrusage",
     }
+
+
+def _timing_counter_reduction(
+    comparison: dict[str, Any], counter: str
+) -> float:
+    left = median(
+        float(run["timing"]["counters_seconds"][counter])
+        for run in comparison["left_runs"]
+    )
+    right = median(
+        float(run["timing"]["counters_seconds"][counter])
+        for run in comparison["right_runs"]
+    )
+    return 1.0 - right / max(left, 1e-12)
 
 
 def _sqlite_batch(connection: sqlite3.Connection) -> None:

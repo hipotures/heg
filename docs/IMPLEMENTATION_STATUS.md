@@ -2,6 +2,21 @@
 
 Last implementation audit: **2026-07-26**.
 
+## Versioned duplicate keys and independent sample provenance
+
+Lane checkpoints now record canonical `duplicate_key_scheme` values while
+remaining compatible with historical aliases. Resume and
+trajectory-preserving forks keep their existing visited/tabu semantics; only
+new lanes and explicit algorithmic restarts may switch to the delta-local key.
+The exact legacy SHA/graph6 key uses a reusable allocation-light encoder and
+reuses the digest for candidate identity.
+
+Random-restart lanes no longer construct fictitious mutation ancestry for
+every accepted graph. Global records, retained candidates and periodic
+checkpoints instead use schema-v2 `independent_sample` provenance. SQLite
+schema v16 adds this provenance to retained candidates and copies it into
+immutable M4 snapshots; historical rows remain `{}`.
+
 ## Persistent scorer, conservative cutoff and fast duplicate key
 
 Erdős–Gyárfás lanes can now use one bounded persistent C++17 count-only

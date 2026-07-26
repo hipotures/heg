@@ -31,6 +31,7 @@ This is the authoritative engineering-invariant matrix.
 | Missing usage remains null | turn lifecycle | timeout/missing usage tests | no fabricated zero |
 | Timeout is unknown, not proof | verifier/SAT/runtime | timeout tests | unknown/fault |
 | Heuristic score-worker failure is not cycle absence | lane scorer fallback and Python record audits | score-worker parity/crash tests | retry once, then Python |
+| Resume never silently migrates duplicate membership | versioned lane checkpoint key scheme | legacy alias, fork and explicit-restart tests | inherit checkpoint scheme; require explicit restart |
 | Browser cannot supply executable/auth path | HTTP validation | security tests | request rejected |
 
 When changing an invariant:

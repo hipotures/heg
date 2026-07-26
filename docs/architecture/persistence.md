@@ -16,7 +16,7 @@ keeps action/checkpoint ordering explicit.
 
 ## Current schema
 
-The documented baseline uses schema version 15.
+The documented baseline uses schema version 16.
 
 Major domains include:
 
@@ -24,6 +24,7 @@ Major domains include:
 - Director sessions/turns/decisions/actions/hypotheses;
 - lanes, checkpoints, telemetry, candidates;
 - candidate pins and immutable snapshots;
+- structured candidate provenance copied into immutable snapshots;
 - verification jobs and terminal events;
 - scientific-memory snapshots;
 - comparison suites/arms/turns/authorizations/worker lifecycle;

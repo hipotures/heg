@@ -53,6 +53,14 @@ class BenchmarkTests(unittest.TestCase):
         self.assertEqual(report["kind"], "score_kernel")
         self.assertEqual(set(report["backend_comparison"]), {"64", "96"})
         self.assertIn("overhead_gate_below_2_percent", report["profiling_comparison"])
+        self.assertIn(
+            "duplicate_time_reduction_fraction",
+            report["legacy_key_comparison"],
+        )
+        self.assertIn(
+            "ancestry_time_reduction_fraction",
+            report["independent_provenance_comparison"],
+        )
         self.assertIn("decision", report["incremental_scoring_gate"])
         self.assertTrue(report["acceptance"]["backend_trajectories_equal"])
 

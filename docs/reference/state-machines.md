@@ -58,6 +58,10 @@ blocked
 
 Process generation may change while lane identity remains stable.
 
+Resume and trajectory-preserving fork keep the checkpoint's
+`duplicate_key_scheme`. A reviewed algorithmic restart is the explicit
+transition that may clear local duplicate state and select a newer scheme.
+
 ## Candidate
 
 Representative states:
@@ -85,6 +89,9 @@ cancelled
 ```
 
 A terminal completed job is not repeated on Resume.
+
+Candidate provenance is orthogonal to candidate state: mutation algorithms
+use `mutation_chain`, while random restart uses `independent_sample`.
 
 ## Comparison suite
 

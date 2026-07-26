@@ -119,11 +119,14 @@ class BitGraph:
             rows[v] |= 1 << u
         return BitGraph(self.n, tuple(rows))
 
-    def to_graph6(self) -> str:
+    def encode_graph6_into(self, output: bytearray) -> None:
+        """Encode canonical graph6 bytes into a reusable buffer."""
+
+        output.clear()
         if self.n <= 62:
-            prefix = bytes((self.n + 63,))
+            output.append(self.n + 63)
         elif self.n <= 258047:
-            prefix = bytes(
+            output.extend(
                 (
                     126,
                     ((self.n >> 12) & 63) + 63,
@@ -133,13 +136,24 @@ class BitGraph:
             )
         else:
             raise ValueError("graph6 export supports at most 258047 vertices")
-        bits = [int(self.has_edge(u, v)) for v in range(1, self.n) for u in range(v)]
-        bits.extend([0] * ((-len(bits)) % 6))
-        data = bytes(
-            sum(bits[offset + bit] << (5 - bit) for bit in range(6)) + 63
-            for offset in range(0, len(bits), 6)
-        )
-        return (prefix + data).decode("ascii")
+        value = 0
+        width = 0
+        for v in range(1, self.n):
+            row_bit = 1 << v
+            for u in range(v):
+                value = (value << 1) | int(bool(self.rows[u] & row_bit))
+                width += 1
+                if width == 6:
+                    output.append(value + 63)
+                    value = 0
+                    width = 0
+        if width:
+            output.append((value << (6 - width)) + 63)
+
+    def to_graph6(self) -> str:
+        encoded = bytearray()
+        self.encode_graph6_into(encoded)
+        return encoded.decode("ascii")
 
     @classmethod
     def from_graph6(cls, value: str | bytes) -> "BitGraph":
@@ -181,8 +195,10 @@ class BitGraph:
                 position += 1
         return cls.from_edges(n, edges)
 
-    def stable_hash(self) -> str:
-        return hashlib.sha256(self.to_graph6().encode("ascii")).hexdigest()
+    def stable_hash(self, workspace: bytearray | None = None) -> str:
+        encoded = workspace if workspace is not None else bytearray()
+        self.encode_graph6_into(encoded)
+        return hashlib.sha256(encoded).hexdigest()
 
 
 @dataclass(slots=True)

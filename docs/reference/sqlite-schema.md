@@ -2,7 +2,7 @@
 
 ## Version
 
-The documented baseline uses SQLite schema version **15**.
+The documented baseline uses SQLite schema version **16**.
 
 ```sql
 PRAGMA user_version;
@@ -36,6 +36,7 @@ PRAGMA foreign_key_check;
 - telemetry windows;
 - candidates;
 - candidate pins and immutable snapshots;
+- `provenance_json` on retained candidates and immutable snapshots;
 - action outcomes.
 
 ### Verification
@@ -91,3 +92,7 @@ Every migration must:
 - pass Online Backup migration from the previous production version;
 - pass integrity and FK checks;
 - preserve canonical historical fingerprints.
+
+The v15→v16 migration only adds non-null `provenance_json` columns with the
+default `{}`. New retained candidates store schema-v2 provenance; candidate
+pinning copies the exact JSON into the immutable M4 snapshot.

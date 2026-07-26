@@ -12,6 +12,7 @@ A candidate stores:
 - graph/artifact hash;
 - score and score semantics;
 - lane/checkpoint provenance;
+- provenance kind (`mutation_chain` or `independent_sample`);
 - state and certification status;
 - timestamps.
 
@@ -47,7 +48,10 @@ sequenceDiagram
 
 `ON DELETE RESTRICT` and pruning filters prevent removal of referenced
 candidates. M4 consumes the immutable snapshot, not a later lookup of a mutable
-row.
+row. Schema v16 copies the retained candidate's `provenance_json` into that
+snapshot in the same pin transaction. Historical rows retain `{}` to mean
+that structured provenance was not available; no historical evidence is
+rewritten.
 
 ## Stale target
 

@@ -1,5 +1,4 @@
 import json
-import sqlite3
 import tempfile
 import unittest
 from http.client import HTTPConnection
@@ -88,12 +87,12 @@ def suite_payload(**changes):
 
 
 class ComparisonDatabaseTests(unittest.TestCase):
-    def test_schema_v15_tables_foreign_keys_and_integrity(self) -> None:
+    def test_schema_v16_tables_foreign_keys_and_integrity(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             database = Path(directory) / "results.sqlite3"
             connection = connect(database)
-            self.assertEqual(SCHEMA_VERSION, 15)
-            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 15)
+            self.assertEqual(SCHEMA_VERSION, 16)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 16)
             tables = {
                 row[0]
                 for row in connection.execute(

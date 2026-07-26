@@ -2226,15 +2226,17 @@ class ResearchStore:
         score: dict[str, Any],
         artifact_ref: str,
         artifact_sha256: str,
+        provenance: dict[str, Any] | None = None,
     ) -> bool:
         with self.transaction() as database:
             cursor = database.execute(
                 """
                 INSERT OR IGNORE INTO campaign_candidates
                 (candidate_id, campaign_id, lane_id, lane_version,
-                 checkpoint_ref, graph6, graph_sha256, score_json, state,
-                 artifact_ref, artifact_sha256, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'retained', ?, ?, ?)
+                 checkpoint_ref, graph6, graph_sha256, score_json,
+                 provenance_json, state, artifact_ref, artifact_sha256,
+                 created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'retained', ?, ?, ?)
                 """,
                 (
                     candidate_id,
@@ -2245,6 +2247,7 @@ class ResearchStore:
                     graph6,
                     graph_sha256,
                     json.dumps(score, sort_keys=True),
+                    json.dumps(provenance or {}, sort_keys=True),
                     artifact_ref,
                     artifact_sha256,
                     utc_now(),
@@ -2293,10 +2296,10 @@ class ResearchStore:
             """
             INSERT OR IGNORE INTO campaign_candidate_snapshots
             (candidate_snapshot_id, campaign_id, candidate_id, graph6,
-             graph_sha256, artifact_sha256, score_json, score_semantics,
-             lane_id, lane_version, checkpoint_ref, certification_status,
-             source_created_at, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             graph_sha256, artifact_sha256, score_json, provenance_json,
+             score_semantics, lane_id, lane_version, checkpoint_ref,
+             certification_status, source_created_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 snapshot_id,
@@ -2306,6 +2309,7 @@ class ResearchStore:
                 candidate["graph_sha256"],
                 candidate["artifact_sha256"],
                 candidate["score_json"],
+                candidate["provenance_json"],
                 "heuristic_ordering_key_v1_not_certification",
                 candidate["lane_id"],
                 candidate["lane_version"],

@@ -79,10 +79,26 @@ accepted or become a global record. Random restart, simulated annealing and
 perturbation moves always receive a full score. The cutoff changes neither RNG
 consumption nor accepted/search-record trajectories.
 
-An optional deterministic 256-bit edge-XOR key avoids graph6/SHA-256
-construction in local duplicate/tabu bookkeeping. It is not a canonical
-graph identity and is never certification evidence. Legacy checkpoints keep
-their recorded key scheme until an explicit algorithmic restart.
+Checkpoint field `duplicate_key_scheme` explicitly selects
+`legacy_sha_graph6_v1` or `delta_local_v2`. Historical
+`tabu_key_scheme=sha256_graph6_v1|zobrist256_v1` values remain readable.
+Resume and trajectory-preserving forks inherit the checkpoint scheme without
+rewriting the visited/tabu membership. Only a new lane or explicit
+algorithmic restart may select `delta_local_v2`.
+
+The legacy scheme still produces exactly SHA-256(canonical graph6), but its
+encoder writes directly into a reusable byte buffer and reuses the digest
+when candidate ancestry needs the same graph identity. The deterministic
+256-bit edge-XOR delta key avoids graph6/SHA-256 in local duplicate/tabu
+bookkeeping. It is not a canonical graph identity and is never certification
+evidence.
+
+Random-restart outputs use `provenance_kind=independent_sample`: each graph is
+a sibling generated from RNG state, not a mutation child of the previous
+sample. The hot loop therefore keeps only scalar evaluation state. Full
+provenance is materialized for global records, retained candidates, M4
+snapshots and periodic checkpoints. Mutation-based lanes retain bounded
+`mutation_chain` ancestry.
 
 Long-running batches may also publish a transient live-frontier sample at most
 once per second. The worker copies the already accepted graph, its existing
@@ -100,6 +116,7 @@ Checkpoint content includes enough state to reproduce continuation:
 - counters;
 - parameter/version metadata;
 - local tabu-key scheme;
+- current/best provenance kind and reproduction metadata;
 - hash/manifest.
 
 Resume verifies hashes and starts a new process generation.

@@ -11,7 +11,8 @@ The candidate card may show:
 - graph family and lane provenance;
 - heuristic score and witness counts;
 - whether counts were capped;
-- mutation ancestry;
+- mutation ancestry for mutation-based lanes, or independent-sample
+  reproduction metadata for random restart;
 - checkpoint;
 - current certification state.
 
@@ -29,6 +30,11 @@ Keep these visually and conceptually separate:
 
 A candidate with a low score may still be rejected by M4 with an explicit
 cycle.
+
+Random-restart candidates do not claim that the previous random graph was
+their parent. Their provenance instead records the lane, source and retaining
+checkpoints, seed lineage, absolute evaluation index, generator version,
+graph hash and score.
 
 ## Candidate pinning
 

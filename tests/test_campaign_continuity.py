@@ -45,18 +45,23 @@ class CampaignContinuityTests(unittest.TestCase):
             )
         )
 
-    def test_schema_14_online_backup_migrates_to_15(self) -> None:
+    def test_schema_15_online_backup_migrates_to_16(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = connect(root / "source.sqlite3")
-            for table in (
-                "campaign_candidate_pins",
-                "campaign_candidate_snapshots",
-                "campaign_execution_attempts",
-                "campaign_memory_snapshots",
-            ):
-                source.execute(f"DROP TABLE {table}")
-            source.execute("PRAGMA user_version=14")
+            source.execute(
+                """
+                ALTER TABLE campaign_candidates
+                DROP COLUMN provenance_json
+                """
+            )
+            source.execute(
+                """
+                ALTER TABLE campaign_candidate_snapshots
+                DROP COLUMN provenance_json
+                """
+            )
+            source.execute("PRAGMA user_version=15")
             source.commit()
             snapshot_path = root / "snapshot.sqlite3"
             snapshot = sqlite3.connect(snapshot_path)
@@ -64,9 +69,9 @@ class CampaignContinuityTests(unittest.TestCase):
             snapshot.close()
             source.close()
             migrated = connect(snapshot_path)
-            self.assertEqual(SCHEMA_VERSION, 15)
+            self.assertEqual(SCHEMA_VERSION, 16)
             self.assertEqual(
-                migrated.execute("PRAGMA user_version").fetchone()[0], 15
+                migrated.execute("PRAGMA user_version").fetchone()[0], 16
             )
             self.assertEqual(
                 migrated.execute("PRAGMA integrity_check").fetchone()[0],
@@ -75,14 +80,17 @@ class CampaignContinuityTests(unittest.TestCase):
             self.assertEqual(
                 migrated.execute("PRAGMA foreign_key_check").fetchall(), []
             )
-            tables = {
-                row[0]
-                for row in migrated.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                )
-            }
-            self.assertIn("campaign_execution_attempts", tables)
-            self.assertIn("campaign_memory_snapshots", tables)
+            for table in (
+                "campaign_candidates",
+                "campaign_candidate_snapshots",
+            ):
+                columns = {
+                    row[1]
+                    for row in migrated.execute(
+                        f"PRAGMA table_info({table})"
+                    )
+                }
+                self.assertIn("provenance_json", columns)
             migrated.close()
 
     def test_attempt_lifecycle_resources_and_cumulative_counters(self) -> None:
@@ -310,6 +318,11 @@ class CampaignContinuityTests(unittest.TestCase):
                 score={"ordering_key": [0, 0, 0, 0, 0]},
                 artifact_ref="candidates/candidate-1.graph6",
                 artifact_sha256="b" * 64,
+                provenance={
+                    "schema_version": 2,
+                    "provenance_kind": "independent_sample",
+                    "graph_sha256": digest,
+                },
             )
             self._accepted_candidate_action(store, "candidate-1")
             self.assertTrue(
@@ -329,6 +342,12 @@ class CampaignContinuityTests(unittest.TestCase):
             self.assertEqual(
                 immutable["score_semantics"],
                 "heuristic_ordering_key_v1_not_certification",
+            )
+            self.assertEqual(
+                json.loads(immutable["provenance_json"])[
+                    "provenance_kind"
+                ],
+                "independent_sample",
             )
             with self.assertRaises(sqlite3.IntegrityError):
                 store.connection.execute(
