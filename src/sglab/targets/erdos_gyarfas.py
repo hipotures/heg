@@ -301,7 +301,15 @@ class ErdosGyarfasPlugin:
         if len(edges) < 2:
             return MutationResult(graph)
         if operator == "forbidden_cycle_break_switch":
-            witness_edges = self._forbidden_witness_edges(graph, rng)
+            witness_choices = config.get(
+                "forbidden_witness_edge_choices"
+            )
+            if witness_choices is None:
+                witness_edges = self._forbidden_witness_edges(graph, rng)
+            else:
+                witness_edges = (
+                    rng.choice(witness_choices) if witness_choices else ()
+                )
             if not witness_edges:
                 return MutationResult(graph)
             for _ in range(64):
@@ -325,6 +333,12 @@ class ErdosGyarfasPlugin:
     def _forbidden_witness_edges(
         self, graph: BitGraph, rng: Random
     ) -> tuple[tuple[int, int], ...]:
+        choices = self.forbidden_witness_edge_choices(graph)
+        return rng.choice(choices) if choices else ()
+
+    def forbidden_witness_edge_choices(
+        self, graph: BitGraph
+    ) -> tuple[tuple[tuple[int, int], ...], ...]:
         witnesses: list[tuple[int, ...]] = []
         for length in self.forbidden_lengths(graph.n):
             found, _complete = find_cycles_of_length_bounded(
@@ -334,10 +348,19 @@ class ErdosGyarfasPlugin:
                 witnesses.extend(found[:1])
         if not witnesses:
             return ()
-        witness = rng.choice(witnesses)
         return tuple(
-            tuple(sorted((witness[index], witness[(index + 1) % len(witness)])))
-            for index in range(len(witness))
+            tuple(
+                tuple(
+                    sorted(
+                        (
+                            witness[index],
+                            witness[(index + 1) % len(witness)],
+                        )
+                    )
+                )
+                for index in range(len(witness))
+            )
+            for witness in witnesses
         )
 
     def _two_edge_switch(

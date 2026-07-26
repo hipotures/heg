@@ -66,6 +66,62 @@ GENERATOR_VERSION = "erdos_gyarfas.generate_seed_v1"
 _UINT64_MASK = (1 << 64) - 1
 
 
+@dataclass(slots=True)
+class MutationProfileAccumulator:
+    uniform_evaluations: int = 0
+    uniform_ns: int = 0
+    targeted_evaluations: int = 0
+    targeted_ns: int = 0
+    random_restart_evaluations: int = 0
+    random_restart_ns: int = 0
+    witness_searches: int = 0
+    witness_search_ns: int = 0
+    witness_cache_hits: int = 0
+    witness_cache_misses: int = 0
+
+    def reset(self) -> None:
+        self.uniform_evaluations = 0
+        self.uniform_ns = 0
+        self.targeted_evaluations = 0
+        self.targeted_ns = 0
+        self.random_restart_evaluations = 0
+        self.random_restart_ns = 0
+        self.witness_searches = 0
+        self.witness_search_ns = 0
+        self.witness_cache_hits = 0
+        self.witness_cache_misses = 0
+
+    def record_operator(self, operator: str, elapsed_ns: int) -> None:
+        if operator == "uniform_two_edge_switch":
+            self.uniform_evaluations += 1
+            self.uniform_ns += elapsed_ns
+        elif operator == "forbidden_cycle_break_switch":
+            self.targeted_evaluations += 1
+            self.targeted_ns += elapsed_ns
+        else:
+            self.random_restart_evaluations += 1
+            self.random_restart_ns += elapsed_ns
+
+    def payload(self, *, cache_enabled: bool) -> dict[str, Any]:
+        lookups = self.witness_cache_hits + self.witness_cache_misses
+        return {
+            "witness_cache_enabled": cache_enabled,
+            "uniform_evaluations": self.uniform_evaluations,
+            "uniform_ns": self.uniform_ns,
+            "targeted_evaluations": self.targeted_evaluations,
+            "targeted_ns": self.targeted_ns,
+            "random_restart_evaluations": self.random_restart_evaluations,
+            "random_restart_ns": self.random_restart_ns,
+            "witness_searches": self.witness_searches,
+            "witness_search_ns": self.witness_search_ns,
+            "witness_cache_hits": self.witness_cache_hits,
+            "witness_cache_misses": self.witness_cache_misses,
+            "witness_cache_hit_rate": (
+                self.witness_cache_hits / lookups if lookups else 0.0
+            ),
+        }
+
+
 def _splitmix64(value: int) -> int:
     value = (value + 0x9E3779B97F4A7C15) & _UINT64_MASK
     value = (
@@ -229,6 +285,7 @@ class _LaneKernel:
         score_worker_enabled: bool = True,
         optimized_legacy_key: bool = True,
         independent_sample_provenance: bool = True,
+        mutation_witness_cache: bool = True,
     ):
         self.spec = spec
         self.plugin = TARGETS[spec.target]
@@ -239,9 +296,22 @@ class _LaneKernel:
         self.independent_sample_provenance = (
             independent_sample_provenance
         )
+        self.mutation_witness_cache_enabled = mutation_witness_cache
+        self._forbidden_witness_edge_choices = getattr(
+            self.plugin, "forbidden_witness_edge_choices", None
+        )
+        self._mutation_witness_cache_graph: BitGraph | None = None
+        self._mutation_witness_cache_choices: tuple[
+            tuple[tuple[int, int], ...], ...
+        ] = ()
         self.graph6_workspace = bytearray()
         self.score_profiling_enabled = (
             instrumentation_enabled and score_profiling_enabled
+        )
+        self.mutation_profile = (
+            MutationProfileAccumulator()
+            if self.score_profiling_enabled
+            else None
         )
         self.timing_ns = (
             {name: 0 for name in TIMING_COUNTER_NAMES}
@@ -479,6 +549,7 @@ class _LaneKernel:
             self.rng,
             {"order": int(self.parameters["order"]), "mode": self.mode},
         )
+        self._invalidate_mutation_witness_cache()
         self.score = self._score(self.graph)
         self.best_graph = self.graph
         self.best_score = self.score
@@ -512,6 +583,7 @@ class _LaneKernel:
         self, checkpoint: dict[str, Any], seed: int
     ) -> None:
         self.graph = BitGraph.from_graph6(str(checkpoint["graph6"]))
+        self._invalidate_mutation_witness_cache()
         self.tabu_key_scheme = (
             FAST_GRAPH_KEY_SCHEME
             if self.fast_duplicate_key_enabled
@@ -609,6 +681,8 @@ class _LaneKernel:
                 self.timing_ns[name] = 0
         if self.score_profile is not None:
             self.score_profile.reset()
+        if self.mutation_profile is not None:
+            self.mutation_profile.reset()
         for name in self.score_backend_batch:
             self.score_backend_batch[name] = 0
         started = time.perf_counter()
@@ -668,6 +742,14 @@ class _LaneKernel:
                     "mode": self.mode,
                     "mutation_operator": mutation_operator,
                 }
+                if (
+                    mutation_operator
+                    == "forbidden_cycle_break_switch"
+                    and self._forbidden_witness_edge_choices is not None
+                ):
+                    mutation_config[
+                        "forbidden_witness_edge_choices"
+                    ] = self._mutation_witness_choices_for(self.graph)
                 mutate_with_delta = getattr(
                     self.plugin, "mutate_with_delta", None
                 )
@@ -685,9 +767,14 @@ class _LaneKernel:
                     )
                     candidate = mutation_delta.graph
             if self.timing_ns is not None:
-                self.timing_ns["mutation_generation"] += (
+                mutation_elapsed = (
                     time.perf_counter_ns() - mutation_started
                 )
+                self.timing_ns["mutation_generation"] += mutation_elapsed
+                if self.mutation_profile is not None:
+                    self.mutation_profile.record_operator(
+                        mutation_operator, mutation_elapsed
+                    )
             evaluated += 1
             self.algorithm_evaluated += 1
             if candidate == self.graph:
@@ -796,6 +883,7 @@ class _LaneKernel:
             operator_counts["global_records"] += int(global_record)
             if accept:
                 self.graph = candidate
+                self._invalidate_mutation_witness_cache()
                 self.score = candidate_score
                 self.current_graph_key = key
                 self.current_evaluation_index = (
@@ -1002,6 +1090,9 @@ class _LaneKernel:
                 "early_exit_enabled": self.score_early_exit_enabled,
                 "duplicate_key_scheme": self.tabu_key_scheme,
                 "score_worker_protocol_version": 1,
+                "mutation_witness_cache_enabled": (
+                    self.mutation_witness_cache_enabled
+                ),
                 "score_worker_sha256": (
                     self.score_worker.binary_sha256
                     if self.score_worker is not None
@@ -1032,8 +1123,43 @@ class _LaneKernel:
                     if self.score_profile is not None
                     else None
                 ),
+                mutation_profile=(
+                    self.mutation_profile.payload(
+                        cache_enabled=self.mutation_witness_cache_enabled
+                    )
+                    if self.mutation_profile is not None
+                    else None
+                ),
             )
         return result
+
+    def _mutation_witness_choices_for(
+        self, graph: BitGraph
+    ) -> tuple[tuple[tuple[int, int], ...], ...]:
+        if (
+            self.mutation_witness_cache_enabled
+            and graph is self._mutation_witness_cache_graph
+        ):
+            if self.mutation_profile is not None:
+                self.mutation_profile.witness_cache_hits += 1
+            return self._mutation_witness_cache_choices
+
+        profile = self.mutation_profile
+        started = time.perf_counter_ns() if profile is not None else 0
+        assert self._forbidden_witness_edge_choices is not None
+        choices = self._forbidden_witness_edge_choices(graph)
+        if profile is not None:
+            profile.witness_searches += 1
+            profile.witness_search_ns += time.perf_counter_ns() - started
+            profile.witness_cache_misses += 1
+        if self.mutation_witness_cache_enabled:
+            self._mutation_witness_cache_graph = graph
+            self._mutation_witness_cache_choices = choices
+        return choices
+
+    def _invalidate_mutation_witness_cache(self) -> None:
+        self._mutation_witness_cache_graph = None
+        self._mutation_witness_cache_choices = ()
 
     def _choose_mutation_operator(self) -> str:
         weights = self.parameters.get(MUTATION_WEIGHTS_PARAMETER)
@@ -2378,6 +2504,7 @@ def _timing_payload(
     *,
     search_loop_seconds: float,
     score_profile: dict[str, int] | None = None,
+    mutation_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     counters = {
         name: value / 1_000_000_000
@@ -2411,6 +2538,8 @@ def _timing_payload(
     }
     if score_profile is not None:
         result["score_profile"] = score_profile
+    if mutation_profile is not None:
+        result["mutation_profile"] = mutation_profile
     return result
 
 

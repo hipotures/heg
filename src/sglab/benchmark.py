@@ -349,21 +349,39 @@ def _score_benchmark_spec(
     order: int,
     evaluations: int,
     algorithm: str,
+    graph_family: str = "unrestricted_min_degree_3",
+    mutation_weights: dict[str, float] | None = None,
 ) -> LaneSpec:
+    parameters: dict[str, Any] = {
+        "order": order,
+        "batch_candidates": evaluations,
+        "witness_cap": 2000,
+    }
+    if algorithm == "simulated_annealing":
+        parameters.update(
+            {
+                "temperature": 1.0,
+                "cooling": 0.995,
+                "restart_threshold": 50_000,
+            }
+        )
+    elif algorithm != "random_restart":
+        parameters.update(
+            {
+                "tabu_tenure": 128,
+                "perturbation_interval": 64,
+            }
+        )
+    if mutation_weights is not None:
+        parameters["mutation_weights"] = mutation_weights
     return LaneSpec(
         lane_id=f"lane-score-benchmark-{order}-{algorithm}",
         campaign_id="campaign-score-benchmark",
         target="erdos_gyarfas",
         algorithm=algorithm,
-        graph_family="unrestricted_min_degree_3",
+        graph_family=graph_family,
         seed=20260726 + order,
-        parameters={
-            "order": order,
-            "batch_candidates": evaluations,
-            "witness_cap": 2000,
-            "tabu_tenure": 128,
-            "perturbation_interval": 64,
-        },
+        parameters=parameters,
         resource_share=1.0,
     )
 
@@ -392,6 +410,9 @@ def _run_score_case(
     profiling: bool,
     optimized_legacy_key: bool = True,
     independent_sample_provenance: bool = True,
+    mutation_witness_cache: bool = True,
+    graph_family: str = "unrestricted_min_degree_3",
+    mutation_weights: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     with _score_environment(
         SGLAB_SCORE_BACKEND=backend,
@@ -403,6 +424,8 @@ def _run_score_case(
                 order=order,
                 evaluations=evaluations,
                 algorithm=algorithm,
+                graph_family=graph_family,
+                mutation_weights=mutation_weights,
             ),
             checkpoint=None,
             fork_seed=None,
@@ -412,6 +435,7 @@ def _run_score_case(
             independent_sample_provenance=(
                 independent_sample_provenance
             ),
+            mutation_witness_cache=mutation_witness_cache,
         )
         try:
             metrics = kernel.run_batch(
@@ -573,6 +597,31 @@ def score_kernel_benchmark(
             "independent_sample_provenance": True,
         },
     )
+    mutation_cache_common = {
+        "order": 96,
+        "evaluations": search_evaluations,
+        "algorithm": "simulated_annealing",
+        "graph_family": "connected_cubic",
+        "mutation_weights": {
+            "uniform_two_edge_switch": 0.7,
+            "forbidden_cycle_break_switch": 0.3,
+        },
+        "backend": "cpp",
+        "early_exit": False,
+        "fast_duplicate_key": True,
+        "profiling": True,
+    }
+    mutation_witness_cache = _alternating_score_comparison(
+        iterations=iterations,
+        left={
+            **mutation_cache_common,
+            "mutation_witness_cache": False,
+        },
+        right={
+            **mutation_cache_common,
+            "mutation_witness_cache": True,
+        },
+    )
     profiling_common = {
         "order": 96,
         "evaluations": search_evaluations,
@@ -592,6 +641,12 @@ def score_kernel_benchmark(
     )
     independent_ancestry_reduction = _timing_counter_reduction(
         independent_provenance, "ancestry_construction"
+    )
+    mutation_time_reduction = _timing_counter_reduction(
+        mutation_witness_cache, "mutation_generation"
+    )
+    witness_search_reduction = _mutation_profile_reduction(
+        mutation_witness_cache, "witness_search_ns"
     )
     completeness_run = profiling["right_runs"][-1]
     timing = completeness_run.get("timing") or {}
@@ -661,6 +716,19 @@ def score_kernel_benchmark(
                 independent_provenance["right_over_left"] >= 1.25
             ),
         },
+        "mutation_witness_cache_comparison": {
+            **mutation_witness_cache,
+            "mutation_time_reduction_fraction": mutation_time_reduction,
+            "witness_search_time_reduction_fraction": (
+                witness_search_reduction
+            ),
+            "mutation_time_reduction_gate_at_least_50_percent": (
+                mutation_time_reduction >= 0.50
+            ),
+            "throughput_gate_at_least_25_percent": (
+                mutation_witness_cache["right_over_left"] >= 1.25
+            ),
+        },
         "profiling_comparison": {
             **profiling,
             "overhead_fraction": profiling_overhead,
@@ -713,6 +781,15 @@ def score_kernel_benchmark(
             "independent_total_throughput_gain_at_least_25_percent": (
                 independent_provenance["right_over_left"] >= 1.25
             ),
+            "mutation_witness_cache_trajectory_equal": (
+                mutation_witness_cache["logical_trajectory_equal"]
+            ),
+            "mutation_witness_cache_time_reduction_at_least_50_percent": (
+                mutation_time_reduction >= 0.50
+            ),
+            "mutation_witness_cache_throughput_gain_at_least_25_percent": (
+                mutation_witness_cache["right_over_left"] >= 1.25
+            ),
             "profiling_trajectory_equal": profiling[
                 "logical_trajectory_equal"
             ],
@@ -733,6 +810,20 @@ def _timing_counter_reduction(
     )
     right = median(
         float(run["timing"]["counters_seconds"][counter])
+        for run in comparison["right_runs"]
+    )
+    return 1.0 - right / max(left, 1e-12)
+
+
+def _mutation_profile_reduction(
+    comparison: dict[str, Any], counter: str
+) -> float:
+    left = median(
+        float(run["timing"]["mutation_profile"][counter])
+        for run in comparison["left_runs"]
+    )
+    right = median(
+        float(run["timing"]["mutation_profile"][counter])
         for run in comparison["right_runs"]
     )
     return 1.0 - right / max(left, 1e-12)

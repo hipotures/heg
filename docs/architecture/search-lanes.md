@@ -60,6 +60,20 @@ per-candidate profile dictionary, JSON, event, SQLite row or log line is
 created. The aggregated `timing.score_profile` is emitted and persisted once
 with the completed batch.
 
+Mutation profiling follows the same batch-only contract. Fixed in-memory
+integer accumulators separate uniform, forbidden-cycle-targeted and
+random-restart mutation time, plus targeted witness-search nanoseconds and
+cache hit/miss counts. The aggregated `timing.mutation_profile` is materialized
+only at batch completion and is absent when score profiling is disabled.
+
+The forbidden-cycle-break operator retains one ephemeral witness-choice cache
+for the lane's current immutable graph. A rejected candidate keeps the cache;
+an accepted move, seed restart or checkpoint restart invalidates it
+immediately. Cache population uses the same bounded Python witness traversal
+and produces the same ordered choices as the uncached operator, so RNG
+consumption and deterministic continuation are unchanged. The cache is never
+serialized, checkpointed or shared between lane processes.
+
 The Erdős–Gyárfás lane may use one persistent `sglab-score-worker` C++17
 process. Requests contain bounded adjacency bitsets; responses contain only
 counts, completeness flags, DFS nodes and elapsed nanoseconds. The process

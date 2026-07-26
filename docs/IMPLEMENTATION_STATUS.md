@@ -2,6 +2,27 @@
 
 Last implementation audit: **2026-07-26**.
 
+## Current-graph witness cache for targeted mutations
+
+After the persistent C++ scorer removed the original DFS bottleneck,
+production order-96 windows showed mutation generation at 64–85% of accounted
+search time. The forbidden-cycle-break operator was independently rerunning
+the bounded Python witness traversal on the unchanged current graph after
+rejected candidates.
+
+Each lane now retains exactly one ephemeral ordered witness-choice tuple for
+its current immutable graph. Accepted moves and restarts invalidate it; the
+cache is not checkpointed or persisted. Cache on/off tests preserve graph,
+score, best graph, RNG state, accepted count, improvements and operator
+statistics. Mutation profiling adds only fixed batch-local integer counters
+and emits one aggregate payload when profiling is enabled.
+
+A seven-pair development benchmark at order 96 with 30% targeted mutations
+improved median throughput from 152.6/s to 244.5/s (1.60×), reduced witness
+searches from 301 to 67 and preserved the full logical trajectory. The larger
+persistent-worker witness protocol extension is therefore deferred until a
+new profile proves the remaining cache misses dominant.
+
 ## Director turn model and effort provenance
 
 Persistent App Server turn cards now show a compact `model:effort` badge next

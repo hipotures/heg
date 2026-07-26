@@ -95,6 +95,10 @@ lane batch. These timing, DFS-node, completeness and early-cutoff counters
 explain throughput; they are not candidate evidence and do not affect
 heuristic scores or M4 verification. Batch diagnostics also identify the
 requested/effective score backend and any Python audits or fallbacks.
+When profiling is enabled, the same completed-batch diagnostic separates
+uniform and forbidden-cycle-targeted mutation time and reports reuse of the
+current graph's witness choices. It does not create a candidate history or
+change the selected mutation sequence.
 
 [screenshot: ID=USR-CAMPAIGN-01; save as docs/assets/screenshots/user/campaigns/director-assessment.png; crop the “Director assessment & hypotheses” section from a running or stopped campaign, include the latest campaign assessment, at least two hypothesis cards with confidence/evidence, and the adjacent current Director decision summary; exclude raw JSON technical details.]
 

@@ -43,6 +43,30 @@ def _spec(*, evaluations: int = 200) -> LaneSpec:
     )
 
 
+def _targeted_spec(*, evaluations: int = 300) -> LaneSpec:
+    return LaneSpec(
+        lane_id="lane-targeted-mutation-cache",
+        campaign_id="campaign-score-worker",
+        target="erdos_gyarfas",
+        algorithm="simulated_annealing",
+        graph_family="connected_cubic",
+        seed=20260726,
+        parameters={
+            "order": 32,
+            "batch_candidates": evaluations,
+            "witness_cap": 64,
+            "temperature": 1.0,
+            "cooling": 0.995,
+            "restart_threshold": 50_000,
+            "mutation_weights": {
+                "uniform_two_edge_switch": 0.0,
+                "forbidden_cycle_break_switch": 1.0,
+            },
+        },
+        resource_share=1.0,
+    )
+
+
 def _logical_checkpoint(kernel: _LaneKernel) -> tuple[object, ...]:
     checkpoint = kernel.checkpoint(0)
     return (
@@ -174,6 +198,85 @@ class PersistentScoreWorkerTests(unittest.TestCase):
         self.assertEqual(results["0"][:3], results["1"][:3])
         self.assertEqual(results["0"][3], 0)
         self.assertGreater(results["1"][3], 0)
+
+    def test_mutation_witness_cache_preserves_trajectory(self) -> None:
+        results = {}
+        profiles = {}
+        for enabled in (False, True):
+            with patch.dict(
+                os.environ,
+                {
+                    "SGLAB_SCORE_BACKEND": "cpp",
+                    "SGLAB_SCORE_EARLY_EXIT": "0",
+                    "SGLAB_FAST_DUPLICATE_KEY": "1",
+                },
+            ):
+                kernel = _LaneKernel(
+                    _targeted_spec(),
+                    None,
+                    None,
+                    mutation_witness_cache=enabled,
+                )
+                try:
+                    metrics = kernel.run_batch(
+                        _NeverStop(), max_evaluations=300
+                    )
+                    results[enabled] = (
+                        _logical_checkpoint(kernel),
+                        metrics["accepted"],
+                        metrics["improvements"],
+                        metrics["operator_statistics"],
+                    )
+                    profiles[enabled] = metrics["timing"][
+                        "mutation_profile"
+                    ]
+                finally:
+                    kernel.close()
+
+        self.assertEqual(results[False], results[True])
+        self.assertEqual(profiles[False]["witness_cache_hits"], 0)
+        self.assertEqual(
+            profiles[False]["witness_searches"],
+            profiles[False]["targeted_evaluations"],
+        )
+        self.assertGreater(profiles[True]["witness_cache_hits"], 0)
+        self.assertLess(
+            profiles[True]["witness_searches"],
+            profiles[False]["witness_searches"],
+        )
+        self.assertTrue(
+            all(
+                not isinstance(value, (dict, list))
+                for value in profiles[True].values()
+            )
+        )
+
+    def test_mutation_profile_can_be_disabled(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "SGLAB_SCORE_BACKEND": "cpp",
+                "SGLAB_SCORE_EARLY_EXIT": "0",
+                "SGLAB_FAST_DUPLICATE_KEY": "1",
+            },
+        ):
+            kernel = _LaneKernel(
+                _targeted_spec(evaluations=10),
+                None,
+                None,
+                instrumentation_enabled=True,
+                score_profiling_enabled=False,
+            )
+            try:
+                metrics = kernel.run_batch(
+                    _NeverStop(), max_evaluations=10
+                )
+            finally:
+                kernel.close()
+        self.assertNotIn("mutation_profile", metrics["timing"])
+        self.assertTrue(
+            metrics["score_backend"]["mutation_witness_cache_enabled"]
+        )
 
     def test_worker_crash_is_restarted_before_fallback(self) -> None:
         with patch.dict(

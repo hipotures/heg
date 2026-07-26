@@ -40,8 +40,15 @@ Attempt-local override fields include:
 `search_limits.score_profiling_enabled` controls per-forbidden-length
 nanosecond, DFS-node, evaluation, completeness and cutoff counters. It
 defaults to enabled for newly prepared campaigns. Disabling it removes the
-score timers and profile accumulator updates without changing the scorer,
-RNG, acceptance policy or durable scientific contract.
+score timers and both score/mutation profile accumulator updates without
+changing the scorer, witness cache, RNG, acceptance policy or durable
+scientific contract.
+
+Completed profiled batches expose `timing.mutation_profile` with scalar
+`uniform_*`, `targeted_*`, `random_restart_*`, `witness_search_*` and
+`witness_cache_*` counters. They are one aggregate record per completed batch,
+not candidate-level telemetry. `score_backend.mutation_witness_cache_enabled`
+reports the effective cache path.
 
 ## Score-kernel rollout controls
 

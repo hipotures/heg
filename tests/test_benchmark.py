@@ -61,8 +61,17 @@ class BenchmarkTests(unittest.TestCase):
             "ancestry_time_reduction_fraction",
             report["independent_provenance_comparison"],
         )
+        self.assertIn(
+            "witness_search_time_reduction_fraction",
+            report["mutation_witness_cache_comparison"],
+        )
         self.assertIn("decision", report["incremental_scoring_gate"])
         self.assertTrue(report["acceptance"]["backend_trajectories_equal"])
+        self.assertTrue(
+            report["acceptance"][
+                "mutation_witness_cache_trajectory_equal"
+            ]
+        )
 
     def test_short_soak_exercises_controls_and_dashboard(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
