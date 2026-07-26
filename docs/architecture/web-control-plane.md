@@ -47,6 +47,10 @@ values therefore copy their complete underlying value without changing the
 card layout. Standalone abbreviated identifiers use the same mechanism, so
 separate `Copy ID` controls are unnecessary. Enter and Space activate focused
 copyable values.
+Persistent App Server turns retain their descending persisted `started_at`
+order. The dashboard renders that UTC timestamp through the browser's local
+timezone while preserving the original value in the semantic `time` element
+and its tooltip; no timestamp is rewritten in persistence or API responses.
 The live-frontier inspector derives aggregate campaign throughput by summing
 the latest completed metric window for each running lane. Missing first-batch
 measurements do not erase the available aggregate; the UI exposes measured

@@ -46,6 +46,10 @@ client-only and makes no HTTP request. The copied text contains the tile label
 and full value; truncated IDs, hashes, and SHA-256 values use their complete
 underlying value. Standalone abbreviated identifiers follow the same
 interaction without separate `Copy ID` buttons.
+The research-campaign response supplies Director turns in descending
+`started_at` order. Timestamps remain persisted and transported as UTC; the
+dashboard alone formats each turn's start time in the browser's local
+timezone.
 
 ## Core write APIs
 

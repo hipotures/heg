@@ -83,6 +83,10 @@ execution-attempt resource tiles. Abbreviated IDs, hashes, and SHA-256 values
 copy their complete underlying value. Standalone abbreviated identifiers are
 also directly clickable; separate `Copy ID` buttons are not shown.
 
+Persistent App Server turns are listed newest first. Each turn shows its
+start time converted by the browser to the operator's local timezone. Hover
+the local timestamp to inspect the original persisted UTC value.
+
 [screenshot: ID=USR-DASHBOARD-01; save as docs/assets/screenshots/user/dashboard/scientific-observatory.png; crop the complete “Scientific observatory” or “Search frontier” panel with the graph visualization, legend, current/best candidate selector, lane/frontier points, and any 2D/3D or camera controls; include the panel title and exclude unrelated campaign forms.]
 
 ### Candidates and verification

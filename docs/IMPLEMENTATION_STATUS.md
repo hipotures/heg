@@ -19,6 +19,11 @@ SHA-256 values copy without truncation or layout changes. Standalone
 abbreviated identifiers use the same mechanism, replacing separate `Copy ID`
 buttons.
 
+Persistent App Server turn cards now state that their order is newest first
+and show each persisted `started_at` timestamp in the browser's local
+timezone. The raw UTC value remains available in the timestamp tooltip and is
+unchanged in the database and API.
+
 ## Aggregate live-frontier throughput
 
 The live-frontier inspector now labels throughput as a campaign aggregate and
