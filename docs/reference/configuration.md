@@ -38,10 +38,26 @@ Attempt-local override fields include:
 ## Search profiling
 
 `search_limits.score_profiling_enabled` controls per-forbidden-length
-nanosecond and DFS-node counters. It defaults to enabled for newly prepared
-campaigns. Disabling it removes the score timers and profile accumulator
-updates without changing the scorer, RNG, acceptance policy or durable
-scientific contract.
+nanosecond, DFS-node, evaluation, completeness and cutoff counters. It
+defaults to enabled for newly prepared campaigns. Disabling it removes the
+score timers and profile accumulator updates without changing the scorer,
+RNG, acceptance policy or durable scientific contract.
+
+## Score-kernel rollout controls
+
+The following process environment variables are execution controls, not
+Director-selectable scientific parameters:
+
+```text
+SGLAB_SCORE_BACKEND=python|shadow|cpp
+SGLAB_SCORE_EARLY_EXIT=0|1
+SGLAB_FAST_DUPLICATE_KEY=0|1
+```
+
+The default is Python with early exit and the fast key disabled. Requested
+values, worker binary path/SHA-256 and protocol version are retained in
+attempt runtime provenance. Completed batch metrics report requested and
+effective backend, audits, restarts, fallbacks and parity mismatches.
 
 ## Scientific memory defaults
 

@@ -43,10 +43,18 @@ separate reference enumerator. Every archived finalist still goes through
 uncapped exact verification.
 
 Optional score profiling uses batch-local integer accumulators for nanoseconds
-and visited DFS nodes per forbidden length. It creates no candidate record,
-event, log entry or persistence write. The counters are serialized once at the
-micro-batch boundary and can be disabled independently of search
-instrumentation.
+visited DFS nodes, evaluations, complete recounts and early cutoffs per
+forbidden length. It creates no candidate record, event, log entry or
+persistence write. The counters are serialized once at the micro-batch
+boundary and can be disabled independently of search instrumentation.
+
+The optional persistent C++17 scorer implements the same bounded iterative
+count traversal behind a versioned binary protocol. Python remains the
+correctness oracle: shadow mode compares every result, production C++ mode
+recounts every proposed global record and periodically samples ordinary
+evaluations. Worker failure falls back to Python and cannot imply that a cycle
+is absent. This helper is a heuristic ranking accelerator, not either M4
+verifier.
 
 ## Iterated local search
 
@@ -55,6 +63,22 @@ instrumentation.
 - restart from the perturbed state;
 - maintain a small elite archive;
 - deduplicate elites canonically.
+
+The current ILS/tabu implementation can use a conservative early-exit bound.
+It stops only when the partial score is already lexicographically dominated
+under the exact applicable acceptance threshold. Perturbation steps do not
+use the bound.
+
+Local duplicate/tabu checks may use a deterministic 256-bit incremental
+edge-XOR key updated from the exact mutation delta. The key is deliberately
+non-authoritative; graph6, checkpoint hashes, candidate IDs and canonical
+archive logic are unchanged.
+
+Incremental witness-set maintenance is not implemented. The 2026-07-26 gate
+found zero complete C16/C32/C64 evaluations out of 2125 evaluated length
+stages, below the required 20% completeness threshold. Without complete
+witness membership, a safe edge-to-witness invalidation index cannot be
+constructed.
 
 ## Genetic search
 

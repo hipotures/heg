@@ -15,6 +15,11 @@ class TargetPlugin(Protocol):
     def explain(self, graph: BitGraph, result: VerifyResult) -> dict[str, Any]: ...
 ```
 
+A target may additionally implement `mutate_with_delta`. It returns the same
+candidate graph plus exact removed/added edge tuples. Lanes may use the delta
+for non-authoritative local bookkeeping; callers that use `mutate` retain the
+original graph-only contract.
+
 ## Result requirements
 
 Every exact verification result includes:
@@ -36,6 +41,9 @@ every hot-loop score.
 - A target may provide lane-local score-workspace and batch-profile hooks.
   Hot-loop profile hooks update an existing accumulator and return only the
   ordinary `ScoreResult`; they do not return per-candidate telemetry objects.
+- A target may provide count-backend assembly and conservative cutoff hooks.
+  A cutoff result means only “dominated under the supplied search threshold”;
+  it is not a complete score and cannot be archived or verified as absence.
 - `exact_verify` must be complete to return `VERIFIED` or `REJECTED`.
 - search algorithms do not inspect target-specific internal fields beyond the documented score tuple.
 - SAT encoding is an optional separate protocol.

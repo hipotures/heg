@@ -30,6 +30,7 @@ This is the authoritative engineering-invariant matrix.
 | SQLite migration preserves history | migration harness | Online Backup + canonical hashes | migration rejected |
 | Missing usage remains null | turn lifecycle | timeout/missing usage tests | no fabricated zero |
 | Timeout is unknown, not proof | verifier/SAT/runtime | timeout tests | unknown/fault |
+| Heuristic score-worker failure is not cycle absence | lane scorer fallback and Python record audits | score-worker parity/crash tests | retry once, then Python |
 | Browser cannot supply executable/auth path | HTTP validation | security tests | request rejected |
 
 When changing an invariant:

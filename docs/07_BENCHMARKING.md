@@ -54,6 +54,25 @@ For each algorithm and `n`:
 - CPU utilization;
 - peak RSS.
 
+## Score-kernel acceptance
+
+Run the alternating scorer, cutoff, duplicate-key and profiling comparisons
+with:
+
+```bash
+sglab benchmark score-kernel \
+  --iterations 7 \
+  --backend-evaluations 100 \
+  --search-evaluations 1000 \
+  --output ./docs/reports/score-kernel-benchmarks
+```
+
+The JSON artifact preserves all samples and compared logical states. C++
+activation requires graph-by-graph parity and at least 2× median backend
+throughput at orders 64 and 96. Profiling overhead must remain below 2%.
+Incremental witness scoring is only eligible for design when at least 20% of
+dominant C16/C32/C64 stages complete their recounts.
+
 ## Active Director control study
 
 The M6 hidden-witness control uses the same fixed envelope for static,

@@ -2,6 +2,26 @@
 
 Last implementation audit: **2026-07-26**.
 
+## Persistent scorer, conservative cutoff and fast duplicate key
+
+Erdős–Gyárfás lanes can now use one bounded persistent C++17 count-only
+worker. Compact adjacency bitsets replace per-candidate process startup;
+worker timeout, crash, malformed output or parity mismatch retries once and
+then falls back to Python. Shadow mode checks every graph. C++ mode checks
+every proposed global record plus periodic samples, and M4 remains unchanged.
+
+ILS/tabu scoring can stop when a monotone partial score is already dominated.
+A deterministic mutation-delta key removes full graph6/SHA-256 construction
+from local duplicate/tabu checks while legacy checkpoints retain their key
+scheme. All controls and worker provenance are reported per attempt/batch.
+
+On seven alternating pairs, C++ improved median backend throughput by 8.64× at
+order 64 and 12.38× at order 96. Early exit added 9.3%, the fast key added
+28.9%, and profiling overhead was 0.71%; every compared logical trajectory
+matched. The incremental-witness gate failed at 0% complete dominant-length
+stages, so that riskier optimization is not implemented. See
+`docs/reports/M6_SCORE_PIPELINE_OPTIMIZATION.md`.
+
 ## Complete Director request-budget repair
 
 The repeated production `DirectorContextBudgetExceeded` fault was reproduced

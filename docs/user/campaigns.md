@@ -91,8 +91,10 @@ Measure progress with:
 Do not use only the final best score.
 
 Operator diagnostics may include one aggregated score profile per completed
-lane batch. These timing and DFS-node counters explain throughput; they are not
-candidate evidence and do not affect heuristic scores or M4 verification.
+lane batch. These timing, DFS-node, completeness and early-cutoff counters
+explain throughput; they are not candidate evidence and do not affect
+heuristic scores or M4 verification. Batch diagnostics also identify the
+requested/effective score backend and any Python audits or fallbacks.
 
 [screenshot: ID=USR-CAMPAIGN-01; save as docs/assets/screenshots/user/campaigns/director-assessment.png; crop the “Director assessment & hypotheses” section from a running or stopped campaign, include the latest campaign assessment, at least two hypothesis cards with confidence/evidence, and the adjacent current Director decision summary; exclude raw JSON technical details.]
 

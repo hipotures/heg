@@ -2,6 +2,11 @@
 
 Date: **2026-07-24**
 
+Implementation outcome: the persistent C++17 option, conservative early exit
+and delta-based local duplicate key were accepted on 2026-07-26. Incremental
+witness maintenance was deferred because its completeness gate failed. See
+`docs/reports/M6_SCORE_PIPELINE_OPTIMIZATION.md`.
+
 ## Measured baseline
 
 The reproduced Phase-B ILS configuration previously spent 94.3% of its search

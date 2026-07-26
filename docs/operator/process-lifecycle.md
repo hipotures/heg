@@ -5,6 +5,7 @@
 Each process must have one reviewed owner:
 
 - campaign coordinator owns lane and verifier processes;
+- each lane owns at most one persistent heuristic score-worker child;
 - dashboard owns workers it launches;
 - App Server client owns its process group;
 - workspace lock prevents a second coordinator.
@@ -39,6 +40,12 @@ A zombie PID is not considered a live worker.
 6. close child processes;
 7. release lease;
 8. reap owned child.
+
+A score-worker protocol error, timeout or crash gets one bounded restart. A
+second failure closes the child and continues that lane with the Python
+heuristic scorer. This local fallback is distinct from exact-verifier failure:
+the helper never certifies candidates and never converts failure into cycle
+absence.
 
 ## Campaign attempt lifecycle
 

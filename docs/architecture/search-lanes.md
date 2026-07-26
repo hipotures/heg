@@ -54,10 +54,35 @@ Actions apply between bounded micro-batches. Each micro-batch produces:
 
 Erdős–Gyárfás score profiling is optional and independent of ancestry
 instrumentation. When enabled, each worker keeps per-length elapsed
-nanoseconds and DFS-node counts in one batch-local accumulator. No
+nanoseconds, DFS-node counts, evaluation counts, complete recounts and
+cutoffs in one batch-local accumulator. No
 per-candidate profile dictionary, JSON, event, SQLite row or log line is
 created. The aggregated `timing.score_profile` is emitted and persisted once
 with the completed batch.
+
+The Erdős–Gyárfás lane may use one persistent `sglab-score-worker` C++17
+process. Requests contain bounded adjacency bitsets; responses contain only
+counts, completeness flags, DFS nodes and elapsed nanoseconds. The process
+starts once per lane, has a separate memory limit and a bounded protocol,
+and is included in lane process-tree RSS. A protocol error, timeout or crash
+is never interpreted as a zero count: the lane retries once and then switches
+to the Python scorer.
+
+`python`, `shadow` and `cpp` scorer modes are rollout controls. Shadow mode
+compares every graph with Python. C++ mode audits every 4096th evaluation and
+every proposed global record with a full Python recount. A mismatch disables
+the worker and makes Python authoritative.
+
+For non-perturbation ILS/tabu moves, an optional monotone cutoff may stop after
+the partial lexicographic penalty already proves that the move cannot be
+accepted or become a global record. Random restart, simulated annealing and
+perturbation moves always receive a full score. The cutoff changes neither RNG
+consumption nor accepted/search-record trajectories.
+
+An optional deterministic 256-bit edge-XOR key avoids graph6/SHA-256
+construction in local duplicate/tabu bookkeeping. It is not a canonical
+graph identity and is never certification evidence. Legacy checkpoints keep
+their recorded key scheme until an explicit algorithmic restart.
 
 Long-running batches may also publish a transient live-frontier sample at most
 once per second. The worker copies the already accepted graph, its existing
@@ -74,6 +99,7 @@ Checkpoint content includes enough state to reproduce continuation:
 - tabu/recent state;
 - counters;
 - parameter/version metadata;
+- local tabu-key scheme;
 - hash/manifest.
 
 Resume verifies hashes and starts a new process generation.
