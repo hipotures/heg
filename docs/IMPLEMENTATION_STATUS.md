@@ -96,6 +96,19 @@ one fresh stateless replan; it is no longer surfaced as a raw
 `IntegrityError`. The historical failed attempt and its records remain
 unchanged.
 
+The next production Resume exercised that action-ID fix successfully: the
+Director used the recommended namespace, but supplied prose rather than
+registry IDs in hypothesis evidence fields. The invalid response was correctly
+persisted and not executed. Its stateless repair prompt then exceeded the
+16,000-token client-owned limit because it redundantly embedded the complete
+10 KiB rejected response alongside the unchanged scientific state. Repair
+prompts now retain the response by artifact/SHA-256 and submit only the exact
+validation errors plus the same state. Offline reconstruction of the preserved
+turn reduces the estimate from 16,743 to 13,989 tokens without increasing any
+limit. The prompt and generated schema also state explicitly that hypothesis
+evidence arrays contain registry IDs, never prose. The failed attempt remains
+immutable historical evidence.
+
 ## First real graph campaign authorization gate
 
 The production campaign CLI now has a deterministic `prepare` boundary for a

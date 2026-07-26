@@ -118,6 +118,10 @@ def hypothesis_update_contract(
         "existing_hypothesis_id_rule": (
             "must reference an existing submitted hypothesis ID"
         ),
+        "evidence_reference_rule": (
+            "evidence_for and evidence_against must contain only exact IDs "
+            "from the submitted evidence registry, never prose"
+        ),
         "existing_operations_available": bool(existing),
     }
 
@@ -174,12 +178,22 @@ def _hypothesis_update_schema(
         "evidence_for": {
             "type": "array",
             "maxItems": 32,
-            "items": {"type": "string"},
+            "items": {
+                "type": "string",
+                "description": (
+                    "Exact submitted evidence-registry ID; never prose."
+                ),
+            },
         },
         "evidence_against": {
             "type": "array",
             "maxItems": 32,
-            "items": {"type": "string"},
+            "items": {
+                "type": "string",
+                "description": (
+                    "Exact submitted evidence-registry ID; never prose."
+                ),
+            },
         },
     }
 

@@ -56,6 +56,14 @@ action or hypothesis update is inserted. The campaign then permits one fresh
 stateless replan; a second collision stops cleanly. A genuinely identical
 idempotent submission retains the existing duplicate/no-op behavior.
 
+An invalid Director result is retained as its own response artifact before
+the one permitted stateless replan. The replan prompt includes the identical
+scientific state, exact validation errors, and the invalid response SHA-256,
+but does not duplicate the full rejected response into client-owned context.
+Hypothesis evidence fields accept only exact submitted evidence-registry IDs,
+never explanatory prose. This keeps the correction actionable and bounded
+without raising the 16,000-token client-owned context limit.
+
 ## CLI
 
 Preview has no database, auth, model, or search side effects:

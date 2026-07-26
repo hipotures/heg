@@ -171,6 +171,14 @@ class DirectorStateV2Tests(unittest.TestCase):
             "existing submitted",
             contract["existing_hypothesis_id_rule"],
         )
+        self.assertIn(
+            "exact IDs",
+            contract["evidence_reference_rule"],
+        )
+        self.assertIn(
+            "never prose",
+            contract["evidence_reference_rule"],
+        )
 
     def test_schema_and_bounded_sections(self) -> None:
         prepared = prepare_director_state_v2(

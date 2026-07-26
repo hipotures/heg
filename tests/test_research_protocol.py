@@ -19,6 +19,7 @@ from sglab.research.app_server_client import (
 from sglab.research.director import ActiveDirector, build_director_prompt
 from sglab.research.protocol import (
     action_identity_contract,
+    canonical_json,
     director_decision_schema,
     hypothesis_updates_match_schema_contract,
 )
@@ -669,6 +670,7 @@ class StubDecisionClient:
         self.wire_bytes = b'{"bounded":"wire"}\n'
         self.closed = False
         self.thread_count = 0
+        self.prompts: list[str] = []
 
     async def start(self) -> None:
         return None
@@ -707,6 +709,7 @@ class StubDecisionClient:
         output_schema,
         on_event=None,
     ):
+        self.prompts.append(prompt)
         decision = self.decisions.pop(0)
         return AppServerTurnResult(
             thread_id=session.thread_id,
@@ -985,7 +988,11 @@ class ActiveDirectorTests(unittest.IsolatedAsyncioTestCase):
             ]
             for action in corrected["actions"]:
                 action["evidence_ids"] = ["snapshot-1"]
-            client = StubDecisionClient([{"invalid": True}, corrected])
+            invalid = {
+                "invalid": True,
+                "duplicated_response_payload": "x" * 40_000,
+            }
+            client = StubDecisionClient([invalid, corrected])
             director = ActiveDirector(
                 client=client,  # type: ignore[arg-type]
                 store=store,
@@ -1014,6 +1021,28 @@ class ActiveDirectorTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 [row["status"] for row in rows],
                 ["completed_invalid", "completed_valid"],
+            )
+            repair_prompt = json.loads(client.prompts[1])
+            self.assertNotIn("invalid_response", repair_prompt)
+            self.assertEqual(
+                repair_prompt["invalid_response_sha256"],
+                hashlib.sha256(
+                    canonical_json(invalid, max_bytes=128 * 1024)
+                ).hexdigest(),
+            )
+            self.assertTrue(repair_prompt["validation_errors"])
+            context_reports = [
+                json.loads(path.read_text(encoding="utf-8"))
+                for path in (
+                    root / "director" / "context-budgets"
+                ).glob("*.json")
+            ]
+            self.assertEqual(len(context_reports), 2)
+            self.assertTrue(
+                all(
+                    report["within_client_token_limit"]
+                    for report in context_reports
+                )
             )
             for row in rows:
                 registry_path = root / row[

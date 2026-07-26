@@ -627,11 +627,15 @@ class ActiveDirector:
         if not validation.accepted and repair_allowed:
             repair_payload = {
                 "repair": (
-                    "Return one corrected decision for the exact same committed "
-                    "snapshot. Do not change snapshot_id."
+                    "Return one fresh corrected decision for the exact same "
+                    "committed snapshot. Do not change snapshot_id. Rebuild "
+                    "the response from the submitted state and validation "
+                    "errors."
                 ),
                 "director_state_v2": prepared_state.state,
-                "invalid_response": result.parsed,
+                "invalid_response_sha256": hashlib.sha256(
+                    response_bytes
+                ).hexdigest(),
                 "validation_errors": [
                     {"path": issue.path, "message": issue.message}
                     for issue in validation.issues
