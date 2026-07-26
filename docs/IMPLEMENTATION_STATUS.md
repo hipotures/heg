@@ -2,6 +2,24 @@
 
 Last implementation audit: **2026-07-26**.
 
+## Recurring Director context-budget repair
+
+The fifth production `DirectorContextBudgetExceeded` recurrence was reproduced
+from its persisted snapshot and context-budget artifact. The request reached
+67,350 bytes / 16,838 estimated tokens. Its calculated state target was below
+the irreducible safe-state floor, so the previous one-shot reduction discarded
+all available compaction and failed at the hard gate.
+
+Complete-request compaction now targets 15,000 tokens, then deterministically
+searches for the tightest feasible state when the ideal target cannot preserve
+all non-droppable facts. The prompt also stops duplicating the action space and
+the complete list of durable reserved action IDs; durable SQLite collision
+validation remains authoritative. The same production snapshot now preflights
+at 59,076 bytes / 14,769 estimated tokens while retaining current executable
+IDs and exact-verifier facts. No model turn or campaign Resume was used for
+this verification. See
+`docs/reports/M6_RECURRING_CONTEXT_BUDGET_REPAIR.md`.
+
 ## Selection-safe dashboard refresh
 
 Periodic dashboard and live-frontier refresh no longer replaces the specific

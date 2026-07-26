@@ -60,6 +60,9 @@ Each action includes:
 
 Action IDs have workspace scope. The state supplies a deterministic recommended
 prefix. A non-idempotent collision rejects the batch before insertion.
+The prompt supplies the number of recently reserved IDs, not their full
+durable list. The SQLite-backed workspace collision check remains the
+authoritative membership test.
 
 The generated schema binds `promote_candidate.candidate_id`,
 `request_diagnostic.subject_ids`, and
@@ -96,6 +99,12 @@ The complete-request budget includes base instructions, prompt, and output
 schema. A request-level compaction pass may reduce policy-droppable
 `DirectorStateV2` detail and rebuild these artifacts under the same snapshot ID
 before any inference starts.
+
+The pass targets 15,000 estimated tokens before applying the 16,000-token hard
+gate. If the calculated state target is smaller than the non-droppable
+projection, the host searches deterministically for the tightest feasible
+state. This preserves exact-verifier facts and current executable IDs while
+still accepting every safe reduction available above that floor.
 
 When the first response is invalid, its repair turn receives the exact
 post-budget `DirectorStateV2` and reference registries submitted on that first

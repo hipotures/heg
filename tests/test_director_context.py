@@ -24,6 +24,8 @@ from sglab.research.context import (
 )
 from sglab.research.director import (
     ActiveDirector,
+    CLIENT_ESTIMATED_TOKENS_SOFT_TARGET,
+    _smallest_feasible_director_state,
     base_instructions,
     build_director_prompt,
 )
@@ -236,6 +238,55 @@ def client_limit_snapshot() -> dict:
 
 
 class DirectorStateV2Tests(unittest.TestCase):
+    def test_prompt_omits_durable_reserved_action_id_list(self) -> None:
+        current = snapshot(
+            [
+                {"action_id": f"action-reserved-{index:02d}"}
+                for index in range(64)
+            ]
+        )
+        payload = json.loads(build_director_prompt(current))
+        identity = payload["action_identity_contract"]
+        applicable = payload["applicable_action_description"]
+
+        self.assertNotIn("recent_reserved_action_ids", identity)
+        self.assertEqual(identity["recent_reserved_action_id_count"], 64)
+        self.assertIn("durable workspace", identity["collision_authority"])
+        self.assertEqual(
+            applicable["source"],
+            "director_state_v2.allowed_action_space",
+        )
+        self.assertNotIn("active_executable_lane_ids", applicable)
+        self.assertNotIn("historical_lane_ids", applicable)
+
+    def test_floor_search_recovers_tightest_safe_state(self) -> None:
+        current = client_limit_snapshot()
+        initial = prepare_director_state_v2(current)
+        recovered, limit, targets = _smallest_feasible_director_state(
+            current,
+            failed_limit=1024,
+            current_state_bytes=initial.size_report["post_compaction"][
+                "director_state_bytes"
+            ],
+        )
+
+        self.assertIsNotNone(recovered)
+        self.assertIsNotNone(limit)
+        self.assertTrue(targets)
+        assert recovered is not None
+        assert limit is not None
+        self.assertLessEqual(
+            recovered.size_report["post_compaction"][
+                "director_state_bytes"
+            ],
+            limit,
+        )
+        with self.assertRaises(DirectorContextBudgetExceeded):
+            prepare_director_state_v2(
+                current,
+                hard_limit_bytes=limit - 1,
+            )
+
     def test_prompt_names_operation_specific_hypothesis_contract(self) -> None:
         payload = json.loads(build_director_prompt(snapshot([batch_action(1)])))
         contract = payload["hypothesis_update_contract"]
@@ -739,6 +790,14 @@ class ContextModeBoundaryTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertTrue(
                 persisted["client_limit_state_byte_targets"]
+            )
+            self.assertEqual(
+                persisted["client_soft_token_target"],
+                CLIENT_ESTIMATED_TOKENS_SOFT_TARGET,
+            )
+            self.assertLessEqual(
+                persisted["client_owned_estimated_tokens"],
+                CLIENT_ESTIMATED_TOKENS_MAX,
             )
             submitted = json.loads(client.prompts[0])[
                 "director_state_v2"

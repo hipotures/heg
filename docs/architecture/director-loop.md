@@ -12,12 +12,15 @@ Two deterministic gates apply before inference:
 1. reduce `DirectorStateV2` to its byte limit;
 2. measure base instructions, prompt, and output schema together.
 
-If the complete request exceeds its token estimate while the state still
-contains policy-droppable detail, the host derives a smaller state-byte target
-from the exact excess plus 1 KiB headroom and rebuilds the prompt, registries,
-and schema. Exact-verifier facts and current executable IDs remain
-non-droppable. If those facts alone cannot fit, the turn still fails closed
-before inference.
+The complete-request pass targets 15,000 estimated client-owned tokens, leaving
+headroom below the 16,000-token hard gate. While the state still contains
+policy-droppable detail, the host derives a smaller state-byte target from the
+exact excess plus 1 KiB headroom and rebuilds the prompt, registries, and
+schema. If that ideal target is below the irreducible safe-state floor, a
+deterministic binary search selects the tightest feasible state instead of
+discarding the entire reduction. Exact-verifier facts and current executable
+IDs remain non-droppable. If the complete request still exceeds the hard gate,
+the turn fails closed before inference.
 
 ## Submitted material
 
@@ -38,6 +41,11 @@ A Director request contains:
 The action space carries compact target-ID lists. Evidence, advisory, and
 executable registries derive their roles from those lists; the prompt does not
 repeat a verbose object for every reference.
+
+The surrounding prompt points to `director_state_v2.allowed_action_space`
+instead of embedding a second copy. It reports the number of durable reserved
+action IDs but does not replay their complete list. Workspace-scoped action-ID
+collision validation remains authoritative in the durable store.
 
 ## Structured output
 

@@ -41,6 +41,7 @@ from .validation import DecisionContext, validate_decision
 
 
 CLIENT_CONTEXT_COMPACTION_HEADROOM_BYTES = 1024
+CLIENT_ESTIMATED_TOKENS_SOFT_TARGET = 15_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,13 +92,9 @@ def build_director_prompt(snapshot: dict[str, Any]) -> str:
         prepared.evidence_registry,
         kinds=frozenset({"hypothesis"}),
     )
-    identity_contract = action_identity_contract(
+    identity_contract = _prompt_action_identity_contract(
+        snapshot,
         str(snapshot["snapshot_id"]),
-        recent_reserved_action_ids=(
-            item.get("action_id")
-            for item in snapshot.get("recent_actions", [])
-            if isinstance(item, dict)
-        ),
     )
     payload = {
         "objective": (
@@ -108,17 +105,10 @@ def build_director_prompt(snapshot: dict[str, Any]) -> str:
         "immutable_target": target,
         "acceptance_control": acceptance_control,
         "applicable_action_description": {
-            "actions": director_state["allowed_action_space"]["actions"],
-            "why_applicable": director_state["allowed_action_space"][
-                "action_applicability"
-            ],
-            "active_executable_lane_ids": director_state[
-                "allowed_action_space"
-            ]["active_executable_lane_ids"],
-            "historical_lane_ids_are_evidence_not_execution_targets": (
-                director_state["allowed_action_space"][
-                    "historical_lane_ids"
-                ]
+            "source": "director_state_v2.allowed_action_space",
+            "instruction": (
+                "Use only the listed actions and current executable target "
+                "IDs. Historical IDs are evidence, not execution targets."
             ),
         },
         "hypothesis_update_contract": hypothesis_update_contract(
@@ -133,6 +123,59 @@ def build_director_prompt(snapshot: dict[str, Any]) -> str:
         ),
     }
     return canonical_json(payload, max_bytes=MAX_SNAPSHOT_BYTES).decode("ascii")
+
+
+def _prompt_action_identity_contract(
+    snapshot: dict[str, Any],
+    snapshot_id: str,
+) -> dict[str, Any]:
+    """Keep collision guidance without repeating durable action IDs."""
+
+    contract = action_identity_contract(
+        snapshot_id,
+        recent_reserved_action_ids=(
+            item.get("action_id")
+            for item in snapshot.get("recent_actions", [])
+            if isinstance(item, dict)
+        ),
+    )
+    reserved = contract.pop("recent_reserved_action_ids", [])
+    contract["recent_reserved_action_id_count"] = len(reserved)
+    contract["collision_authority"] = (
+        "durable workspace validation; reserved IDs are intentionally "
+        "omitted from this bounded prompt"
+    )
+    return contract
+
+
+def _smallest_feasible_director_state(
+    snapshot: dict[str, Any],
+    *,
+    failed_limit: int,
+    current_state_bytes: int,
+) -> tuple[PreparedDirectorState | None, int | None, list[int]]:
+    """Recover the tightest safe state when the ideal target is impossible."""
+
+    low = max(1024, failed_limit + 1)
+    high = min(DIRECTOR_STATE_MAX_BYTES, current_state_bytes - 1)
+    best_state: PreparedDirectorState | None = None
+    best_limit: int | None = None
+    targets: list[int] = []
+    while low <= high:
+        candidate_limit = (low + high) // 2
+        targets.append(candidate_limit)
+        try:
+            candidate = prepare_director_state_v2(
+                snapshot,
+                hard_limit_bytes=candidate_limit,
+            )
+        except DirectorContextBudgetExceeded:
+            low = candidate_limit + 1
+        else:
+            best_state = candidate
+            best_limit = candidate_limit
+            high = candidate_limit - 1
+    return best_state, best_limit, targets
 
 
 class ActiveDirector:
@@ -403,6 +446,8 @@ class ActiveDirector:
                 "prompt DirectorStateV2 does not match the committed snapshot"
             )
         client_compaction_targets: list[int] = []
+        client_compaction_floor_search_targets: list[int] = []
+        client_compaction_recovered_limit: int | None = None
         client_compaction_failure: str | None = None
         while True:
             parsed_prompt["director_state_v2"] = prepared_state.state
@@ -453,7 +498,11 @@ class ActiveDirector:
                 output_schema=output_schema,
                 mode=self.context_mode,
             )
-            if context_report["within_client_token_limit"]:
+            within_soft_target = (
+                int(context_report["client_owned_estimated_tokens"])
+                <= CLIENT_ESTIMATED_TOKENS_SOFT_TARGET
+            )
+            if within_soft_target:
                 break
             if state_is_fixed:
                 break
@@ -463,7 +512,10 @@ class ActiveDirector:
                     "director_state_bytes"
                 ]
             )
-            excess_bytes = total_bytes - CLIENT_ESTIMATED_TOKENS_MAX * 4
+            excess_bytes = (
+                total_bytes
+                - CLIENT_ESTIMATED_TOKENS_SOFT_TARGET * 4
+            )
             next_limit = state_bytes - max(
                 CLIENT_CONTEXT_COMPACTION_HEADROOM_BYTES,
                 excess_bytes
@@ -478,16 +530,47 @@ class ActiveDirector:
                 )
             except DirectorContextBudgetExceeded as error:
                 client_compaction_failure = str(error)
-                break
+                (
+                    recovered_state,
+                    recovered_limit,
+                    floor_search_targets,
+                ) = _smallest_feasible_director_state(
+                    snapshot,
+                    failed_limit=next_limit,
+                    current_state_bytes=state_bytes,
+                )
+                client_compaction_floor_search_targets.extend(
+                    floor_search_targets
+                )
+                if recovered_state is None or recovered_limit is None:
+                    break
+                prepared_state = recovered_state
+                client_compaction_recovered_limit = recovered_limit
         context_report["client_limit_compaction_applied"] = bool(
             client_compaction_targets
+        )
+        context_report["client_soft_token_target"] = (
+            CLIENT_ESTIMATED_TOKENS_SOFT_TARGET
+        )
+        context_report["within_client_soft_target"] = (
+            int(context_report["client_owned_estimated_tokens"])
+            <= CLIENT_ESTIMATED_TOKENS_SOFT_TARGET
         )
         context_report["client_limit_state_byte_targets"] = (
             client_compaction_targets
         )
+        context_report["client_limit_floor_search_targets"] = (
+            client_compaction_floor_search_targets
+        )
+        context_report["client_limit_recovered_state_byte_limit"] = (
+            client_compaction_recovered_limit
+        )
         if client_compaction_failure is not None:
             context_report["client_limit_compaction_failure"] = (
                 client_compaction_failure
+            )
+            context_report["client_limit_compaction_failure_recovered"] = (
+                client_compaction_recovered_limit is not None
             )
         registry_bytes = canonical_json(
             prepared_state.evidence_registry, max_bytes=128 * 1024
@@ -694,13 +777,9 @@ class ActiveDirector:
                     {"path": issue.path, "message": issue.message}
                     for issue in validation.issues
                 ],
-                "action_identity_contract": action_identity_contract(
+                "action_identity_contract": _prompt_action_identity_contract(
+                    snapshot,
                     snapshot_id,
-                    recent_reserved_action_ids=(
-                        item.get("action_id")
-                        for item in snapshot.get("recent_actions", [])
-                        if isinstance(item, dict)
-                    ),
                 ),
             }
             repair_prompt = canonical_json(

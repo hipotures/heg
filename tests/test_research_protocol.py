@@ -131,9 +131,11 @@ class ResearchProtocolTests(unittest.TestCase):
         contract = prompt["action_identity_contract"]
         self.assertEqual(contract["scope"], "durable_workspace")
         self.assertTrue(contract["recommended_prefix"].startswith("action-"))
+        self.assertNotIn("recent_reserved_action_ids", contract)
+        self.assertEqual(contract["recent_reserved_action_id_count"], 1)
         self.assertIn(
-            "action-already-durable",
-            contract["recent_reserved_action_ids"],
+            "durable workspace",
+            contract["collision_authority"],
         )
 
     def test_action_id_must_not_reuse_durable_workspace_identifier(

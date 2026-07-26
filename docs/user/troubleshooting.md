@@ -70,7 +70,10 @@ Director-state limit, then preview Resume with a repair acknowledgement.
 For `client-owned context estimate exceeds ... tokens`, use a build that also
 reduces policy-droppable state against the exact combined size of base
 instructions, prompt, and output schema. The saved context-budget report shows
-`client_limit_compaction_applied` and the attempted state-byte targets.
+`client_limit_compaction_applied` and the attempted state-byte targets. Current
+builds target 15,000 tokens before the 16,000 hard gate and, when the ideal
+target is impossible, record `client_limit_floor_search_targets` plus
+`client_limit_recovered_state_byte_limit`.
 
 If the fault remains after both passes, inspect that report. A final reduced
 `DirectorStateV2` above 32,768 bytes, or a complete request above its token
