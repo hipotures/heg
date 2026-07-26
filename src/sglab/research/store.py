@@ -1218,6 +1218,39 @@ class ResearchStore:
             if snapshot is None or campaign is None:
                 raise RuntimeError("decision references missing durable state")
             campaign_is_fresh = int(snapshot[0]) == int(campaign[0])
+            submitted_actions = {
+                str(action["action_id"]): action
+                for action in decision["actions"]
+            }
+            existing_by_action_id: dict[str, sqlite3.Row] = {}
+            if submitted_actions:
+                placeholders = ",".join("?" for _ in submitted_actions)
+                existing_by_action_id = {
+                    str(row["action_id"]): row
+                    for row in database.execute(
+                        f"""
+                        SELECT action_id, idempotency_key
+                        FROM director_actions
+                        WHERE action_id IN ({placeholders})
+                        """,
+                        tuple(submitted_actions),
+                    )
+                }
+            action_id_collisions = {
+                action_id
+                for action_id, existing in existing_by_action_id.items()
+                if str(existing["idempotency_key"])
+                != str(submitted_actions[action_id]["idempotency_key"])
+            }
+            batch_status = (
+                "rejected_action_id_collision"
+                if action_id_collisions
+                else (
+                    "accepted"
+                    if campaign_is_fresh
+                    else "rejected_stale_campaign"
+                )
+            )
             database.execute(
                 """
                 INSERT INTO director_action_batches
@@ -1237,11 +1270,19 @@ class ResearchStore:
                     turn_record_id,
                     decision["campaign_assessment"],
                     json.dumps(decision["next_review"], sort_keys=True),
-                    "accepted" if campaign_is_fresh else "rejected_stale_campaign",
+                    batch_status,
                     now,
                     turn_record_id,
                 ),
             )
+            if action_id_collisions:
+                for action_id in submitted_actions:
+                    statuses[action_id] = (
+                        "rejected_action_id_collision"
+                        if action_id in action_id_collisions
+                        else "blocked_action_id_collision"
+                    )
+                return statuses
             for action in decision["actions"]:
                 action_id = str(action["action_id"])
                 duplicate = database.execute(

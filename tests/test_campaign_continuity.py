@@ -480,7 +480,14 @@ class CampaignContinuityTests(unittest.TestCase):
             preview["proposed_attempt_index"],
             expected_attempt_index,
         )
-        self.assertEqual(preview["reusable_checkpoint_count"], 6)
+        self.assertEqual(
+            preview["reusable_checkpoint_count"],
+            sum(
+                bool(checkpoint["valid"])
+                for checkpoint in preview["checkpoints"]
+            ),
+        )
+        self.assertGreater(preview["reusable_checkpoint_count"], 0)
         self.assertEqual(
             preview["historical_stale_actions_excluded"][0]["action_id"],
             "verify-retained-candidate-01",

@@ -27,6 +27,7 @@ from .context import (
     prepare_director_state_v2,
 )
 from .protocol import (
+    action_identity_contract,
     DecisionValidation,
     MAX_SNAPSHOT_BYTES,
     canonical_json,
@@ -85,6 +86,14 @@ def build_director_prompt(snapshot: dict[str, Any]) -> str:
         prepared.evidence_registry,
         kinds=frozenset({"hypothesis"}),
     )
+    identity_contract = action_identity_contract(
+        str(snapshot["snapshot_id"]),
+        recent_reserved_action_ids=(
+            item.get("action_id")
+            for item in snapshot.get("recent_actions", [])
+            if isinstance(item, dict)
+        ),
+    )
     payload = {
         "objective": (
             "Actively manage the running concurrent search portfolio. "
@@ -110,6 +119,7 @@ def build_director_prompt(snapshot: dict[str, Any]) -> str:
         "hypothesis_update_contract": hypothesis_update_contract(
             hypothesis_ids
         ),
+        "action_identity_contract": identity_contract,
         "director_state_v2": director_state,
         "required_response": (
             "Assess, update evidence-backed hypotheses, issue concrete typed "
@@ -446,6 +456,9 @@ class ActiveDirector:
         output_schema = director_decision_schema(
             prepared_state.state["allowed_action_space"],
             existing_hypothesis_ids=validation_context.hypothesis_ids,
+            action_id_prefix=action_identity_contract(
+                snapshot_id
+            )["recommended_prefix"],
         )
         context_report = complete_context_size_report(
             prepared_state,
@@ -623,6 +636,14 @@ class ActiveDirector:
                     {"path": issue.path, "message": issue.message}
                     for issue in validation.issues
                 ],
+                "action_identity_contract": action_identity_contract(
+                    snapshot_id,
+                    recent_reserved_action_ids=(
+                        item.get("action_id")
+                        for item in snapshot.get("recent_actions", [])
+                        if isinstance(item, dict)
+                    ),
+                ),
             }
             repair_prompt = canonical_json(
                 repair_payload, max_bytes=MAX_SNAPSHOT_BYTES

@@ -46,6 +46,16 @@ outcomes, lane history, valid checkpoints, telemetry summaries, cumulative
 time/evaluations/tokens, idempotency keys, and prior faults. Terminal actions
 and completed verifier jobs are not executed again.
 
+Director action identifiers have durable workspace scope because
+`director_actions.action_id` is a workspace-wide primary key. Every stateless
+turn receives a deterministic snapshot-derived recommended prefix, and the
+semantic validator rejects any identifier already present in the durable
+workspace. The persistence layer repeats this check inside the decision-batch
+transaction: a non-idempotent collision rejects the whole batch before any
+action or hypothesis update is inserted. The campaign then permits one fresh
+stateless replan; a second collision stops cleanly. A genuinely identical
+idempotent submission retains the existing duplicate/no-op behavior.
+
 ## CLI
 
 Preview has no database, auth, model, or search side effects:

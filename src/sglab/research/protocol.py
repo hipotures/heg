@@ -40,6 +40,33 @@ HYPOTHESIS_UPDATE_FIELDS = (
 )
 
 
+def action_identity_contract(
+    snapshot_id: str,
+    *,
+    recent_reserved_action_ids: Any = (),
+) -> dict[str, Any]:
+    prefix = (
+        f"action-{hashlib.sha256(snapshot_id.encode('utf-8')).hexdigest()[:12]}-"
+    )
+    recent = sorted(
+        {
+            value
+            for value in recent_reserved_action_ids
+            if isinstance(value, str) and value
+        }
+    )[-64:]
+    return {
+        "scope": "durable_workspace",
+        "rule": (
+            "Every action_id must be new and must never reuse an action_id "
+            "already persisted in this workspace."
+        ),
+        "recommended_prefix": prefix,
+        "recent_reserved_action_ids": recent,
+        "collision_policy": "one_fresh_stateless_replan_then_fail_closed",
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class ValidationIssue:
     path: str
@@ -203,9 +230,21 @@ def _hypothesis_update_schema(
     return {"anyOf": branches}
 
 
-def _common_action_properties() -> dict[str, Any]:
+def _common_action_properties(
+    action_id_prefix: str | None = None,
+) -> dict[str, Any]:
+    action_id: dict[str, Any] = {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+    }
+    if action_id_prefix:
+        action_id["description"] = (
+            "Must be new across the durable workspace. Use prefix "
+            f"{action_id_prefix}"
+        )
     return {
-        "action_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "action_id": action_id,
         "type": {"type": "string", "enum": list(ACTION_TYPES)},
         "priority": {"type": "integer", "minimum": 0, "maximum": 100},
         "hypothesis_ids": {
@@ -269,6 +308,7 @@ def director_decision_schema(
     allowed_action_space: dict[str, Any] | None = None,
     *,
     existing_hypothesis_ids: Any = (),
+    action_id_prefix: str | None = None,
 ) -> dict[str, Any]:
     """Return the structured schema for the submitted applicable actions."""
 
@@ -294,7 +334,7 @@ def director_decision_schema(
         if isinstance(allowed_action_space, dict)
         else []
     )
-    common = _common_action_properties()
+    common = _common_action_properties(action_id_prefix)
     common_required = [
         "action_id",
         "type",

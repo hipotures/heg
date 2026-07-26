@@ -249,6 +249,12 @@ class SnapshotBuilder:
             applicable_action_types=frozenset(
                 prepared.state["allowed_action_space"]["actions"]
             ),
+            reserved_action_ids=frozenset(
+                str(row["action_id"])
+                for row in self.store.connection.execute(
+                    "SELECT action_id FROM director_actions"
+                )
+            ),
         )
         return snapshot, context
 

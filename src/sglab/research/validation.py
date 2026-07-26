@@ -75,6 +75,7 @@ class DecisionContext:
     advisory_target_ids: frozenset[str] | None = None
     executable_target_ids: frozenset[str] | None = None
     applicable_action_types: frozenset[str] = frozenset(ACTION_TYPES)
+    reserved_action_ids: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         # Backward-compatible construction for callers predating explicit
@@ -182,6 +183,11 @@ def validate_decision(
         action_id = _identifier(issues, action["action_id"], f"{path}.action_id")
         if action_id in action_ids:
             issues.add(f"{path}.action_id", "is duplicated in this batch")
+        if action_id in context.reserved_action_ids:
+            issues.add(
+                f"{path}.action_id",
+                "already exists in the durable workspace; choose a new ID",
+            )
         action_ids.add(action_id)
         key = _identifier(
             issues,

@@ -57,9 +57,10 @@ four prior M4 outcomes and its hypothesis, and changed application worker
 slots from 2 to 16 without duplicate actions. Protected HTTP controls and
 Playwright CDP verify attempt history, cumulative/local metrics, repair
 acknowledgement, resource differences, and desktop/mobile Resume preview.
-The real paused campaign produces a read-only Resume preview with six valid
-checkpoints and its historical missing-candidate action excluded. No real
-model or auth access occurred. See `docs/CAMPAIGN_RESUME.md`,
+The real paused campaign produces a read-only Resume preview with the current
+set of hash-valid reusable checkpoints and its historical missing-candidate
+action excluded. No real model or auth access occurred. See
+`docs/CAMPAIGN_RESUME.md`,
 `docs/CAMPAIGN_SCIENTIFIC_MEMORY.md`, and
 `docs/reports/CAMPAIGN_RESUME_AND_MEMORY_PHASE_A.md`.
 
@@ -82,6 +83,18 @@ boundary: expected App Server wrappers were accepted below the legacy
 trusted-executable policy now recognizes both private layouts. Targets remain
 non-followed for accounting, wrong-directory/untrusted links remain rejected,
 and the failed execution attempt remains immutable historical evidence.
+
+A later production attempt completed a valid Director turn but the stateless
+response reused four descriptive `action_id` values from an earlier batch
+with new idempotency keys. SQLite therefore raised the workspace-wide primary
+key constraint before any of those returned actions executed. The Director
+contract now supplies a deterministic per-snapshot action-ID namespace, the
+semantic context rejects every durable workspace collision, and decision
+persistence performs an atomic collision preflight. A race discovered only at
+commit time is recorded as `rejected_action_id_collision` and receives at most
+one fresh stateless replan; it is no longer surfaced as a raw
+`IntegrityError`. The historical failed attempt and its records remain
+unchanged.
 
 ## First real graph campaign authorization gate
 

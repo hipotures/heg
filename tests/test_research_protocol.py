@@ -16,8 +16,9 @@ from sglab.research.app_server_client import (
     AppServerTurnResult,
     AppServerUsage,
 )
-from sglab.research.director import ActiveDirector
+from sglab.research.director import ActiveDirector, build_director_prompt
 from sglab.research.protocol import (
+    action_identity_contract,
     director_decision_schema,
     hypothesis_updates_match_schema_contract,
 )
@@ -112,6 +113,58 @@ def context() -> DecisionContext:
 
 
 class ResearchProtocolTests(unittest.TestCase):
+    def test_prompt_supplies_turn_scoped_action_identity_contract(self) -> None:
+        prompt = json.loads(
+            build_director_prompt(
+                {
+                    "schema_version": "3.0",
+                    "snapshot_id": "snapshot-1",
+                    "campaign": {"stop_mode": "time_limit"},
+                    "target": {"target_id": "erdos_gyarfas"},
+                    "recent_actions": [
+                        {"action_id": "action-already-durable"}
+                    ],
+                }
+            )
+        )
+        contract = prompt["action_identity_contract"]
+        self.assertEqual(contract["scope"], "durable_workspace")
+        self.assertTrue(contract["recommended_prefix"].startswith("action-"))
+        self.assertIn(
+            "action-already-durable",
+            contract["recent_reserved_action_ids"],
+        )
+
+    def test_action_id_must_not_reuse_durable_workspace_identifier(
+        self,
+    ) -> None:
+        decision = valid_decision()
+        reserved = frozenset({"action-start"})
+        result = validate_decision(
+            decision,
+            replace(context(), reserved_action_ids=reserved),
+        )
+        self.assertFalse(result.accepted)
+        self.assertTrue(
+            any(
+                issue.path == "$.actions[0].action_id"
+                and "durable workspace" in issue.message
+                for issue in result.issues
+            )
+        )
+        contract = action_identity_contract(
+            "snapshot-1",
+            recent_reserved_action_ids=reserved,
+        )
+        self.assertIn("action-start", contract["recent_reserved_action_ids"])
+        schema = director_decision_schema(
+            action_id_prefix=contract["recommended_prefix"]
+        )
+        description = schema["properties"]["actions"]["items"]["anyOf"][0][
+            "properties"
+        ]["action_id"]["description"]
+        self.assertIn(contract["recommended_prefix"], description)
+
     def test_create_with_new_hypothesis_id(self) -> None:
         decision = valid_decision()
         result = validate_decision(decision, context())
@@ -378,6 +431,122 @@ class ResearchProtocolTests(unittest.TestCase):
 
 
 class ResearchStoreTests(unittest.TestCase):
+    def test_action_id_collision_rejects_whole_batch_atomically(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "campaign.sqlite3"
+            with ResearchStore(path) as store:
+                store.create_campaign(
+                    campaign_id="campaign-collision",
+                    target="erdos_gyarfas",
+                    target_definition_sha256="a" * 64,
+                    stop_mode="time_limit",
+                    deadline_at="2026-07-25T00:00:00Z",
+                )
+
+                first = valid_decision()
+                for index, decision in enumerate(
+                    (
+                        first,
+                        {
+                            **copy.deepcopy(first),
+                            "snapshot_id": "snapshot-2",
+                        },
+                    ),
+                    start=1,
+                ):
+                    snapshot_id = f"snapshot-{index}"
+                    trigger_id = f"trigger-{index}"
+                    state_version = int(
+                        store.campaign("campaign-collision")[
+                            "state_version"
+                        ]
+                    )
+                    store.record_snapshot(
+                        snapshot_id=snapshot_id,
+                        campaign_id="campaign-collision",
+                        campaign_state_version=state_version,
+                        high_water={},
+                        artifact_ref=f"snapshots/{snapshot_id}.json",
+                        artifact_sha256=str(index) * 64,
+                        payload_bytes=100,
+                    )
+                    store.record_trigger(
+                        trigger_id=trigger_id,
+                        campaign_id="campaign-collision",
+                        campaign_state_version=state_version,
+                        reasons=["bootstrap"],
+                        first_event_at="2026-07-24T00:00:00Z",
+                        snapshot_id=snapshot_id,
+                    )
+                    if index == 2:
+                        for action in decision["actions"]:
+                            action["idempotency_key"] += ":new-turn"
+                    session_record_id = f"session-record-{index}"
+                    store.record_session(
+                        record_id=session_record_id,
+                        campaign_id="campaign-collision",
+                        thread_id=f"thread-{index}",
+                        session_id=f"session-{index}",
+                        thread_path=f"/private/rollout-{index}.jsonl",
+                        parent_thread_id=None,
+                        model="replay",
+                        effort="none",
+                        codex_version="test",
+                        executable_sha256="c" * 64,
+                        protocol_schema_sha256="d" * 64,
+                    )
+                    turn = f"turn-record-{index}"
+                    store.begin_turn(
+                        turn_record_id=turn,
+                        session_record_id=session_record_id,
+                        campaign_id="campaign-collision",
+                        thread_id=f"thread-{index}",
+                        snapshot_id=snapshot_id,
+                        trigger_id=trigger_id,
+                        request_artifact_ref=f"turns/request-{index}.json",
+                        request_sha256="e" * 64,
+                        wire_artifact_ref=f"turns/wire-{index}.jsonl",
+                    )
+                    store.complete_turn(
+                        turn,
+                        turn_id=f"turn-{index}",
+                        status="completed_valid",
+                        response_artifact_ref=f"turns/response-{index}.json",
+                        response_sha256="f" * 64,
+                    )
+                    statuses = store.commit_decision_batch(
+                        decision_batch_id=f"batch-{index}",
+                        campaign_id="campaign-collision",
+                        snapshot_id=snapshot_id,
+                        trigger_id=trigger_id,
+                        turn_record_id=turn,
+                        decision=decision,
+                    )
+                    if index == 1:
+                        self.assertIn("accepted", statuses.values())
+                    else:
+                        self.assertEqual(
+                            set(statuses.values()),
+                            {"rejected_action_id_collision"},
+                        )
+
+                self.assertEqual(
+                    store.connection.execute(
+                        "SELECT count(*) FROM director_actions"
+                    ).fetchone()[0],
+                    2,
+                )
+                self.assertEqual(
+                    store.connection.execute(
+                        """
+                        SELECT validation_status
+                        FROM director_action_batches
+                        WHERE decision_batch_id='batch-2'
+                        """
+                    ).fetchone()[0],
+                    "rejected_action_id_collision",
+                )
+
     def test_campaign_snapshot_session_and_turn_are_durable(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "campaign.sqlite3"
@@ -565,6 +734,104 @@ class StubDecisionClient:
 
 
 class ActiveDirectorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_reserved_action_id_gets_one_fresh_repair_turn(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = ResearchStore(root / "campaign.sqlite3")
+            store.create_campaign(
+                campaign_id="campaign-action-id-repair",
+                target="erdos_gyarfas",
+                target_definition_sha256="a" * 64,
+                stop_mode="time_limit",
+                deadline_at="2026-07-25T00:00:00Z",
+            )
+            snapshot = {
+                "schema_version": "3.0",
+                "snapshot_id": "snapshot-1",
+                "campaign": {"stop_mode": "time_limit"},
+                "target": {"target_id": "erdos_gyarfas"},
+                "resources": {"max_active_lanes": 2},
+                "lanes": [
+                    {
+                        "lane_id": "lane-1",
+                        "lane_version": 3,
+                        "state": "running",
+                        "algorithm": "simulated_annealing",
+                    }
+                ],
+                "available_evidence_ids": ["evidence-1"],
+                "recent_actions": [{"action_id": "action-start"}],
+            }
+            store.record_snapshot(
+                snapshot_id="snapshot-1",
+                campaign_id="campaign-action-id-repair",
+                campaign_state_version=0,
+                high_water={},
+                artifact_ref="snapshots/snapshot-1.json",
+                artifact_sha256="b" * 64,
+                payload_bytes=100,
+            )
+            store.record_trigger(
+                trigger_id="trigger-1",
+                campaign_id="campaign-action-id-repair",
+                campaign_state_version=0,
+                reasons=["bootstrap"],
+                first_event_at="2026-07-24T00:00:00Z",
+                snapshot_id="snapshot-1",
+            )
+            colliding = valid_decision()
+            corrected = copy.deepcopy(colliding)
+            for action in (colliding, corrected):
+                action["hypothesis_updates"][0]["evidence_for"] = [
+                    "snapshot-1"
+                ]
+                for item in action["actions"]:
+                    item["evidence_ids"] = ["snapshot-1"]
+            corrected["actions"][0]["action_id"] = "action-fixed-start"
+            corrected["actions"][1]["action_id"] = "action-fixed-patch"
+            client = StubDecisionClient([colliding, corrected])
+            director = ActiveDirector(
+                client=client,  # type: ignore[arg-type]
+                store=store,
+                campaign_id="campaign-action-id-repair",
+                campaign_dir=root,
+                codex_version="0.145.0",
+                executable_sha256="c" * 64,
+                protocol_schema_sha256="d" * 64,
+            )
+            try:
+                await director.start()
+                evidence = await director.request_decision(
+                    snapshot=snapshot,
+                    trigger_id="trigger-1",
+                    context=replace(
+                        context(),
+                        reserved_action_ids=frozenset({"action-start"}),
+                    ),
+                )
+                self.assertTrue(evidence.validation.accepted)
+                self.assertEqual(len(evidence.turn_record_ids), 2)
+                self.assertEqual(client.thread_count, 2)
+                self.assertEqual(
+                    [
+                        row["status"]
+                        for row in store.connection.execute(
+                            """
+                            SELECT status FROM app_server_turns
+                            ORDER BY started_at, rowid
+                            """
+                        )
+                    ],
+                    ["completed_invalid", "completed_valid"],
+                )
+                self.assertEqual(
+                    evidence.decision["actions"][0]["action_id"],
+                    "action-fixed-start",
+                )
+            finally:
+                await director.close()
+                store.close()
+
     async def test_strict_campaign_model_contract_fails_before_turn(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

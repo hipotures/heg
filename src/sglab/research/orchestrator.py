@@ -117,23 +117,39 @@ class ActiveResearchOrchestrator:
                 total_candidates=self.manager.total_candidates()
             )
             first = await self._run_cycle(batch)
-            if "stale_target" not in first.action_statuses.values():
+            replan_statuses = {
+                "stale_target",
+                "rejected_action_id_collision",
+            }
+            if not (
+                replan_statuses & set(first.action_statuses.values())
+            ):
                 return first
             second = await self._run_cycle(
                 TriggerBatch(
-                    reasons=("stale_action_replan",),
+                    reasons=(
+                        (
+                            "action_id_collision_replan"
+                            if "rejected_action_id_collision"
+                            in first.action_statuses.values()
+                            else "stale_action_replan"
+                        ),
+                    ),
                     first_event_at=utc_now(),
                 )
             )
             statuses = {**first.action_statuses, **second.action_statuses}
-            exhausted = "stale_target" in second.action_statuses.values()
+            exhausted = bool(
+                replan_statuses & set(second.action_statuses.values())
+            )
             if exhausted:
                 self.store.finish_campaign(
                     self.campaign_id,
                     terminal_kind="director_replan_exhausted",
                     detail=(
-                        "one fresh stateless replan also referenced a stale "
-                        "candidate; no invalid action was executed"
+                        "one fresh stateless replan also returned an invalid "
+                        "action target or identifier; no invalid action was "
+                        "executed"
                     ),
                 )
             return DirectorCycleResult(
