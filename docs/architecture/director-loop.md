@@ -51,6 +51,12 @@ The output includes:
 - evaluation windows;
 - next review trigger.
 
+When the action space exposes retained candidates, every candidate target in
+the generated output schema is restricted to the exact submitted candidate
+ID list. This includes each item of
+`schedule_verification.candidate_ids`; semantic validation repeats the same
+membership check as defense in depth.
+
 ## Validation layers
 
 1. JSON/schema validation.

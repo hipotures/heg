@@ -80,6 +80,13 @@ the exact prepared state and registries from that turn. A repair must not
 recompute the same source snapshot at the default byte limit. Test an
 invalid→repair sequence before Resume.
 
+For `Director response remained invalid after repair` caused by an
+inadmissible `schedule_verification` candidate, confirm that the generated
+schema's `candidate_ids.items.enum` exactly equals the submitted candidate
+target list. Replay the faulted action space, verify the full request remains
+below its client-owned token gate, and retain the semantic membership check
+before Resume.
+
 ## Scientific invalidation
 
 If a bug invalidated prior scientific results, do not Resume. Mark the

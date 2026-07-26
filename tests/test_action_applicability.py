@@ -457,3 +457,19 @@ class ActionApplicabilityTests(unittest.TestCase):
                 validation.accepted,
                 (action_type, validation.issues),
             )
+
+        invalid_verification = {
+            **actions["schedule_verification"],
+            "candidate_ids": ["candidate-best-truncated"],
+        }
+        rejected = validate_decision(
+            decision_with_action(invalid_verification), context
+        )
+        self.assertFalse(rejected.accepted)
+        self.assertTrue(
+            any(
+                issue.path == "$.actions[0].candidate_ids[0]"
+                and issue.message == "is not an admissible retained candidate"
+                for issue in rejected.issues
+            )
+        )

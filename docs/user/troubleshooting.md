@@ -47,6 +47,12 @@ Common causes:
 - inactive lane or candidate used as an executable target;
 - context or output size above a hard limit.
 
+Current builds constrain verification candidate IDs in the generated output
+schema as well as in semantic validation. If an older build repeatedly
+accepted a syntactically valid but unknown
+`schedule_verification.candidate_ids` value from structured output, upgrade
+before Resume; the rejected turns remain preserved evidence.
+
 ## `scientific_state_overflow`
 
 The deterministic compacted state could not fit below the hard limit without

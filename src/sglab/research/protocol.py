@@ -619,7 +619,14 @@ def director_decision_schema(
                     "type": "array",
                     "minItems": 1,
                     "maxItems": 32,
-                    "items": {"type": "string"},
+                    "items": {
+                        "type": "string",
+                        **(
+                            {"enum": candidate_target_ids}
+                            if allowed_action_space is not None
+                            else {}
+                        ),
+                    },
                 },
                 "verification_priority": {
                     "type": "integer",

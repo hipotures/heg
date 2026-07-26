@@ -2,6 +2,21 @@
 
 Last implementation audit: **2026-07-26**.
 
+## Director verification-target schema
+
+The dynamic Director output schema now restricts every
+`schedule_verification.candidate_ids` item to the exact submitted candidate
+target list. The semantic validator retains the same membership check; no
+unknown ID is repaired, normalized or executed.
+
+This closes the production attempt-15 gap in which the repair response used a
+truncated candidate ID that was structurally valid as an arbitrary string but
+semantically inadmissible. Replaying that attempt's 12-candidate action space
+excluded the truncated ID and increased the complete schema by 453 bytes. The
+full request remained within budget at 53,359 bytes / 13,340 estimated tokens
+against the 16,000-token gate. See
+`docs/reports/M6_DIRECTOR_VERIFICATION_TARGET_SCHEMA.md`.
+
 ## Director repair-turn state identity
 
 Production attempt 11 completed four valid Director turns, then received one

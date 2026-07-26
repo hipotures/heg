@@ -256,6 +256,38 @@ class ResearchProtocolTests(unittest.TestCase):
         self.assertIn('"expected_lane_version"', encoded)
         self.assertNotIn('"command"', encoded)
 
+    def test_verification_schema_only_allows_submitted_candidates(
+        self,
+    ) -> None:
+        candidate_ids = ["candidate-1", "candidate-2"]
+        schema = director_decision_schema(
+            {
+                "actions": ["schedule_verification"],
+                "active_executable_lane_ids": [],
+                "candidate_target_ids": candidate_ids,
+                "checkpoint_target_ids": [],
+            }
+        )
+        verification = schema["properties"]["actions"]["items"]["anyOf"][0]
+        self.assertEqual(
+            verification["properties"]["candidate_ids"]["items"],
+            {"type": "string", "enum": candidate_ids},
+        )
+
+        generic = director_decision_schema()
+        generic_verification = next(
+            variant
+            for variant in generic["properties"]["actions"]["items"][
+                "anyOf"
+            ]
+            if variant["properties"]["type"]["const"]
+            == "schedule_verification"
+        )
+        self.assertEqual(
+            generic_verification["properties"]["candidate_ids"]["items"],
+            {"type": "string"},
+        )
+
     def test_parameter_semantics_are_normalized_and_unsupported_rejected(
         self,
     ) -> None:

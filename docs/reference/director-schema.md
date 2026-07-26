@@ -61,6 +61,12 @@ Each action includes:
 Action IDs have workspace scope. The state supplies a deterministic recommended
 prefix. A non-idempotent collision rejects the batch before insertion.
 
+The generated schema binds `promote_candidate.candidate_id`,
+`request_diagnostic.subject_ids`, and
+`schedule_verification.candidate_ids` to the submitted candidate-target enum.
+An unseen, historical-only, or truncated candidate ID is therefore outside
+the structured-output contract and remains invalid under semantic validation.
+
 ## Validation
 
 Validation covers:
