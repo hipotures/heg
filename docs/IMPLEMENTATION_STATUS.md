@@ -2,6 +2,16 @@
 
 Last implementation audit: **2026-07-26**.
 
+## Audience-oriented documentation migration
+
+The repository documentation now has user, operator, architecture, reference,
+Codex, ADR, and evidence-report entry points based on commit
+`a25579d0a6cd088d2c0687664312e9c3b07404b7`. The migration preserves historical
+reports, benchmark evidence, and the chronological implementation ledger while
+replacing six superseded mixed-purpose manuals with focused current guides.
+All local Markdown link targets resolve, and the 18 screenshot markers remain
+as an explicit capture plan under `docs/user/screenshot-plan.md`.
+
 ## Scientific observatory
 
 The live campaign dashboard now includes a bounded read-only scientific
@@ -60,8 +70,8 @@ acknowledgement, resource differences, and desktop/mobile Resume preview.
 The real paused campaign produces a read-only Resume preview with the current
 set of hash-valid reusable checkpoints and its historical missing-candidate
 action excluded. No real model or auth access occurred. See
-`docs/CAMPAIGN_RESUME.md`,
-`docs/CAMPAIGN_SCIENTIFIC_MEMORY.md`, and
+`docs/user/resume.md`,
+`docs/architecture/scientific-memory.md`, and
 `docs/reports/CAMPAIGN_RESUME_AND_MEMORY_PHASE_A.md`.
 
 The first production Resume exposed a legacy-shape boundary missed by the
@@ -403,7 +413,8 @@ demonstration made zero real model calls or auth accesses and the comparison
 worker created zero search batches, lanes, evaluations, action dispatches,
 compactions, or tool executions. See
 `docs/reports/M7_COMPARISON_WORKER_PHASE_A.md`,
-`docs/COMPARISON_WORKER.md`, and `docs/COMPARISON_UI.md`.
+`docs/architecture/comparison-system.md`, and
+`docs/reference/cli-comparisons.md`.
 
 ## M7 controlled comparison UI and persistence complete
 
@@ -429,7 +440,8 @@ The deterministic replay dry run made zero model calls, auth accesses, search
 batches, lanes, or action dispatches. Focused tests, two complete 153-test
 runs, doctor, compile checks, benchmark/dashboard smoke, loopback HTTP, and
 SQLite v10 migration/integrity checks pass. See
-`docs/reports/M7_COMPARISON_UI_PHASE_A.md` and `docs/COMPARISON_UI.md`.
+`docs/reports/M7_COMPARISON_UI_PHASE_A.md` and
+`docs/user/comparisons.md`.
 
 ## Fresh reduced context-mode screen completed
 

@@ -1,0 +1,68 @@
+# Recovery
+
+## Recovery goals
+
+Recovery must preserve scientific progress without pretending that process
+state survived.
+
+## Campaign Resume
+
+Use the normal Resume preview:
+
+```bash
+sglab research-campaign resume   --workspace <workspace>   --campaign-id <campaign-id>   --additional-time 1h   --cpu-workers 16   --max-active-lanes 8   --repair-acknowledgement "<repair description>"   --preview
+```
+
+Review:
+
+- source state and previous fault;
+- new attempt ID/index;
+- starting scientific-memory hash;
+- checkpoint hashes;
+- inherited counters;
+- resource changes;
+- stale actions excluded from execution.
+
+## Checkpoint recovery
+
+- verify adjacent hash/manifest;
+- restore graph, RNG, tabu/search state, counters, and high-water;
+- start a new process generation;
+- do not advance SQLite telemetry beyond a durable checkpoint boundary;
+- report missing/corrupt checkpoint per lane.
+
+## App Server recovery
+
+No automatic provider retry is used in the strict campaign contract unless it
+is explicitly fingerprinted. Interrupted turns remain durable with nullable
+answer/usage.
+
+Stateless Director mode rebuilds context from scientific memory rather than
+relying on conversation recovery.
+
+## Repaired faults
+
+A fault Resume requires:
+
+- repair acknowledgement;
+- code commit;
+- preserved original fault/attempt;
+- new attempt;
+- one current executable registry;
+- no replay of terminal actions or completed verifier jobs.
+
+## Scientific invalidation
+
+If a bug invalidated prior scientific results, do not Resume. Mark the
+campaign scientifically invalidated and start a fresh campaign.
+
+## Recovery verification
+
+Always run:
+
+```sql
+PRAGMA integrity_check;
+PRAGMA foreign_key_check;
+```
+
+Use a consistent backup for intrusive repair or migration tests.

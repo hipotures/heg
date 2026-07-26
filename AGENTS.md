@@ -1,48 +1,91 @@
-# Project Instructions for Codex
+# AGENTS.md — Structural Graph Conjecture Lab
+
+This file is the entry point for Codex and other coding agents working in this
+repository.
 
 ## Mission
 
-Implement a compact Linux research tool for searching structural graph conjecture counterexamples. The default pilot target is the Erdős–Gyárfás conjecture. Follow `CODEX_PROMPT.md` and the documents under `docs/`.
+Maintain a reproducible, bounded graph-research system in which:
 
-## Non-negotiable engineering constraints
+- one durable campaign represents one scientific experiment;
+- every process start or Resume creates an immutable execution attempt;
+- the AI Director may choose only reviewed actions;
+- invalid decisions are persisted and never executed;
+- search results remain heuristic until the M4 verifier certifies them;
+- raw scientific history is preserved even when Director context is compacted;
+- workspaces remain isolated unless an explicit import or fork is requested.
 
-1. Keep the implementation small and inspectable.
-2. Use Python 3.12 for orchestration and the HTTP dashboard.
-3. Use a single optional C++17 helper only where profiling proves Python is too slow.
-4. Do not introduce React, Node.js, Django, Flask, FastAPI, Celery, Redis, an ORM, Kubernetes, or a distributed task framework.
-5. The web UI must remain a static HTML page plus standard-library Python HTTP endpoints.
-6. Do not put an LLM call in the candidate-evaluation loop.
-7. Do not store every candidate. Persist only run metadata, periodic aggregates, improvements, checkpoints, and verified artifacts.
-8. Bound queues, caches, subprocess time, resident memory, output size, and database growth.
-9. A timeout is `UNKNOWN`, never `UNSAT`.
-10. Any claimed counterexample must pass two independent exact verification paths.
-11. Any exhaustive nonexistence claim must preserve the complete instance, solver version, logs, hashes, and a machine-checkable proof certificate when the selected solver supports it.
-12. Do not optimize before measuring. Add benchmark gates before replacing simple code.
+## Required reading by change type
 
-## Testing policy
+| Change area | Read before editing |
+|---|---|
+| Campaign lifecycle or Resume | `docs/architecture/campaign-runtime.md`, `docs/architecture/invariants.md`, `docs/codex/modifying-resume.md` |
+| Director prompt/schema/validation | `docs/architecture/director-loop.md`, `docs/reference/director-schema.md`, `docs/codex/adding-a-director-field.md` |
+| Candidate retention or verification | `docs/architecture/candidate-lifecycle.md`, `docs/architecture/m4-verification.md` |
+| Search lanes/checkpoints | `docs/architecture/search-lanes.md`, `docs/reference/state-machines.md` |
+| SQLite migration | `docs/architecture/persistence.md`, `docs/codex/database-migrations.md` |
+| Dashboard/API | `docs/architecture/web-control-plane.md`, `docs/codex/adding-a-dashboard-view.md` |
+| App Server integration | `docs/architecture/app-server-integration.md`, `docs/operator/authentication.md` |
+| Comparison system | `docs/architecture/comparison-system.md`, `docs/reference/cli-comparisons.md` |
 
-Keep the test suite focused. Required tests cover:
+## Non-negotiable invariants
 
-- graph representation invariants;
-- reference cycle detection on small known graphs;
-- exact-verifier agreement on small random graphs;
-- state-file atomicity;
-- one tiny SAT ground-truth comparison;
-- one HTTP API smoke test;
-- one resource-limit smoke test.
+1. A Director decision is durably committed before any action is dispatched.
+2. Invalid, stale, schema-invalid, or semantic-invalid actions are never
+   executed.
+3. M4 is the only authority that may certify a counterexample.
+4. A candidate targeted by an accepted action is pinned and represented by an
+   immutable snapshot.
+5. Resume keeps the campaign ID and creates a new execution attempt.
+6. Resume never silently changes the target, Director model, effort, context
+   mode, or scientific prompt contract.
+7. Distinct fresh campaigns do not inherit scientific knowledge automatically.
+8. Scientific-memory compaction never deletes raw history and never drops
+   exact-verifier facts or current executable IDs.
+9. Credential contents never enter SQLite, reports, logs, manifests, prompts,
+   or browser responses.
+10. A byte-quota failure may be emitted only when the measured numeric
+    inequality is true.
+11. No model tool, shell command, file path, or executable is accepted from a
+    Director response.
+12. Historical runtime records, fingerprints, and evidence artifacts are
+    append-only evidence.
 
-Do not generate large combinatorial parameter grids in unit tests. Expensive checks belong in explicit benchmark or verification commands.
+The detailed matrix is in `docs/architecture/invariants.md`.
 
-## Development workflow
+## Worktree discipline
 
-- Work milestone by milestone.
-- At the end of each milestone, update `docs/IMPLEMENTATION_STATUS.md`.
-- Preserve unsuccessful benchmark results and failure logs.
-- Do not silently change the mathematical target.
-- Prefer deterministic seeds and record them.
-- Keep research claims separate from software completion claims.
+- Inspect `git status` before editing.
+- Preserve unrelated user files.
+- Do not reset, clean, or overwrite existing work unless explicitly requested.
+- Do not rewrite historical workspace data to make a test pass.
+- Use temporary or copied workspaces for migration and recovery tests.
+- Treat `docs/reports/` as evidence; do not silently rewrite old reports.
 
-## Required commands when complete
+## Database changes
+
+- Use additive, versioned migrations.
+- Test the previous production schema to the new schema through SQLite Online
+  Backup.
+- Run `PRAGMA integrity_check` and `PRAGMA foreign_key_check`.
+- Preserve historical fingerprints and canonical hashes.
+- Never use the physical SQLite main-file hash as a scientific identity while
+  WAL mode is active.
+
+## Runtime testing
+
+Prefer this order:
+
+1. focused unit tests;
+2. deterministic fake/replay state-machine tests;
+3. short real-kernel tests without model access;
+4. loopback HTTP and Playwright checks;
+5. authenticated tests only after an exact authorization boundary.
+
+Never consume real auth or model turns when a deterministic test can prove the
+same property.
+
+## Standard gates
 
 ```bash
 make doctor
@@ -52,4 +95,32 @@ make benchmark-smoke
 make dashboard-smoke
 ```
 
-The project is not complete merely because the dashboard starts. The exact verifier and reproducible artifact format are the scientific core.
+Also run focused tests, migration checks, loopback HTTP tests, and process
+orphan checks appropriate to the changed subsystem.
+
+## Documentation obligations
+
+A behavior change must update:
+
+- the relevant user or operator workflow;
+- the architecture document;
+- the reference document;
+- `docs/architecture/invariants.md` when an invariant changes;
+- an ADR when the change introduces a durable architectural decision;
+- `docs/IMPLEMENTATION_STATUS.md` as the chronological ledger;
+- a report under `docs/reports/` when the change has an explicit acceptance
+  gate.
+
+Do not document future behavior as implemented.
+
+## Screenshot markers
+
+User documents contain markers in this form:
+
+```text
+[screenshot: ID=...; save as ...; crop ...]
+```
+
+Do not remove them until a screenshot has been captured, cropped, checked at
+desktop and mobile widths where requested, and inserted at the marker
+location. Follow `docs/user/screenshot-plan.md`.
