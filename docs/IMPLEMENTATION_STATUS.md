@@ -17,11 +17,13 @@ score, best graph, RNG state, accepted count, improvements and operator
 statistics. Mutation profiling adds only fixed batch-local integer counters
 and emits one aggregate payload when profiling is enabled.
 
-A seven-pair development benchmark at order 96 with 30% targeted mutations
-improved median throughput from 152.6/s to 244.5/s (1.60×), reduced witness
-searches from 301 to 67 and preserved the full logical trajectory. The larger
-persistent-worker witness protocol extension is therefore deferred until a
-new profile proves the remaining cache misses dominant.
+A clean seven-pair benchmark at order 96 with 30% targeted mutations improved
+median throughput from 186.8/s to 261.6/s (1.40×), reduced mutation time by
+72.7%, reduced witness searches from 301 to 67 and preserved the full logical
+trajectory. Profiling on/off measured −0.03% overhead (noise) against the 2%
+gate. The larger persistent-worker witness protocol extension is therefore
+deferred until a new profile proves the remaining cache misses dominant. See
+`docs/reports/M6_MUTATION_WITNESS_CACHE.md`.
 
 ## Director turn model and effort provenance
 
