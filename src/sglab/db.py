@@ -211,7 +211,6 @@ CREATE TABLE IF NOT EXISTS campaign_candidates (
     graph6 TEXT NOT NULL,
     graph_sha256 TEXT NOT NULL,
     score_json TEXT NOT NULL,
-    provenance_json TEXT NOT NULL DEFAULT '{}',
     state TEXT NOT NULL,
     artifact_ref TEXT NOT NULL,
     artifact_sha256 TEXT NOT NULL,

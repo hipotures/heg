@@ -17,6 +17,12 @@ checkpoints instead use schema-v2 `independent_sample` provenance. SQLite
 schema v16 adds this provenance to retained candidates and copies it into
 immutable M4 snapshots; historical rows remain `{}`.
 
+Seven alternating benchmark pairs preserved every logical trajectory. The
+legacy encoder reduced duplicate time by 48.1% and improved total throughput
+14.6%; independent provenance reduced ancestry time by 99.68% and improved
+random-restart throughput 33.4%. Profiling overhead remained below 2%. See
+`docs/reports/M6_DUPLICATE_KEYS_AND_PROVENANCE.md`.
+
 ## Persistent scorer, conservative cutoff and fast duplicate key
 
 Erdős–Gyárfás lanes can now use one bounded persistent C++17 count-only
