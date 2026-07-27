@@ -330,6 +330,19 @@ def director_decision_schema(
             else ACTION_TYPES
         )
     )
+    available_lane_slots = (
+        allowed_action_space.get("available_lane_slots")
+        if isinstance(allowed_action_space, dict)
+        else None
+    )
+    if available_lane_slots is not None:
+        available_lane_slots = max(0, int(available_lane_slots))
+        if available_lane_slots == 0:
+            applicable_actions.discard("fork_lane")
+    fork_variant_max_items = min(
+        4,
+        available_lane_slots,
+    ) if available_lane_slots is not None and available_lane_slots > 0 else 4
     active_lane_ids = (
         list(allowed_action_space.get("active_executable_lane_ids", []))
         if isinstance(allowed_action_space, dict)
@@ -519,7 +532,7 @@ def director_decision_schema(
                 "variants": {
                     "type": "array",
                     "minItems": 1,
-                    "maxItems": 4,
+                    "maxItems": fork_variant_max_items,
                     "items": {
                         "type": "object",
                         "additionalProperties": False,

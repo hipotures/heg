@@ -18,7 +18,7 @@ from sglab.research.protocol import (
     director_decision_schema,
 )
 from sglab.research.store import ResearchStore
-from sglab.research.validation import validate_decision
+from sglab.research.validation import DecisionContext, validate_decision
 from sglab.state import atomic_write_json
 
 
@@ -63,10 +63,84 @@ def snapshot(*, active: bool) -> dict:
     }
 
 
-def stop_decision(lane_id: str, version: int) -> dict:
+def lane_capacity_snapshot(
+    *, active_count: int, maximum_lanes: int = 8
+) -> dict:
+    value = snapshot(active=False)
+    value["snapshot_id"] = "snapshot-lane-capacity"
+    value["resources"] = {"max_active_lanes": maximum_lanes}
+    value["lanes"] = [
+        {
+            "lane_id": f"lane-{index}",
+            "lane_version": 2 if index == 0 else 1,
+            "state": "running",
+            "algorithm": "iterated_local_search_tabu",
+            "graph_family": "connected_cubic",
+            "checkpoint_id": f"checkpoint-{index}",
+        }
+        for index in range(active_count)
+    ]
+    value["continuity"] = {
+        "lane_and_checkpoint_ledger": [
+            {
+                "lane_id": lane["lane_id"],
+                "lane_version": lane["lane_version"],
+                "state": lane["state"],
+                "algorithm": lane["algorithm"],
+                "checkpoint_id": lane["checkpoint_id"],
+            }
+            for lane in value["lanes"]
+        ]
+    }
+    return value
+
+
+def director_context(source: dict) -> DecisionContext:
+    prepared = prepare_director_state_v2(source)
+    active = [
+        value
+        for value in source["lanes"]
+        if value["state"] in {"starting", "running", "paused", "stopping"}
+    ]
+    registry = prepared.evidence_registry
+    return DecisionContext(
+        snapshot_id=prepared.state["source_snapshot_id"],
+        evidence_ids=evidence_registry_ids(registry),
+        lane_versions={
+            value["lane_id"]: int(value["lane_version"])
+            for value in active
+        },
+        lane_algorithms={
+            value["lane_id"]: value["algorithm"] for value in active
+        },
+        checkpoint_ids=evidence_registry_ids(
+            registry, kinds=frozenset({"checkpoint"})
+        ),
+        candidate_ids=evidence_registry_ids(
+            registry, kinds=frozenset({"candidate"})
+        ),
+        max_active_lanes=source["resources"]["max_active_lanes"],
+        advisory_target_ids=evidence_registry_ids(
+            prepared.advisory_target_registry
+        ),
+        executable_target_ids=evidence_registry_ids(
+            prepared.executable_target_registry
+        ),
+        applicable_action_types=frozenset(
+            prepared.state["allowed_action_space"]["actions"]
+        ),
+    )
+
+
+def stop_decision(
+    lane_id: str,
+    version: int,
+    *,
+    snapshot_id: str = "snapshot-applicability",
+) -> dict:
     return {
         "schema_version": "1.0",
-        "snapshot_id": "snapshot-applicability",
+        "snapshot_id": snapshot_id,
         "campaign_assessment": "Stop the selected active lane.",
         "hypothesis_updates": [],
         "actions": [
@@ -98,10 +172,14 @@ def stop_decision(lane_id: str, version: int) -> dict:
     }
 
 
-def decision_with_action(action: dict) -> dict:
+def decision_with_action(
+    action: dict,
+    *,
+    snapshot_id: str = "snapshot-applicability",
+) -> dict:
     return {
         "schema_version": "1.0",
-        "snapshot_id": "snapshot-applicability",
+        "snapshot_id": snapshot_id,
         "campaign_assessment": "Choose one applicable bounded action.",
         "hypothesis_updates": [],
         "actions": [action],
@@ -141,6 +219,99 @@ def schema_actions(schema: dict) -> set[str]:
 
 
 class ActionApplicabilityTests(unittest.TestCase):
+    def test_active_lane_versions_are_visible_and_strictly_validated(self) -> None:
+        source = lane_capacity_snapshot(active_count=2)
+        prepared = prepare_director_state_v2(source)
+        ledger = prepared.state["continuity"]["lane_and_checkpoint_ledger"]
+        versions = {
+            item["lane_id"]: item["lane_version"] for item in ledger
+        }
+        self.assertEqual(versions, {"lane-0": 2, "lane-1": 1})
+        action_space = prepared.state["allowed_action_space"]
+        self.assertEqual(action_space["active_lane_count"], 2)
+        self.assertEqual(action_space["max_active_lanes"], 8)
+        self.assertEqual(action_space["available_lane_slots"], 6)
+
+        context = director_context(source)
+        accepted = validate_decision(
+            stop_decision(
+                "lane-0",
+                2,
+                snapshot_id=source["snapshot_id"],
+            ),
+            context,
+        )
+        self.assertTrue(accepted.accepted, accepted.issues)
+        rejected = validate_decision(
+            stop_decision(
+                "lane-0",
+                0,
+                snapshot_id=source["snapshot_id"],
+            ),
+            context,
+        )
+        self.assertFalse(rejected.accepted)
+        self.assertTrue(
+            any("stale" in issue.message for issue in rejected.issues)
+        )
+
+    def test_full_capacity_hides_fork_lane_everywhere(self) -> None:
+        source = lane_capacity_snapshot(active_count=8)
+        prepared = prepare_director_state_v2(source)
+        action_space = prepared.state["allowed_action_space"]
+        prompt = json.loads(build_context_screen_prompt(source))
+        schema = director_decision_schema(action_space)
+
+        self.assertEqual(action_space["active_lane_count"], 8)
+        self.assertEqual(action_space["max_active_lanes"], 8)
+        self.assertEqual(action_space["available_lane_slots"], 0)
+        self.assertNotIn("fork_lane", action_space["actions"])
+        self.assertNotIn(
+            "fork_lane",
+            prompt["applicable_action_description"]["actions"],
+        )
+        self.assertNotIn("fork_lane", schema_actions(schema))
+
+    def test_one_available_slot_limits_fork_and_rejects_two_variants(self) -> None:
+        source = lane_capacity_snapshot(active_count=7)
+        prepared = prepare_director_state_v2(source)
+        action_space = prepared.state["allowed_action_space"]
+        schema = director_decision_schema(action_space)
+        fork_schema = next(
+            variant
+            for variant in schema["properties"]["actions"]["items"]["anyOf"]
+            if variant["properties"]["type"]["const"] == "fork_lane"
+        )
+        self.assertEqual(action_space["available_lane_slots"], 1)
+        self.assertEqual(fork_schema["properties"]["variants"]["maxItems"], 1)
+
+        action = {
+            **common_action("fork_lane"),
+            "lane_id": "lane-0",
+            "expected_lane_version": 2,
+            "checkpoint_id": "checkpoint-0",
+            "variants": [
+                {
+                    "name": "one",
+                    "patch": {"tabu_tenure": 8},
+                    "resource_share": 0.5,
+                },
+                {
+                    "name": "two",
+                    "patch": {"tabu_tenure": 16},
+                    "resource_share": 0.5,
+                },
+            ],
+        }
+        rejected = validate_decision(
+            decision_with_action(action, snapshot_id=source["snapshot_id"]),
+            director_context(source),
+        )
+        self.assertFalse(rejected.accepted)
+        self.assertTrue(
+            any("max_active_lanes" in issue.message for issue in rejected.issues)
+        )
+
     def test_no_active_lane_keeps_history_as_evidence_but_hides_stop(self) -> None:
         source = snapshot(active=False)
         prepared = prepare_director_state_v2(source)

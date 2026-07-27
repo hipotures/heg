@@ -505,6 +505,7 @@ class SnapshotBuilder:
         lanes = [
             {
                 "lane_id": row["lane_id"],
+                "lane_version": int(row["lane_version"]),
                 "state": row["state"],
                 "algorithm": row["algorithm"],
                 "graph_family": row["graph_family"],
@@ -518,7 +519,7 @@ class SnapshotBuilder:
             }
             for row in self.store.connection.execute(
                 """
-                SELECT lane_id, state, algorithm, graph_family,
+                SELECT lane_id, lane_version, state, algorithm, graph_family,
                        current_parameters_json, checkpoint_ref,
                        checkpoint_sha256, telemetry_high_water
                 FROM research_lanes WHERE campaign_id=?

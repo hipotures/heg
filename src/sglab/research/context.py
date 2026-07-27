@@ -741,6 +741,15 @@ def _applicable_action_space(
     maximum_lanes = int(
         (snapshot.get("resources") or {}).get("max_active_lanes", 1)
     )
+    active_lane_count = len(active_lanes)
+    available_lane_slots = max(0, maximum_lanes - active_lane_count)
+    active_lane_versions = {
+        str(lane["lane_id"]): int(lane.get("lane_version", 0))
+        for lane in sorted(
+            active_lanes,
+            key=lambda value: str(value["lane_id"]),
+        )
+    }
     best_result = state.get("best_ever_result")
     retained_candidate = (
         best_result.get("candidate_id")
@@ -819,7 +828,7 @@ def _applicable_action_space(
         actions.append(action)
         explanations[action] = reason
 
-    if len(active_lanes) < maximum_lanes:
+    if available_lane_slots > 0:
         expose(
             "start_lane",
             "capacity exists for one reviewed new search lane",
@@ -829,7 +838,7 @@ def _applicable_action_space(
             "patch_lane",
             "at least one active lane has implemented patchable controls",
         )
-        if checkpoint_ids:
+        if checkpoint_ids and available_lane_slots > 0:
             expose(
                 "fork_lane",
                 "an active lane and a retained checkpoint are available",
@@ -872,6 +881,10 @@ def _applicable_action_space(
         "actions": actions,
         "action_applicability": explanations,
         "active_executable_lane_ids": active_lane_ids,
+        "active_lane_versions": active_lane_versions,
+        "active_lane_count": active_lane_count,
+        "max_active_lanes": maximum_lanes,
+        "available_lane_slots": available_lane_slots,
         "historical_lane_ids": sorted(
             str(value["lane_id"])
             for value in lanes
