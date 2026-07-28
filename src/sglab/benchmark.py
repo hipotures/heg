@@ -26,6 +26,7 @@ from .locations import source_root
 from .model import BitGraph, find_cycle_of_length
 from .research.lanes import (
     LaneSpec,
+    SeedGenerationAccumulator,
     _LaneKernel,
     _emit,
     _live_frontier_payload,
@@ -42,6 +43,7 @@ from .state import atomic_write_json, next_control, utc_now
 from .state import read_json
 from .search import SearchConfig, _novelty, _scalar, run_search
 from .targets.erdos_gyarfas import PLUGIN, verify_reference
+from .targets.base import SeedGenerationTrace
 
 
 def quantiles(samples: Iterable[float]) -> dict[str, float]:
@@ -84,6 +86,100 @@ def _measure(function: Callable[[], object], iterations: int) -> dict[str, Any]:
         function()
         samples.append(time.perf_counter() - started)
     return {"unit": "seconds", "samples": samples, **quantiles(samples)}
+
+
+def seed_generation_benchmark(
+    *, iterations: int = 20
+) -> dict[str, Any]:
+    if iterations < 1:
+        raise ValueError("iterations must be positive")
+    cases = {
+        "cubic": (20, "cubic_first", "initial_lane_seed"),
+        "mixed_degree": (
+            21,
+            "minimal_structure_mixed_degree",
+            "initial_lane_seed",
+        ),
+        "random_restart": (
+            20,
+            "cubic_first",
+            "random_restart_candidate",
+        ),
+    }
+    results: dict[str, Any] = {}
+    for name, (order, mode, source) in cases.items():
+        baseline_rng = Random(20260728)
+        baseline_graphs: list[str] = []
+        baseline_started = time.perf_counter_ns()
+        for _ in range(iterations):
+            baseline_graphs.append(
+                PLUGIN.generate_seed(
+                    baseline_rng, {"order": order, "mode": mode}
+                ).to_graph6()
+            )
+        baseline_elapsed_ns = max(
+            1, time.perf_counter_ns() - baseline_started
+        )
+
+        instrumented_rng = Random(20260728)
+        instrumented_graphs: list[str] = []
+        accumulator = SeedGenerationAccumulator()
+        instrumented_started = time.perf_counter_ns()
+        for _ in range(iterations):
+            trace = SeedGenerationTrace(generator_mode=mode)
+            seed_started = time.perf_counter_ns()
+            graph = PLUGIN.generate_seed(
+                instrumented_rng,
+                {"order": order, "mode": mode},
+                trace=trace,
+            )
+            seed_elapsed_ns = time.perf_counter_ns() - seed_started
+            accumulator.record(
+                source=source,
+                trace=trace,
+                elapsed_ns=seed_elapsed_ns,
+                in_search_loop=source == "random_restart_candidate",
+            )
+            instrumented_graphs.append(graph.to_graph6())
+        instrumented_elapsed_ns = max(
+            1, time.perf_counter_ns() - instrumented_started
+        )
+        trajectory_equal = (
+            baseline_graphs == instrumented_graphs
+            and baseline_rng.getstate() == instrumented_rng.getstate()
+        )
+        results[name] = {
+            "order": order,
+            "generator_mode": mode,
+            "iterations": iterations,
+            "baseline_candidates_per_second": (
+                iterations * 1_000_000_000 / baseline_elapsed_ns
+            ),
+            "instrumented_candidates_per_second": (
+                iterations * 1_000_000_000 / instrumented_elapsed_ns
+            ),
+            "overhead_fraction": (
+                instrumented_elapsed_ns / baseline_elapsed_ns - 1.0
+            ),
+            "seed_generation_runtime_share": (
+                accumulator.total.elapsed_ns_total
+                / instrumented_elapsed_ns
+            ),
+            "trajectory_equal": trajectory_equal,
+            "bounded_attempt_histogram_buckets": len(
+                accumulator.total.attempt_histogram
+            ),
+            "bounded_elapsed_histogram_buckets": len(
+                accumulator.total.elapsed_ns_histogram
+            ),
+        }
+    return {
+        "iterations": iterations,
+        "cases": results,
+        "all_trajectories_equal": all(
+            case["trajectory_equal"] for case in results.values()
+        ),
+    }
 
 
 def hardware_metadata(path: Path) -> dict[str, Any]:
@@ -352,6 +448,9 @@ def microbenchmark(
         "kind": "microbenchmark",
         "iterations": iterations,
         "operations": operations,
+        "seed_generation": seed_generation_benchmark(
+            iterations=max(4, iterations * 2)
+        ),
         "operation_context": {
             "canonicalization_authoritative": canonicalization_authoritative,
             "cpp_verifier_status": cpp_probe["status"],

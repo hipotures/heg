@@ -353,6 +353,11 @@ def director_decision_schema(
         if isinstance(allowed_action_space, dict)
         else []
     )
+    diagnostic_subject_ids = (
+        list(allowed_action_space.get("diagnostic_subject_ids", []))
+        if isinstance(allowed_action_space, dict)
+        else []
+    )
     checkpoint_target_ids = (
         list(allowed_action_space.get("checkpoint_target_ids", []))
         if isinstance(allowed_action_space, dict)
@@ -642,7 +647,7 @@ def director_decision_schema(
                     "items": {
                         "type": "string",
                         **(
-                            {"enum": candidate_target_ids}
+                            {"enum": diagnostic_subject_ids}
                             if allowed_action_space is not None
                             else {}
                         ),

@@ -7,7 +7,13 @@ class TargetPlugin(Protocol):
     id: str
 
     def validate_graph(self, graph: BitGraph) -> ValidationResult: ...
-    def generate_seed(self, rng: Random, config: dict[str, Any]) -> BitGraph: ...
+    def generate_seed(
+        self,
+        rng: Random,
+        config: dict[str, Any],
+        *,
+        trace: SeedGenerationTrace | None = None,
+    ) -> BitGraph: ...
     def mutate(self, graph: BitGraph, rng: Random, config: dict[str, Any]) -> BitGraph: ...
     def score_from_cycle_counts(self, graph: BitGraph, cap: int, results, profile) -> ScoreResult: ...
     def exact_verify(self, graph: BitGraph) -> VerifyResult: ...
@@ -19,6 +25,12 @@ A target may additionally implement `mutate_with_delta`. It returns the same
 candidate graph plus exact removed/added edge tuples. Lanes may use the delta
 for non-authoritative local bookkeeping; callers that use `mutate` retain the
 original graph-only contract.
+
+`generate_seed` must not change behavior when a trace is supplied. It updates
+only effective generator mode, internal attempts consumed, configured retry
+budget, and a bounded failure category. The lane caller owns elapsed-time and
+source classification. Implementations must not make an extra generator call
+or consume additional RNG for telemetry.
 
 ## Result requirements
 

@@ -26,7 +26,7 @@ from ..score_worker import (
 )
 from ..state import atomic_write_json, utc_now
 from ..targets import TARGETS
-from ..targets.base import ScoreResult
+from ..targets.base import ScoreResult, SeedGenerationTrace
 from .catalog import (
     ALGORITHMS,
     ALGORITHM_PARAMETERS,
@@ -63,6 +63,46 @@ MUTATION_CHAIN_PROVENANCE = "mutation_chain"
 INDEPENDENT_SAMPLE_PROVENANCE = "independent_sample"
 GENERATOR_VERSION = "erdos_gyarfas.generate_seed_v1"
 _UINT64_MASK = (1 << 64) - 1
+SEED_GENERATION_SOURCES = (
+    "initial_lane_seed",
+    "automatic_algorithm_restart",
+    "explicit_director_restart",
+    "random_restart_candidate",
+)
+SEED_ATTEMPT_BUCKET_UPPER_BOUNDS = (
+    1,
+    2,
+    4,
+    8,
+    16,
+    32,
+    64,
+    128,
+    256,
+    512,
+    1_024,
+    2_048,
+)
+SEED_ELAPSED_NS_BUCKET_UPPER_BOUNDS = (
+    10_000,
+    50_000,
+    100_000,
+    500_000,
+    1_000_000,
+    5_000_000,
+    10_000_000,
+    50_000_000,
+    100_000_000,
+    500_000_000,
+    1_000_000_000,
+    5_000_000_000,
+)
+SEED_FAILURE_CATEGORIES = (
+    "cubic_matching_construction_exhaustion",
+    "mixed_degree_stub_construction_exhaustion",
+    "invalid_generator_configuration",
+    "other_implementation_failure",
+)
 
 
 @dataclass(slots=True)
@@ -119,6 +159,304 @@ class MutationProfileAccumulator:
                 self.witness_cache_hits / lookups if lookups else 0.0
             ),
         }
+
+
+def _bounded_histogram_index(
+    value: int, upper_bounds: tuple[int, ...]
+) -> int:
+    for index, upper_bound in enumerate(upper_bounds):
+        if value <= upper_bound:
+            return index
+    return len(upper_bounds)
+
+
+def _histogram_percentile(
+    counts: list[int],
+    upper_bounds: tuple[int, ...],
+    percentile: float,
+) -> int:
+    total = sum(counts)
+    if total == 0:
+        return 0
+    target = max(1, math.ceil(total * percentile))
+    observed = 0
+    for index, count in enumerate(counts):
+        observed += count
+        if observed >= target:
+            if index < len(upper_bounds):
+                return upper_bounds[index]
+            return upper_bounds[-1] + 1
+    return upper_bounds[-1] + 1
+
+
+@dataclass(slots=True)
+class SeedMetricCounters:
+    calls: int = 0
+    successes: int = 0
+    failures: int = 0
+    attempts_total: int = 0
+    attempts_max: int = 0
+    retry_budget_total: int = 0
+    retry_budget_max: int = 0
+    retry_budget_exhaustions: int = 0
+    elapsed_ns_total: int = 0
+    elapsed_ns_max: int = 0
+    search_loop_elapsed_ns: int = 0
+    attempt_histogram: list[int] = field(
+        default_factory=lambda: [
+            0
+            for _ in range(
+                len(SEED_ATTEMPT_BUCKET_UPPER_BOUNDS) + 1
+            )
+        ]
+    )
+    elapsed_ns_histogram: list[int] = field(
+        default_factory=lambda: [
+            0
+            for _ in range(
+                len(SEED_ELAPSED_NS_BUCKET_UPPER_BOUNDS) + 1
+            )
+        ]
+    )
+    failure_categories: dict[str, int] = field(
+        default_factory=lambda: {
+            category: 0 for category in SEED_FAILURE_CATEGORIES
+        }
+    )
+
+    def record(
+        self,
+        *,
+        attempts: int,
+        retry_budget: int,
+        elapsed_ns: int,
+        failure_category: str | None,
+        in_search_loop: bool,
+    ) -> None:
+        self.calls += 1
+        self.attempts_total += attempts
+        self.attempts_max = max(self.attempts_max, attempts)
+        self.retry_budget_total += retry_budget
+        self.retry_budget_max = max(self.retry_budget_max, retry_budget)
+        self.elapsed_ns_total += elapsed_ns
+        self.elapsed_ns_max = max(self.elapsed_ns_max, elapsed_ns)
+        if in_search_loop:
+            self.search_loop_elapsed_ns += elapsed_ns
+        self.attempt_histogram[
+            _bounded_histogram_index(
+                attempts, SEED_ATTEMPT_BUCKET_UPPER_BOUNDS
+            )
+        ] += 1
+        self.elapsed_ns_histogram[
+            _bounded_histogram_index(
+                elapsed_ns, SEED_ELAPSED_NS_BUCKET_UPPER_BOUNDS
+            )
+        ] += 1
+        if failure_category is None:
+            self.successes += 1
+            return
+        self.failures += 1
+        category = (
+            failure_category
+            if failure_category in self.failure_categories
+            else "other_implementation_failure"
+        )
+        self.failure_categories[category] += 1
+        if retry_budget > 0 and attempts >= retry_budget:
+            self.retry_budget_exhaustions += 1
+
+    def payload(self) -> dict[str, Any]:
+        return {
+            "calls": self.calls,
+            "successes": self.successes,
+            "failures": self.failures,
+            "attempts_total": self.attempts_total,
+            "attempts_mean": (
+                self.attempts_total / self.calls if self.calls else 0.0
+            ),
+            "attempts_max": self.attempts_max,
+            "attempt_percentiles": {
+                "p50": _histogram_percentile(
+                    self.attempt_histogram,
+                    SEED_ATTEMPT_BUCKET_UPPER_BOUNDS,
+                    0.50,
+                ),
+                "p95": _histogram_percentile(
+                    self.attempt_histogram,
+                    SEED_ATTEMPT_BUCKET_UPPER_BOUNDS,
+                    0.95,
+                ),
+                "p99": _histogram_percentile(
+                    self.attempt_histogram,
+                    SEED_ATTEMPT_BUCKET_UPPER_BOUNDS,
+                    0.99,
+                ),
+            },
+            "retry_budget_total": self.retry_budget_total,
+            "retry_budget_mean": (
+                self.retry_budget_total / self.calls
+                if self.calls
+                else 0.0
+            ),
+            "retry_budget_max": self.retry_budget_max,
+            "maximum_retry_budget_fraction": (
+                self.attempts_max / self.retry_budget_max
+                if self.retry_budget_max
+                else 0.0
+            ),
+            "retry_budget_exhaustions": self.retry_budget_exhaustions,
+            "elapsed_ns_total": self.elapsed_ns_total,
+            "elapsed_ns_mean": (
+                self.elapsed_ns_total / self.calls if self.calls else 0.0
+            ),
+            "elapsed_ns_max": self.elapsed_ns_max,
+            "elapsed_ns_percentiles": {
+                "p50": _histogram_percentile(
+                    self.elapsed_ns_histogram,
+                    SEED_ELAPSED_NS_BUCKET_UPPER_BOUNDS,
+                    0.50,
+                ),
+                "p95": _histogram_percentile(
+                    self.elapsed_ns_histogram,
+                    SEED_ELAPSED_NS_BUCKET_UPPER_BOUNDS,
+                    0.95,
+                ),
+                "p99": _histogram_percentile(
+                    self.elapsed_ns_histogram,
+                    SEED_ELAPSED_NS_BUCKET_UPPER_BOUNDS,
+                    0.99,
+                ),
+            },
+            "search_loop_elapsed_ns": self.search_loop_elapsed_ns,
+            "attempt_histogram": list(self.attempt_histogram),
+            "elapsed_ns_histogram": list(self.elapsed_ns_histogram),
+            "failure_categories": dict(self.failure_categories),
+        }
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> SeedMetricCounters:
+        counters = cls()
+        for name in (
+            "calls",
+            "successes",
+            "failures",
+            "attempts_total",
+            "attempts_max",
+            "retry_budget_total",
+            "retry_budget_max",
+            "retry_budget_exhaustions",
+            "elapsed_ns_total",
+            "elapsed_ns_max",
+            "search_loop_elapsed_ns",
+        ):
+            setattr(counters, name, int(payload.get(name, 0)))
+        attempts = payload.get("attempt_histogram", [])
+        elapsed = payload.get("elapsed_ns_histogram", [])
+        if isinstance(attempts, list) and len(attempts) == len(
+            counters.attempt_histogram
+        ):
+            counters.attempt_histogram = [int(value) for value in attempts]
+        if isinstance(elapsed, list) and len(elapsed) == len(
+            counters.elapsed_ns_histogram
+        ):
+            counters.elapsed_ns_histogram = [
+                int(value) for value in elapsed
+            ]
+        categories = payload.get("failure_categories", {})
+        if isinstance(categories, dict):
+            counters.failure_categories = {
+                category: int(categories.get(category, 0))
+                for category in SEED_FAILURE_CATEGORIES
+            }
+        return counters
+
+
+@dataclass(slots=True)
+class SeedGenerationAccumulator:
+    total: SeedMetricCounters = field(default_factory=SeedMetricCounters)
+    sources: dict[str, SeedMetricCounters] = field(
+        default_factory=lambda: {
+            source: SeedMetricCounters()
+            for source in SEED_GENERATION_SOURCES
+        }
+    )
+    measured_search_loop_ns: int = 0
+
+    def record(
+        self,
+        *,
+        source: str,
+        trace: SeedGenerationTrace,
+        elapsed_ns: int,
+        in_search_loop: bool,
+    ) -> None:
+        if source not in self.sources:
+            raise ValueError(f"unsupported seed generation source: {source}")
+        values = {
+            "attempts": trace.attempts,
+            "retry_budget": trace.retry_budget,
+            "elapsed_ns": elapsed_ns,
+            "failure_category": trace.failure_category,
+            "in_search_loop": in_search_loop,
+        }
+        self.total.record(**values)
+        self.sources[source].record(**values)
+
+    def payload(
+        self,
+        *,
+        graph_family: str,
+        graph_order: int,
+        generator_mode: str,
+    ) -> dict[str, Any]:
+        total = self.total.payload()
+        return {
+            "schema_version": 1,
+            "graph_family": graph_family,
+            "graph_order": graph_order,
+            "generator_mode": generator_mode,
+            "attempt_bucket_upper_bounds": list(
+                SEED_ATTEMPT_BUCKET_UPPER_BOUNDS
+            ),
+            "elapsed_ns_bucket_upper_bounds": list(
+                SEED_ELAPSED_NS_BUCKET_UPPER_BOUNDS
+            ),
+            "measured_search_loop_ns": self.measured_search_loop_ns,
+            "generator_time_share": (
+                self.total.search_loop_elapsed_ns
+                / self.measured_search_loop_ns
+                if self.measured_search_loop_ns
+                else 0.0
+            ),
+            "total": total,
+            "sources": {
+                source: self.sources[source].payload()
+                for source in SEED_GENERATION_SOURCES
+            },
+        }
+
+    @classmethod
+    def from_payload(
+        cls, payload: dict[str, Any]
+    ) -> SeedGenerationAccumulator:
+        result = cls()
+        total = payload.get("total")
+        if isinstance(total, dict):
+            result.total = SeedMetricCounters.from_payload(total)
+        sources = payload.get("sources")
+        if isinstance(sources, dict):
+            result.sources = {
+                source: SeedMetricCounters.from_payload(
+                    sources.get(source, {})
+                    if isinstance(sources.get(source), dict)
+                    else {}
+                )
+                for source in SEED_GENERATION_SOURCES
+            }
+        result.measured_search_loop_ns = int(
+            payload.get("measured_search_loop_ns", 0)
+        )
+        return result
 
 
 def _splitmix64(value: int) -> int:
@@ -368,6 +706,21 @@ class _LaneKernel:
         self.actual_restarts = 0
         self.recent_hashes: deque[str] = deque(maxlen=4096)
         self.recent_hash_set: set[str] = set()
+        self.seed_generation_batch = SeedGenerationAccumulator()
+        restored_seed_generation = (
+            checkpoint.get("seed_generation")
+            if checkpoint is not None
+            and fork_seed is None
+            and instrumentation_enabled
+            else None
+        )
+        self.seed_generation_cumulative = (
+            SeedGenerationAccumulator.from_payload(
+                restored_seed_generation
+            )
+            if isinstance(restored_seed_generation, dict)
+            else SeedGenerationAccumulator()
+        )
         checkpoint_key_scheme = LEGACY_GRAPH_KEY_SCHEME
         if checkpoint is not None:
             raw_scheme = checkpoint.get(
@@ -389,7 +742,7 @@ class _LaneKernel:
             )
         )
         if checkpoint is None:
-            self._new_seed(spec.seed)
+            self._new_seed(spec.seed, source="initial_lane_seed")
         else:
             self.graph = BitGraph.from_graph6(str(checkpoint["graph6"]))
             self.score = _score_from_payload(checkpoint["score"])
@@ -486,16 +839,85 @@ class _LaneKernel:
             self.high_water,
         )
 
-    def _new_seed(self, seed: int) -> None:
+    def _generate_seed(
+        self, *, source: str, in_search_loop: bool
+    ) -> BitGraph:
+        config = {
+            "order": int(self.parameters["order"]),
+            "mode": self.mode,
+        }
+        if not self.instrumentation_enabled:
+            return self.plugin.generate_seed(self.rng, config)
+        trace = SeedGenerationTrace(generator_mode=self.mode)
+        started = time.perf_counter_ns()
+        try:
+            graph = self.plugin.generate_seed(
+                self.rng, config, trace=trace
+            )
+        except BaseException as error:
+            if trace.failure_category is None:
+                trace.failure_category = "other_implementation_failure"
+            elapsed_ns = time.perf_counter_ns() - started
+            self.seed_generation_batch.record(
+                source=source,
+                trace=trace,
+                elapsed_ns=elapsed_ns,
+                in_search_loop=in_search_loop,
+            )
+            self.seed_generation_cumulative.record(
+                source=source,
+                trace=trace,
+                elapsed_ns=elapsed_ns,
+                in_search_loop=in_search_loop,
+            )
+            observation = {
+                "source": source,
+                "graph_family": self.spec.graph_family,
+                "graph_order": int(self.parameters["order"]),
+                "generator_mode": trace.generator_mode,
+                "attempts": trace.attempts,
+                "retry_budget": trace.retry_budget,
+                "elapsed_ns": elapsed_ns,
+                "failure_category": trace.failure_category,
+            }
+            try:
+                setattr(error, "seed_generation_observation", observation)
+            except Exception:
+                pass
+            raise
+        elapsed_ns = time.perf_counter_ns() - started
+        self.seed_generation_batch.record(
+            source=source,
+            trace=trace,
+            elapsed_ns=elapsed_ns,
+            in_search_loop=in_search_loop,
+        )
+        self.seed_generation_cumulative.record(
+            source=source,
+            trace=trace,
+            elapsed_ns=elapsed_ns,
+            in_search_loop=in_search_loop,
+        )
+        return graph
+
+    def _effective_seed_generator_mode(self) -> str:
+        if (
+            self.mode == "unrestricted_min_degree_3"
+            and int(self.parameters["order"]) % 2
+        ):
+            return "minimal_structure_mixed_degree"
+        return self.mode
+
+    def _new_seed(self, seed: int, *, source: str) -> None:
         self.rng = Random(seed)
         self.tabu_key_scheme = (
             FAST_GRAPH_KEY_SCHEME
             if self.fast_duplicate_key_enabled
             else LEGACY_GRAPH_KEY_SCHEME
         )
-        self.graph = self.plugin.generate_seed(
-            self.rng,
-            {"order": int(self.parameters["order"]), "mode": self.mode},
+        self.graph = self._generate_seed(
+            source=source,
+            in_search_loop=source == "automatic_algorithm_restart",
         )
         self._invalidate_mutation_witness_cache()
         self.score = self._score(self.graph)
@@ -525,7 +947,7 @@ class _LaneKernel:
         )
 
     def restart(self, seed: int) -> None:
-        self._new_seed(seed)
+        self._new_seed(seed, source="explicit_director_restart")
 
     def restart_from_checkpoint(
         self, checkpoint: dict[str, Any], seed: int
@@ -659,7 +1081,10 @@ class _LaneKernel:
                 % int(self.parameters.get("restart_threshold", 50_000))
                 == 0
             ):
-                self._new_seed(self.rng.randrange(2**63))
+                self._new_seed(
+                    self.rng.randrange(2**63),
+                    source="automatic_algorithm_restart",
+                )
                 self.actual_restarts += 1
             mutation_started = (
                 time.perf_counter_ns()
@@ -678,12 +1103,9 @@ class _LaneKernel:
             operator_counts["uses"] += 1
             mutation_delta = None
             if self.algorithm == "random_restart":
-                candidate = self.plugin.generate_seed(
-                    self.rng,
-                    {
-                        "order": int(self.parameters["order"]),
-                        "mode": self.mode,
-                    },
+                candidate = self._generate_seed(
+                    source="random_restart_candidate",
+                    in_search_loop=True,
                 )
             else:
                 mutation_config = {
@@ -920,6 +1342,12 @@ class _LaneKernel:
         self.high_water += evaluated
         loop_finished = time.perf_counter()
         elapsed = max(loop_finished - started, 1e-9)
+        if self.instrumentation_enabled:
+            elapsed_ns = max(1, round(elapsed * 1_000_000_000))
+            self.seed_generation_batch.measured_search_loop_ns += elapsed_ns
+            self.seed_generation_cumulative.measured_search_loop_ns += (
+                elapsed_ns
+            )
         termination_reason = (
             "stop_requested"
             if stop_event.is_set()
@@ -1062,6 +1490,21 @@ class _LaneKernel:
                     else None
                 ),
             )
+        if self.instrumentation_enabled:
+            result["seed_generation"] = {
+                "schema_version": 1,
+                "batch": self.seed_generation_batch.payload(
+                    graph_family=self.spec.graph_family,
+                    graph_order=int(self.parameters["order"]),
+                    generator_mode=self._effective_seed_generator_mode(),
+                ),
+                "cumulative": self.seed_generation_cumulative.payload(
+                    graph_family=self.spec.graph_family,
+                    graph_order=int(self.parameters["order"]),
+                    generator_mode=self._effective_seed_generator_mode(),
+                ),
+            }
+            self.seed_generation_batch = SeedGenerationAccumulator()
         return result
 
     def _mutation_witness_choices_for(
@@ -1399,10 +1842,22 @@ class _LaneKernel:
             "current_provenance": current_provenance,
             "best_provenance": best_provenance,
         }
-        digest = hashlib.sha256(
-            canonical_json(payload, max_bytes=1024 * 1024)
-        ).hexdigest()
-        return {**payload, "checkpoint_id": f"checkpoint-{digest[:24]}", "sha256": digest}
+        if self.instrumentation_enabled:
+            seed_generation = self.seed_generation_cumulative.payload(
+                graph_family=self.spec.graph_family,
+                graph_order=int(self.parameters["order"]),
+                generator_mode=self._effective_seed_generator_mode(),
+            )
+            payload["seed_generation"] = seed_generation
+            payload["seed_generation_sha256"] = hashlib.sha256(
+                canonical_json(seed_generation, max_bytes=256 * 1024)
+            ).hexdigest()
+        digest = checkpoint_scientific_sha256(payload)
+        return {
+            **payload,
+            "checkpoint_id": f"checkpoint-{digest[:24]}",
+            "sha256": digest,
+        }
 
 
 def _live_frontier_payload(
@@ -1433,6 +1888,31 @@ def _live_frontier_payload(
         "preview_id": f"live-frontier-{digest[:24]}",
         "sha256": digest,
     }
+
+
+def checkpoint_scientific_sha256(payload: dict[str, Any]) -> str:
+    scientific = dict(payload)
+    scientific.pop("checkpoint_id", None)
+    scientific.pop("sha256", None)
+    scientific.pop("seed_generation", None)
+    scientific.pop("seed_generation_sha256", None)
+    return hashlib.sha256(
+        canonical_json(scientific, max_bytes=1024 * 1024)
+    ).hexdigest()
+
+
+def checkpoint_seed_generation_sha256(
+    payload: dict[str, Any],
+) -> str | None:
+    seed_generation = payload.get("seed_generation")
+    claimed = payload.get("seed_generation_sha256")
+    if seed_generation is None and claimed is None:
+        return None
+    if not isinstance(seed_generation, dict) or not isinstance(claimed, str):
+        raise ValueError("checkpoint seed telemetry envelope is incomplete")
+    return hashlib.sha256(
+        canonical_json(seed_generation, max_bytes=256 * 1024)
+    ).hexdigest()
 
 
 def _publish_live_frontier(
@@ -1615,13 +2095,22 @@ def _lane_worker(
             important=True,
         )
     except BaseException as error:
+        error_detail = f"{type(error).__name__}: {error}"
+        seed_failure = getattr(
+            error, "seed_generation_observation", None
+        )
+        if isinstance(seed_failure, dict):
+            error_detail = (
+                f"{error_detail}; seed_generation="
+                f"{json.dumps(seed_failure, sort_keys=True, separators=(',', ':'))}"
+            )
         _emit(
             events,
             {
                 "kind": "exit",
                 "lane_id": spec.lane_id,
                 "reason": "failure",
-                "error": f"{type(error).__name__}: {error}",
+                "error": error_detail,
                 "at": utc_now(),
             },
             important=True,

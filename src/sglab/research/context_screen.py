@@ -134,9 +134,6 @@ def prepare_context_screen_phase_a(
         state_bytes = canonical_json(
             prepared.state, max_bytes=DIRECTOR_STATE_MAX_BYTES
         )
-        registry_bytes = canonical_json(
-            prepared.evidence_registry, max_bytes=128 * 1024
-        )
         envelope = {
             "thread_id": "<runtime-thread-id>",
             "snapshot_id": snapshot["snapshot_id"],
@@ -1501,6 +1498,12 @@ def decision_context_for_snapshot(
         ),
         executable_target_ids=evidence_registry_ids(
             prepared.executable_target_registry
+        ),
+        diagnostic_subject_ids=frozenset(
+            str(value)
+            for value in prepared.state["allowed_action_space"].get(
+                "diagnostic_subject_ids", []
+            )
         ),
         applicable_action_types=frozenset(
             prepared.state["allowed_action_space"]["actions"]

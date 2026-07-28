@@ -599,7 +599,11 @@ class ActionApplicabilityTests(unittest.TestCase):
             "request_diagnostic": {
                 **common_action("request_diagnostic"),
                 "diagnostic_type": "graph_invariants",
-                "subject_ids": ["snapshot-applicability"],
+                "subject_ids": [
+                    prepared.state["allowed_action_space"][
+                        "diagnostic_subject_ids"
+                    ][0]
+                ],
             },
             "schedule_verification": {
                 **common_action("schedule_verification"),

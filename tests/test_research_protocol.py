@@ -290,6 +290,30 @@ class ResearchProtocolTests(unittest.TestCase):
             {"type": "string"},
         )
 
+    def test_diagnostic_schema_allows_submitted_lane_subjects(self) -> None:
+        subjects = [
+            "lane-current",
+            "lane-metrics:lane-current:window-7",
+        ]
+        schema = director_decision_schema(
+            {
+                "actions": ["request_diagnostic"],
+                "active_executable_lane_ids": ["lane-current"],
+                "candidate_target_ids": [],
+                "checkpoint_target_ids": [],
+                "diagnostic_subject_ids": subjects,
+            }
+        )
+        diagnostic = schema["properties"]["actions"]["items"]["anyOf"][0]
+        self.assertEqual(
+            diagnostic["properties"]["subject_ids"]["items"],
+            {"type": "string", "enum": subjects},
+        )
+        self.assertIn(
+            "seed_generation_efficiency",
+            diagnostic["properties"]["diagnostic_type"]["enum"],
+        )
+
     def test_schema_only_allows_submitted_evidence_references(self) -> None:
         evidence_ids = [
             "candidate-summary:candidate-current",

@@ -16,6 +16,7 @@ from ..score_worker import CycleCountResult
 from .base import (
     MutationResult,
     ScoreResult,
+    SeedGenerationTrace,
     ValidationResult,
     VerifyResult,
     Witness,
@@ -157,90 +158,137 @@ class ErdosGyarfasPlugin:
     def new_score_profile() -> ScoreProfileAccumulator:
         return ScoreProfileAccumulator()
 
-    def generate_seed(self, rng: Random, config: dict[str, Any]) -> BitGraph:
-        n = int(config["order"])
-        mode = str(config.get("mode", "cubic_first"))
-        if n < 4:
-            raise ValueError("order must be at least 4")
-        if mode not in {
-            "cubic_first",
-            "minimal_structure_mixed_degree",
-            "unrestricted_min_degree_3",
-        }:
-            raise ValueError(f"unsupported mode: {mode}")
-        if mode == "cubic_first" and n % 2:
-            raise ValueError("cubic graphs require an even order")
-        if mode == "minimal_structure_mixed_degree" and n < 5:
-            raise ValueError("minimal_structure_mixed_degree requires order at least 5")
+    def generate_seed(
+        self,
+        rng: Random,
+        config: dict[str, Any],
+        *,
+        trace: SeedGenerationTrace | None = None,
+    ) -> BitGraph:
+        try:
+            n = int(config["order"])
+            mode = str(config.get("mode", "cubic_first"))
+            if trace is not None:
+                trace.generator_mode = mode
+            if n < 4:
+                raise ValueError("order must be at least 4")
+            if mode not in {
+                "cubic_first",
+                "minimal_structure_mixed_degree",
+                "unrestricted_min_degree_3",
+            }:
+                raise ValueError(f"unsupported mode: {mode}")
+            if mode == "cubic_first" and n % 2:
+                raise ValueError("cubic graphs require an even order")
+            if mode == "minimal_structure_mixed_degree" and n < 5:
+                raise ValueError(
+                    "minimal_structure_mixed_degree requires order at least 5"
+                )
+        except (KeyError, TypeError, ValueError):
+            if trace is not None:
+                trace.failure_category = "invalid_generator_configuration"
+            raise
+
         if mode == "unrestricted_min_degree_3" and n % 2:
-            return self.generate_seed(
-                rng,
-                {**config, "mode": "minimal_structure_mixed_degree"},
-            )
-        if mode == "minimal_structure_mixed_degree":
-            high_count = 2 if n % 2 == 0 else 1
-            high_count = min(high_count, max(1, math.floor(3 * n / 7)))
-            degrees = [4] * high_count + [3] * (n - high_count)
-            if sum(degrees) % 2:
-                high_count += 1
+            mode = "minimal_structure_mixed_degree"
+            if trace is not None:
+                trace.generator_mode = mode
+
+        try:
+            if mode == "minimal_structure_mixed_degree":
+                retry_budget = 2_000
+                if trace is not None:
+                    trace.retry_budget = retry_budget
+                high_count = 2 if n % 2 == 0 else 1
+                high_count = min(
+                    high_count, max(1, math.floor(3 * n / 7))
+                )
                 degrees = [4] * high_count + [3] * (n - high_count)
-            high = set(range(high_count))
-            for _ in range(2_000):
-                stubs = [
-                    vertex
-                    for vertex, degree in enumerate(degrees)
-                    for _ in range(degree)
-                ]
-                rng.shuffle(stubs)
-                edges: set[tuple[int, int]] = set()
-                valid = True
-                while stubs:
-                    u = stubs.pop()
+                if sum(degrees) % 2:
+                    high_count += 1
+                    degrees = [4] * high_count + [3] * (n - high_count)
+                high = set(range(high_count))
+                for attempt in range(1, retry_budget + 1):
+                    if trace is not None:
+                        trace.attempts = attempt
+                    stubs = [
+                        vertex
+                        for vertex, degree in enumerate(degrees)
+                        for _ in range(degree)
+                    ]
+                    rng.shuffle(stubs)
+                    edges: set[tuple[int, int]] = set()
+                    valid = True
+                    while stubs:
+                        u = stubs.pop()
+                        choices = [
+                            index
+                            for index, v in enumerate(stubs)
+                            if u != v
+                            and tuple(sorted((u, v))) not in edges
+                            and not (u in high and v in high)
+                        ]
+                        if not choices:
+                            valid = False
+                            break
+                        v = stubs.pop(rng.choice(choices))
+                        edges.add(tuple(sorted((u, v))))
+                    if valid:
+                        graph = BitGraph.from_edges(n, edges)
+                        if graph.is_connected() and all(
+                            any(
+                                graph.degree(v) == 3
+                                for v in graph.neighbors(u)
+                            )
+                            for u in range(n)
+                        ):
+                            return graph
+                if trace is not None:
+                    trace.failure_category = (
+                        "mixed_degree_stub_construction_exhaustion"
+                    )
+                raise RuntimeError(
+                    "failed to generate a mixed-degree seed within retry budget"
+                )
+
+            # A cycle plus a random non-neighbour perfect matching is a
+            # connected cubic seed. Retry is bounded and deterministic.
+            retry_budget = 200
+            if trace is not None:
+                trace.retry_budget = retry_budget
+            cycle = {(u, (u + 1) % n) for u in range(n)}
+            cycle = {tuple(sorted(edge)) for edge in cycle}
+            for attempt in range(1, retry_budget + 1):
+                if trace is not None:
+                    trace.attempts = attempt
+                vertices = list(range(n))
+                rng.shuffle(vertices)
+                matching: set[tuple[int, int]] = set()
+                while vertices:
+                    u = vertices.pop()
                     choices = [
                         index
-                        for index, v in enumerate(stubs)
-                        if u != v
-                        and tuple(sorted((u, v))) not in edges
-                        and not (u in high and v in high)
+                        for index, v in enumerate(vertices)
+                        if tuple(sorted((u, v))) not in cycle
                     ]
                     if not choices:
-                        valid = False
                         break
-                    v = stubs.pop(rng.choice(choices))
-                    edges.add(tuple(sorted((u, v))))
-                if valid:
-                    graph = BitGraph.from_edges(n, edges)
-                    if graph.is_connected() and all(
-                        any(graph.degree(v) == 3 for v in graph.neighbors(u))
-                        for u in range(n)
-                    ):
-                        return graph
+                    index = rng.choice(choices)
+                    v = vertices.pop(index)
+                    matching.add(tuple(sorted((u, v))))
+                if not vertices and len(matching) == n // 2:
+                    return BitGraph.from_edges(n, cycle | matching)
+            if trace is not None:
+                trace.failure_category = (
+                    "cubic_matching_construction_exhaustion"
+                )
             raise RuntimeError(
-                "failed to generate a mixed-degree seed within retry budget"
+                "failed to generate a cubic seed within retry budget"
             )
-        # A cycle plus a random non-neighbour perfect matching is a connected
-        # cubic seed. Retry is bounded and deterministic for a fixed RNG state.
-        cycle = {(u, (u + 1) % n) for u in range(n)}
-        cycle = {tuple(sorted(edge)) for edge in cycle}
-        for _ in range(200):
-            vertices = list(range(n))
-            rng.shuffle(vertices)
-            matching: set[tuple[int, int]] = set()
-            while vertices:
-                u = vertices.pop()
-                choices = [
-                    index
-                    for index, v in enumerate(vertices)
-                    if tuple(sorted((u, v))) not in cycle
-                ]
-                if not choices:
-                    break
-                index = rng.choice(choices)
-                v = vertices.pop(index)
-                matching.add(tuple(sorted((u, v))))
-            if not vertices and len(matching) == n // 2:
-                return BitGraph.from_edges(n, cycle | matching)
-        raise RuntimeError("failed to generate a cubic seed within retry budget")
+        except BaseException:
+            if trace is not None and trace.failure_category is None:
+                trace.failure_category = "other_implementation_failure"
+            raise
 
     def mutate(self, graph: BitGraph, rng: Random, config: dict[str, Any]) -> BitGraph:
         return self.mutate_with_delta(graph, rng, config).graph

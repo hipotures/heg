@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+import copy
+import json
 import tempfile
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from sglab.research.actions import LaneActionDispatcher
-from sglab.research.lanes import LaneManager, LaneSpec
+from sglab.research.lanes import (
+    LaneManager,
+    LaneSpec,
+    _LaneKernel,
+)
 from sglab.research.recovery import CampaignRecovery
 from sglab.research.store import ResearchStore
 
@@ -34,6 +41,57 @@ def spec() -> LaneSpec:
 
 
 class CampaignRecoveryTests(unittest.TestCase):
+    def test_seed_telemetry_envelope_is_verified_on_recovery(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            kernel = _LaneKernel(spec(), None, None)
+            try:
+                checkpoint = kernel.checkpoint(0)
+            finally:
+                kernel.close()
+            checkpoint_path = root / "checkpoint.json"
+            row = {
+                "checkpoint_ref": checkpoint_path.name,
+                "checkpoint_sha256": checkpoint["sha256"],
+                "lane_id": checkpoint["lane_id"],
+                "lane_version": checkpoint["lane_version"],
+            }
+            recovery = CampaignRecovery(
+                store=SimpleNamespace(),
+                manager=SimpleNamespace(),
+                dispatcher=SimpleNamespace(),
+                campaign_id="campaign-1",
+                campaign_dir=root,
+            )
+
+            checkpoint_path.write_text(
+                json.dumps(checkpoint), encoding="utf-8"
+            )
+            self.assertEqual(
+                recovery._checkpoint(row)["checkpoint_id"],
+                checkpoint["checkpoint_id"],
+            )
+
+            tampered = copy.deepcopy(checkpoint)
+            tampered["seed_generation"]["total"]["calls"] += 1
+            checkpoint_path.write_text(
+                json.dumps(tampered), encoding="utf-8"
+            )
+            with self.assertRaisesRegex(
+                RuntimeError, "seed telemetry hash mismatch"
+            ):
+                recovery._checkpoint(row)
+
+            incomplete = copy.deepcopy(checkpoint)
+            incomplete.pop("seed_generation_sha256")
+            checkpoint_path.write_text(
+                json.dumps(incomplete), encoding="utf-8"
+            )
+            with self.assertRaisesRegex(
+                ValueError, "telemetry envelope is incomplete"
+            ):
+                recovery._checkpoint(row)
+
     def test_exact_checkpoint_state_resumes_without_restarting_high_water(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

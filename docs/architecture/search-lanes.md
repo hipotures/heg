@@ -57,6 +57,20 @@ Actions apply between bounded micro-batches. Each micro-batch produces:
 - checkpoint before matching high-water telemetry;
 - candidate improvements.
 
+Every campaign seed construction is observed at the call boundary without an
+additional generator call or RNG draw. Fixed-size accumulators record graph
+family/order, effective generator mode, source, success/failure, internal
+attempt count, retry budget, elapsed nanoseconds, and categorized failure.
+Sources distinguish initial lane creation, automatic algorithm restart,
+explicit reviewed restart, and each random-restart candidate. Restoring a
+checkpoint graph is not seed construction and increments nothing.
+
+Batch and cumulative lane telemetry contain call/success/failure totals,
+attempt and elapsed totals/maxima, retry exhaustion, fixed-bucket p50/p95/p99
+estimates, and the share of measured search-loop time spent in seed
+construction. Histograms and source/category maps have compile-time bounds;
+there is no per-seed event, row, artifact, or prompt history.
+
 Erdős–Gyárfás score profiling is optional and independent of ancestry
 instrumentation. When enabled, each worker keeps per-length elapsed
 nanoseconds, DFS-node counts, evaluation counts, complete recounts and
@@ -140,6 +154,12 @@ Checkpoint content includes enough state to reproduce continuation:
 - local tabu-key scheme;
 - current/best provenance kind and reproduction metadata;
 - hash/manifest.
+
+Seed telemetry is carried in the checkpoint so cumulative aggregates survive
+Resume. Because elapsed time is observational and nondeterministic, it has a
+separate SHA-256 envelope and is excluded from the scientific checkpoint
+identity. Recovery verifies both hashes. Instrumentation therefore leaves the
+graph/RNG/search checkpoint ID identical to an uninstrumented run.
 
 Resume verifies hashes and starts a new process generation.
 

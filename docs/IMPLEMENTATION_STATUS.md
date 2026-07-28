@@ -2,6 +2,23 @@
 
 Last implementation audit: **2026-07-28**.
 
+## Seed-generation retry and latency telemetry
+
+Every campaign seed construction now records its source, graph family/order,
+effective generator mode, success/failure, internal attempts, fixed retry
+budget, elapsed time, and categorized failure. Fixed-size attempt/time
+histograms provide bounded p50/p95/p99 estimates with batch and cumulative
+lane totals; random-restart seed time is now separable from generic mutation
+generation. Checkpoint graph restores are explicitly excluded.
+
+Cumulative aggregates survive Resume in a separately hashed checkpoint
+telemetry envelope, leaving graph/RNG/search checkpoint identity deterministic.
+The reviewed `seed_generation_efficiency` diagnostic compares lanes, families,
+and orders for high p95 attempts, retry-budget pressure, generator runtime
+share, and seed-dominated random-restart throughput. No generator, retry
+budget, graph-family semantics, search trajectory, archive, or M4 behavior
+changed. See ADR 0015 and `docs/reports/SEED_GENERATION_TELEMETRY.md`.
+
 ## Passive snapshot-to-commit boundary
 
 Passive review no longer runs as a background task while the same orchestrator

@@ -128,6 +128,8 @@ class ScientificActionDispatcher:
             }
         elif diagnostic_type == "operator_yield":
             result = {"lanes": [self._operator_yield(lane) for lane in lanes]}
+        elif diagnostic_type == "seed_generation_efficiency":
+            result = self._seed_generation_efficiency(lanes)
         elif diagnostic_type == "candidate_structural_diff":
             result = _candidate_diff(candidates[:2])
         elif diagnostic_type == "canonical_duplicate_analysis":
@@ -217,6 +219,124 @@ class ScientificActionDispatcher:
             "mean_operator_yield": (
                 sum(yields) / len(yields) if yields else 0.0
             ),
+        }
+
+    def _seed_generation_efficiency(
+        self, lanes: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        comparisons: list[dict[str, Any]] = []
+        for lane in lanes:
+            row = self.store.connection.execute(
+                """
+                SELECT metrics_json FROM lane_metric_windows
+                WHERE lane_id=? ORDER BY end_high_water DESC LIMIT 1
+                """,
+                (lane["lane_id"],),
+            ).fetchone()
+            metrics = json.loads(row["metrics_json"]) if row else {}
+            seed_generation = metrics.get("seed_generation", {})
+            cumulative = (
+                seed_generation.get("cumulative", {})
+                if isinstance(seed_generation, dict)
+                else {}
+            )
+            total = cumulative.get("total", {})
+            sources = cumulative.get("sources", {})
+            random_restart = (
+                sources.get("random_restart_candidate", {})
+                if isinstance(sources, dict)
+                else {}
+            )
+            parameters = json.loads(lane["current_parameters_json"])
+            measured_search_loop_ns = int(
+                cumulative.get("measured_search_loop_ns", 0)
+            )
+            random_restart_share = (
+                int(random_restart.get("search_loop_elapsed_ns", 0))
+                / measured_search_loop_ns
+                if measured_search_loop_ns
+                else 0.0
+            )
+            attempt_percentiles = total.get("attempt_percentiles", {})
+            comparison = {
+                "lane_id": lane["lane_id"],
+                "graph_family": lane["graph_family"],
+                "graph_order": int(parameters["order"]),
+                "generator_mode": cumulative.get("generator_mode"),
+                "calls": int(total.get("calls", 0)),
+                "successes": int(total.get("successes", 0)),
+                "failures": int(total.get("failures", 0)),
+                "p95_attempts": int(
+                    attempt_percentiles.get("p95", 0)
+                ),
+                "p99_attempts": int(
+                    attempt_percentiles.get("p99", 0)
+                ),
+                "maximum_attempts": int(total.get("attempts_max", 0)),
+                "retry_budget": int(total.get("retry_budget_max", 0)),
+                "maximum_retry_budget_fraction": float(
+                    total.get("maximum_retry_budget_fraction", 0.0)
+                ),
+                "retry_budget_exhaustions": int(
+                    total.get("retry_budget_exhaustions", 0)
+                ),
+                "generation_elapsed_seconds": (
+                    int(total.get("elapsed_ns_total", 0))
+                    / 1_000_000_000
+                ),
+                "generator_time_share": float(
+                    cumulative.get("generator_time_share", 0.0)
+                ),
+                "random_restart_generator_time_share": (
+                    random_restart_share
+                ),
+                "random_restart_seed_construction_dominated": (
+                    random_restart_share >= 0.5
+                ),
+                "failure_categories": dict(
+                    total.get("failure_categories", {})
+                ),
+            }
+            comparisons.append(comparison)
+        comparisons.sort(
+            key=lambda value: (
+                str(value["graph_family"]),
+                int(value["graph_order"]),
+                str(value["lane_id"]),
+            )
+        )
+        highest_p95 = max(
+            comparisons,
+            key=lambda value: (
+                int(value["p95_attempts"]),
+                int(value["maximum_attempts"]),
+                str(value["lane_id"]),
+            ),
+            default=None,
+        )
+        highest_runtime_share = max(
+            comparisons,
+            key=lambda value: (
+                float(value["generator_time_share"]),
+                str(value["lane_id"]),
+            ),
+            default=None,
+        )
+        return {
+            "lanes": comparisons,
+            "highest_p95_attempts": highest_p95,
+            "near_retry_budget": [
+                value
+                for value in comparisons
+                if value["maximum_retry_budget_fraction"] >= 0.8
+                or value["retry_budget_exhaustions"] > 0
+            ],
+            "highest_generator_time_share": highest_runtime_share,
+            "random_restart_seed_construction_dominated": [
+                value
+                for value in comparisons
+                if value["random_restart_seed_construction_dominated"]
+            ],
         }
 
     def _mutation_ancestry(self, lane: dict[str, Any]) -> dict[str, Any]:

@@ -43,7 +43,8 @@ or a passive scheduler decision.
 
 - lanes and revisions;
 - checkpoints;
-- telemetry windows;
+- telemetry windows, including bounded batch/cumulative seed-generation
+  aggregates in `metrics_json`;
 - candidates;
 - candidate pins and immutable snapshots;
 - `provenance_json` on retained candidates and immutable snapshots;
@@ -111,3 +112,7 @@ The v16→v17 migration adds mode provenance and passive scheduler tables, then
 rebuilds only `director_action_batches` so its source may be either a model
 turn or scheduler decision. Historical batch IDs and fingerprints are copied
 unchanged and verified with `foreign_key_check`.
+
+Seed-generation instrumentation requires no schema migration. Its bounded
+aggregate is stored in existing telemetry JSON and checkpoint artifacts; it
+does not create per-seed SQLite rows.

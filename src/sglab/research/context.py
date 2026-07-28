@@ -798,29 +798,6 @@ def _applicable_action_space(
             if isinstance(value, str) and value
         }
     )
-    visible_ids = sorted(
-        {
-            str(value)
-            for value in _values_for_keys(
-                state,
-                {
-                    "action_id",
-                    "candidate_id",
-                    "best_candidate_identifier",
-                    "checkpoint_id",
-                    "decision_batch_id",
-                    "evidence_id",
-                    "hypothesis_id",
-                    "lane_id",
-                    "metric_window_id",
-                    "outcome_id",
-                },
-            )
-            if isinstance(value, str) and value
-        }
-        | {str(state.get("source_snapshot_id", ""))}
-    )
-
     actions: list[str] = []
     explanations: dict[str, str] = {}
 
@@ -860,7 +837,12 @@ def _applicable_action_space(
             "promote_candidate",
             "at least one retained candidate is available",
         )
-    if visible_ids:
+    diagnostic_subject_ids = sorted(
+        set(active_lane_ids)
+        | {str(value["lane_id"]) for value in lanes}
+        | set(candidate_ids)
+    )
+    if diagnostic_subject_ids:
         expose(
             "request_diagnostic",
             "at least one submitted evidence subject is available",
@@ -895,6 +877,7 @@ def _applicable_action_space(
             for value in lanes
         },
         "candidate_target_ids": candidate_ids,
+        "diagnostic_subject_ids": diagnostic_subject_ids,
         "algorithms": catalog["algorithms"],
         "graph_families": [
             value["id"] for value in catalog["graph_families"]
@@ -909,20 +892,6 @@ def _applicable_action_space(
     if checkpoint_ids:
         result["checkpoint_target_ids"] = checkpoint_ids
     return result
-
-
-def _values_for_keys(value: Any, keys: set[str]) -> list[Any]:
-    values: list[Any] = []
-    if isinstance(value, dict):
-        for key, child in value.items():
-            if key in keys:
-                values.append(child)
-            values.extend(_values_for_keys(child, keys))
-    elif isinstance(value, list):
-        for child in value:
-            values.extend(_values_for_keys(child, keys))
-    return values
-
 
 def _outcome_summary(
     action: dict[str, Any], *, historical: bool

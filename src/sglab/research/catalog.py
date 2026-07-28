@@ -32,6 +32,7 @@ DIAGNOSTICS = (
     "mutation_ancestry",
     "archive_cluster_comparison",
     "operator_yield",
+    "seed_generation_efficiency",
     "candidate_structural_diff",
     "canonical_duplicate_analysis",
 )
@@ -139,7 +140,7 @@ def action_catalog() -> dict[str, Any]:
         ),
     }
     return {
-        "catalog_version": "1.1",
+        "catalog_version": "1.2",
         "algorithms": list(ALGORITHMS),
         "graph_families": [
             {"id": family, "engine_mode": mode}

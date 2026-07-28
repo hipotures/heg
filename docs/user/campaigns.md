@@ -117,6 +117,14 @@ uniform and forbidden-cycle-targeted mutation time and reports reuse of the
 current graph's witness choices. It does not create a candidate history or
 change the selected mutation sequence.
 
+Seed-generation telemetry separately shows how many internal construction
+attempts were needed, whether a retry budget was exhausted, and how much
+measured search-loop time was spent constructing seeds. The reviewed
+`seed_generation_efficiency` diagnostic compares these bounded aggregates
+across submitted lanes, graph families, and orders. Initial, automatic
+restart, explicit restart, and random-restart sources are distinct; loading a
+checkpoint does not count as generation.
+
 The dashboard's aggregate throughput is the sum of the latest completed
 metric window from every running lane. Each lane card shows that same
 latest-window value, so the visible lane rates can be added directly. Rolling

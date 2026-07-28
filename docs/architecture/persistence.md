@@ -63,6 +63,13 @@ Critical transactions include:
 Use canonical content hashes for scientific identity. Do not use the physical
 SQLite main-file hash while WAL mode is active.
 
+Lane checkpoints have two integrity domains. The scientific checkpoint
+SHA-256 covers graph, RNG, algorithm state, provenance, counters, and
+parameters. Bounded seed-generation telemetry has its own SHA-256 because its
+elapsed-time fields are observational and must not change deterministic
+checkpoint identity. Recovery verifies both; either mismatch rejects the
+checkpoint.
+
 ## Artifact references
 
 Database rows store safe relative paths and SHA-256. Public reports avoid

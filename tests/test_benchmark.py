@@ -7,6 +7,7 @@ from sglab.benchmark import (
     microbenchmark,
     quantiles,
     score_kernel_benchmark,
+    seed_generation_benchmark,
     soak,
     write_report,
 )
@@ -20,9 +21,8 @@ class BenchmarkTests(unittest.TestCase):
         self.assertEqual(result["maximum"], 100)
 
     def test_microbenchmark_separates_search_pipeline_stages(self) -> None:
-        operations = microbenchmark(
-            iterations=1, orders=(20,)
-        )["operations"]
+        report = microbenchmark(iterations=1, orders=(20,))
+        operations = report["operations"]
         self.assertTrue(
             {
                 "candidate_evaluation_batch_10_n20",
@@ -32,6 +32,27 @@ class BenchmarkTests(unittest.TestCase):
                 "live_frontier_publication",
             }.issubset(operations)
         )
+        self.assertTrue(
+            report["seed_generation"]["all_trajectories_equal"]
+        )
+
+    def test_seed_generation_benchmark_reports_required_workloads(
+        self,
+    ) -> None:
+        report = seed_generation_benchmark(iterations=2)
+        self.assertEqual(
+            set(report["cases"]),
+            {"cubic", "mixed_degree", "random_restart"},
+        )
+        self.assertTrue(report["all_trajectories_equal"])
+        for case in report["cases"].values():
+            self.assertGreater(case["baseline_candidates_per_second"], 0)
+            self.assertGreater(
+                case["instrumented_candidates_per_second"], 0
+            )
+            self.assertGreaterEqual(
+                case["seed_generation_runtime_share"], 0
+            )
 
     def test_short_calibration_covers_frontier_gates_and_writes_reports(self) -> None:
         report = calibrate(0.002, seeds=1, jobs=2)

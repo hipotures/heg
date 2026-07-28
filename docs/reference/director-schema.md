@@ -69,6 +69,14 @@ Each action includes:
 - fallback;
 - type-specific fields.
 
+`request_diagnostic` may select
+`seed_generation_efficiency`. Its submitted subject enum is the bounded
+diagnostic-subject registry, not only retained candidates, so current lane and
+lane-metric evidence can be compared. The result identifies per-lane
+family/order, p95/p99 attempts, retry-budget proximity and exhaustion,
+generator runtime share, and random-restart lanes dominated by seed
+construction. It remains heuristic telemetry and contains no graph bodies.
+
 ## IDs
 
 Action IDs have workspace scope. The state supplies a deterministic recommended
@@ -77,11 +85,11 @@ The prompt supplies the number of recently reserved IDs, not their full
 durable list. The SQLite-backed workspace collision check remains the
 authoritative membership test.
 
-The generated schema binds `promote_candidate.candidate_id`,
-`request_diagnostic.subject_ids`, and
+The generated schema binds `promote_candidate.candidate_id` and
 `schedule_verification.candidate_ids` to the submitted candidate-target enum.
-An unseen, historical-only, or truncated candidate ID is therefore outside
-the structured-output contract and remains invalid under semantic validation.
+It binds `request_diagnostic.subject_ids` to the submitted diagnostic-subject
+enum. An unseen or truncated ID is therefore outside the structured-output
+contract and remains invalid under semantic validation.
 
 The generated schema also binds every hypothesis and action evidence
 reference to the exact submitted evidence-registry enum:

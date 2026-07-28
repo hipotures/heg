@@ -38,6 +38,14 @@ class MutationResult:
     added_edges: tuple[tuple[int, int], ...] = ()
 
 
+@dataclass(slots=True)
+class SeedGenerationTrace:
+    generator_mode: str = ""
+    attempts: int = 0
+    retry_budget: int = 0
+    failure_category: str | None = None
+
+
 @dataclass(frozen=True, slots=True)
 class ScoreResult:
     valid: bool
@@ -66,7 +74,13 @@ class TargetPlugin(Protocol):
 
     def forbidden_lengths(self, order: int) -> tuple[int, ...]: ...
     def validate_graph(self, graph: BitGraph) -> ValidationResult: ...
-    def generate_seed(self, rng: Random, config: dict[str, Any]) -> BitGraph: ...
+    def generate_seed(
+        self,
+        rng: Random,
+        config: dict[str, Any],
+        *,
+        trace: SeedGenerationTrace | None = None,
+    ) -> BitGraph: ...
     def mutate(
         self, graph: BitGraph, rng: Random, config: dict[str, Any]
     ) -> BitGraph: ...

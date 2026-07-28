@@ -246,6 +246,12 @@ class SnapshotBuilder:
             executable_target_ids=evidence_registry_ids(
                 prepared.executable_target_registry
             ),
+            diagnostic_subject_ids=frozenset(
+                str(value)
+                for value in prepared.state["allowed_action_space"].get(
+                    "diagnostic_subject_ids", []
+                )
+            ),
             applicable_action_types=frozenset(
                 prepared.state["allowed_action_space"]["actions"]
             ),

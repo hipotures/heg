@@ -3,12 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-import hashlib
 import json
 
 from .actions import LaneActionDispatcher
-from .lanes import LaneManager, LaneSpec
-from .protocol import canonical_json
+from .lanes import (
+    LaneManager,
+    LaneSpec,
+    checkpoint_scientific_sha256,
+    checkpoint_seed_generation_sha256,
+)
 from .store import ResearchStore
 
 
@@ -134,14 +137,17 @@ class CampaignRecovery:
             try:
                 path.relative_to(self.campaign_dir)
                 checkpoint = json.loads(path.read_text(encoding="utf-8"))
-                unsigned = dict(checkpoint)
-                unsigned.pop("checkpoint_id", None)
-                unsigned.pop("sha256", None)
-                actual = hashlib.sha256(
-                    canonical_json(unsigned, max_bytes=1024 * 1024)
-                ).hexdigest()
+                actual = checkpoint_scientific_sha256(checkpoint)
+                seed_actual = checkpoint_seed_generation_sha256(
+                    checkpoint
+                )
                 if (
                     checkpoint.get("sha256") != actual
+                    or (
+                        seed_actual is not None
+                        and checkpoint.get("seed_generation_sha256")
+                        != seed_actual
+                    )
                     or checkpoint.get("lane_id") != row["lane_id"]
                     or int(checkpoint.get("lane_version", -1))
                     != int(row["lane_version"])
@@ -179,14 +185,15 @@ class CampaignRecovery:
         if not isinstance(payload, dict):
             raise RuntimeError("checkpoint is not an object")
         claimed = str(payload.get("sha256", ""))
-        unsigned = dict(payload)
-        unsigned.pop("checkpoint_id", None)
-        unsigned.pop("sha256", None)
-        actual = hashlib.sha256(
-            canonical_json(unsigned, max_bytes=1024 * 1024)
-        ).hexdigest()
+        actual = checkpoint_scientific_sha256(payload)
+        seed_actual = checkpoint_seed_generation_sha256(payload)
         if claimed != actual or str(row["checkpoint_sha256"]) != actual:
             raise RuntimeError("checkpoint hash mismatch")
+        if (
+            seed_actual is not None
+            and payload.get("seed_generation_sha256") != seed_actual
+        ):
+            raise RuntimeError("checkpoint seed telemetry hash mismatch")
         if payload.get("lane_id") != row["lane_id"]:
             raise RuntimeError("checkpoint lane mismatch")
         if int(payload.get("lane_version", -1)) != int(row["lane_version"]):

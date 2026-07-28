@@ -74,6 +74,7 @@ class DecisionContext:
     max_active_lanes: int = 8
     advisory_target_ids: frozenset[str] | None = None
     executable_target_ids: frozenset[str] | None = None
+    diagnostic_subject_ids: frozenset[str] | None = None
     applicable_action_types: frozenset[str] = frozenset(ACTION_TYPES)
     reserved_action_ids: frozenset[str] = frozenset()
 
@@ -92,6 +93,12 @@ class DecisionContext:
                 frozenset(self.lane_versions)
                 | self.checkpoint_ids
                 | self.candidate_ids,
+            )
+        if self.diagnostic_subject_ids is None:
+            object.__setattr__(
+                self,
+                "diagnostic_subject_ids",
+                frozenset(self.lane_versions) | self.candidate_ids,
             )
 
 
@@ -282,11 +289,7 @@ def validate_decision(
                 f"{path}.subject_ids",
                 minimum=1,
                 maximum=32,
-                allowlist=(
-                    context.evidence_ids
-                    | context.advisory_target_ids
-                    | context.executable_target_ids
-                ),
+                allowlist=context.diagnostic_subject_ids or frozenset(),
             )
         elif action_type == "schedule_verification":
             _candidate_list(

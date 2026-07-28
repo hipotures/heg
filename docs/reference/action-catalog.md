@@ -43,3 +43,11 @@ Examples:
 6. persist outcome/effect.
 
 No accepted action is dispatched before durable commit.
+
+## Reviewed diagnostics
+
+`seed_generation_efficiency` compares the latest cumulative bounded seed
+telemetry for submitted lanes. It reports the lane/family/order with the
+highest p95 attempt estimate, generators approaching or exhausting their retry
+budget, generator share of measured search-loop time, and random-restart
+lanes whose throughput is seed-construction dominated.
