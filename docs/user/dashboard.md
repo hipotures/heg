@@ -20,12 +20,17 @@ only while their corresponding section is available.
 Shows:
 
 - campaign and execution-attempt identity;
+- active orchestration mode;
 - state and stop condition;
 - cumulative and attempt-local counters;
 - Director connection/auth status;
 - resource usage;
 - fault detail;
 - M4 queue and certification state.
+
+For **No-LLM passive search**, the status also shows policy/version and the
+last deterministic reason codes. Director auth, connection, context, and token
+usage render as not applicable rather than as faults.
 
 ### Director assessment and hypotheses
 
@@ -46,6 +51,9 @@ Each decision is rendered semantically:
 - measured downstream outcome.
 
 Raw JSON is secondary technical evidence only.
+The same view renders passive scheduler actions and their measured outcomes;
+the durable source is labeled as scheduler provenance rather than a model
+turn.
 
 ### Search lanes
 
@@ -139,6 +147,10 @@ Controls are state-dependent:
 - stop only while controllable;
 - Resume only for supported terminal/recovery states;
 - no dead Resume control for a fault that has not been acknowledged.
+
+Campaign creation and the new-attempt Resume panel both offer `AI Director`
+and `No-LLM passive search`. Changing the selection affects only the new
+attempt and never triggers an automatic fallback.
 
 ## Theme and responsive behavior
 

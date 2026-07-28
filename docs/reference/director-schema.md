@@ -14,6 +14,13 @@ A Director response contains:
 The exact generated JSON schema is derived from the submitted action space and
 registries.
 
+In `llm` mode this contract is model-facing. In `passive` mode the versioned
+host scheduler constructs the same typed decision object and submits it to the
+same semantic validator, durable action-batch store, and dispatcher. Passive
+decisions have a scheduler-decision source instead of an App Server turn
+source; they do not create repair turns. A rejected passive decision is
+persisted as a scheduler fault and no action from that batch is dispatched.
+
 The submitted action space uses separate compact lists for active executable
 lanes, historical lanes, candidate targets, and checkpoint targets, plus one
 compact lane-lifecycle map. Reference registries deterministically recover
@@ -106,6 +113,9 @@ One invalid result may produce a repair request containing:
 - no duplicated full rejected response.
 
 The repair must keep the same snapshot ID.
+
+Repair is available only for `llm` decisions. Passive decisions fail closed
+after their single deterministic validation attempt.
 
 The complete-request budget includes base instructions, prompt, and output
 schema. A request-level compaction pass may reduce policy-droppable

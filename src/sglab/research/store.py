@@ -70,11 +70,14 @@ class ResearchStore:
         deadline_at: str | None,
         effective_context_mode: str | None = None,
         context_recommendation_basis: str | None = None,
+        director_mode: str = "llm",
     ) -> None:
         if stop_mode not in {"time_limit", "until_success"}:
             raise ValueError("invalid campaign stop mode")
         if (stop_mode == "time_limit") != (deadline_at is not None):
             raise ValueError("time_limit requires and until_success forbids deadline_at")
+        if director_mode not in {"llm", "passive"}:
+            raise ValueError("invalid director mode")
         now = utc_now()
         with self.transaction() as database:
             database.execute(
@@ -83,8 +86,8 @@ class ResearchStore:
                 (campaign_id, created_at, updated_at, target,
                  target_definition_sha256, state, state_version, stop_mode,
                  deadline_at, effective_context_mode,
-                 context_recommendation_basis)
-                VALUES (?, ?, ?, ?, ?, 'running', 0, ?, ?, ?, ?)
+                 context_recommendation_basis, director_mode)
+                VALUES (?, ?, ?, ?, ?, 'running', 0, ?, ?, ?, ?, ?)
                 """,
                 (
                     campaign_id,
@@ -96,6 +99,7 @@ class ResearchStore:
                     deadline_at,
                     effective_context_mode,
                     context_recommendation_basis,
+                    director_mode,
                 ),
             )
 
@@ -116,6 +120,8 @@ class ResearchStore:
             SELECT
               (SELECT count(*) FROM app_server_turns
                WHERE campaign_id=?) AS director_turns,
+              (SELECT count(*) FROM passive_scheduler_decisions
+               WHERE campaign_id=?) AS scheduler_decisions,
               (SELECT coalesce(sum(total_tokens), 0) FROM app_server_turns
                WHERE campaign_id=?) AS server_tokens,
               (SELECT coalesce(sum(wall_seconds), 0) FROM app_server_turns
@@ -134,10 +140,13 @@ class ResearchStore:
                WHERE campaign_id=? AND state IN ('completed','unknown','failed'))
                 AS terminal_verifications
             """,
-            (campaign_id,) * 9,
+            (campaign_id,) * 10,
         ).fetchone()
         return {
             "director_turns": int(row["director_turns"] or 0),
+            "scheduler_decisions": int(
+                row["scheduler_decisions"] or 0
+            ),
             "server_tokens": int(row["server_tokens"] or 0),
             "director_wall_seconds": float(
                 row["director_wall_seconds"] or 0
@@ -194,7 +203,15 @@ class ResearchStore:
         authorization_provenance: dict[str, Any] | None = None,
         runtime_provenance: dict[str, Any] | None = None,
         process_id: int | None = None,
+        director_mode: str = "llm",
+        previous_director_mode: str | None = None,
+        mode_transition: dict[str, Any] | None = None,
+        contract_fingerprint: str | None = None,
     ) -> int:
+        if director_mode not in {"llm", "passive"}:
+            raise ValueError("invalid director mode")
+        if previous_director_mode not in {None, "llm", "passive"}:
+            raise ValueError("invalid previous director mode")
         inherited = self.cumulative_campaign_counters(campaign_id)
         with self.transaction() as database:
             campaign = database.execute(
@@ -221,9 +238,10 @@ class ResearchStore:
                  starting_checkpoint_refs_json, inherited_counters_json,
                  attempt_counters_json, repair_acknowledgement,
                  authorization_provenance_json, runtime_provenance_json,
-                 process_id)
+                 process_id, director_mode, previous_director_mode,
+                 mode_transition_json, contract_fingerprint)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?,
-                        ?, ?, ?)
+                        ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     attempt_id,
@@ -245,15 +263,19 @@ class ResearchStore:
                     ),
                     json.dumps(runtime_provenance or {}, sort_keys=True),
                     process_id,
+                    director_mode,
+                    previous_director_mode,
+                    json.dumps(mode_transition or {}, sort_keys=True),
+                    contract_fingerprint,
                 ),
             )
             database.execute(
                 """
                 UPDATE research_campaigns
-                SET current_attempt_id=?, updated_at=?
+                SET current_attempt_id=?, director_mode=?, updated_at=?
                 WHERE campaign_id=?
                 """,
-                (attempt_id, utc_now(), campaign_id),
+                (attempt_id, director_mode, utc_now(), campaign_id),
             )
         return attempt_index
 
@@ -748,6 +770,69 @@ class ResearchStore:
             if cursor.rowcount != 1:
                 raise KeyError(trigger_id)
 
+    def passive_scheduler_state(
+        self, campaign_id: str
+    ) -> dict[str, Any] | None:
+        row = self.connection.execute(
+            """
+            SELECT * FROM passive_scheduler_states WHERE campaign_id=?
+            """,
+            (campaign_id,),
+        ).fetchone()
+        return dict(row) if row is not None else None
+
+    def record_passive_scheduler_fault(
+        self,
+        *,
+        scheduler_decision_id: str,
+        campaign_id: str,
+        snapshot_id: str,
+        metadata: dict[str, Any],
+        decision: dict[str, Any],
+        detail: str,
+    ) -> None:
+        now = utc_now()
+        state_before = metadata["state_before"]
+        with self.transaction() as database:
+            database.execute(
+                """
+                INSERT INTO passive_scheduler_decisions
+                (scheduler_decision_id, campaign_id, execution_attempt_id,
+                 policy_id, policy_version, scheduler_state_version,
+                 state_version_before, state_version_after,
+                 input_snapshot_id, input_snapshot_version,
+                 input_metrics_json, reason_codes_json,
+                 generated_action_ids_json, validation_status,
+                 validation_detail, resulting_changes_json, created_at)
+                SELECT ?, ?, current_attempt_id, ?, ?, ?, ?, NULL, ?, ?, ?,
+                       ?, ?, 'rejected_invalid', ?, '{}', ?
+                FROM research_campaigns WHERE campaign_id=?
+                """,
+                (
+                    scheduler_decision_id,
+                    campaign_id,
+                    metadata["policy_id"],
+                    metadata["policy_version"],
+                    metadata["scheduler_state_version"],
+                    state_before["state_version"],
+                    snapshot_id,
+                    metadata["input_snapshot_version"],
+                    json.dumps(metadata["input_metrics"], sort_keys=True),
+                    json.dumps(metadata["reason_codes"], sort_keys=True),
+                    json.dumps(
+                        [
+                            action.get("action_id")
+                            for action in decision.get("actions", [])
+                            if isinstance(action, dict)
+                        ],
+                        sort_keys=True,
+                    ),
+                    detail[:4000],
+                    now,
+                    campaign_id,
+                ),
+            )
+
     def record_session(
         self,
         *,
@@ -1184,23 +1269,36 @@ class ResearchStore:
         campaign_id: str,
         snapshot_id: str,
         trigger_id: str,
-        turn_record_id: str,
+        turn_record_id: str | None,
         decision: dict[str, Any],
+        scheduler_decision_id: str | None = None,
+        scheduler_metadata: dict[str, Any] | None = None,
     ) -> dict[str, str]:
         """Commit validated actions, rejecting races without silent rebasing."""
 
+        if (turn_record_id is None) == (scheduler_decision_id is None):
+            raise ValueError(
+                "decision batch requires exactly one durable source"
+            )
+        if (scheduler_decision_id is None) != (scheduler_metadata is None):
+            raise ValueError(
+                "scheduler decision ID and metadata must be supplied together"
+            )
         now = utc_now()
         statuses: dict[str, str] = {}
         with self.transaction() as database:
-            turn = database.execute(
-                """
-                SELECT status FROM app_server_turns
-                WHERE turn_record_id=? AND campaign_id=? AND snapshot_id=?
-                """,
-                (turn_record_id, campaign_id, snapshot_id),
-            ).fetchone()
-            if turn is None or turn["status"] != "completed_valid":
-                raise RuntimeError("decision source turn is not completed_valid")
+            if turn_record_id is not None:
+                turn = database.execute(
+                    """
+                    SELECT status FROM app_server_turns
+                    WHERE turn_record_id=? AND campaign_id=? AND snapshot_id=?
+                    """,
+                    (turn_record_id, campaign_id, snapshot_id),
+                ).fetchone()
+                if turn is None or turn["status"] != "completed_valid":
+                    raise RuntimeError(
+                        "decision source turn is not completed_valid"
+                    )
             snapshot = database.execute(
                 """
                 SELECT campaign_state_version FROM director_snapshots
@@ -1218,6 +1316,16 @@ class ResearchStore:
             if snapshot is None or campaign is None:
                 raise RuntimeError("decision references missing durable state")
             campaign_is_fresh = int(snapshot[0]) == int(campaign[0])
+            if scheduler_metadata is not None:
+                self._insert_passive_scheduler_decision(
+                    database,
+                    scheduler_decision_id=str(scheduler_decision_id),
+                    campaign_id=campaign_id,
+                    snapshot_id=snapshot_id,
+                    metadata=scheduler_metadata,
+                    decision=decision,
+                    now=now,
+                )
             submitted_actions = {
                 str(action["action_id"]): action
                 for action in decision["actions"]
@@ -1251,36 +1359,88 @@ class ResearchStore:
                     else "rejected_stale_campaign"
                 )
             )
-            database.execute(
-                """
-                INSERT INTO director_action_batches
-                (decision_batch_id, campaign_id, snapshot_id, trigger_id,
-                 turn_record_id, campaign_assessment, next_review_json,
-                 validation_status, response_artifact_ref, response_sha256,
-                 created_at)
-                SELECT ?, ?, ?, ?, ?, ?, ?, ?, response_artifact_ref,
-                       response_sha256, ?
-                FROM app_server_turns WHERE turn_record_id=?
-                """,
-                (
-                    decision_batch_id,
-                    campaign_id,
-                    snapshot_id,
-                    trigger_id,
-                    turn_record_id,
-                    decision["campaign_assessment"],
-                    json.dumps(decision["next_review"], sort_keys=True),
-                    batch_status,
-                    now,
-                    turn_record_id,
-                ),
-            )
+            if turn_record_id is not None:
+                database.execute(
+                    """
+                    INSERT INTO director_action_batches
+                    (decision_batch_id, campaign_id, snapshot_id, trigger_id,
+                     turn_record_id, scheduler_decision_id,
+                     campaign_assessment, next_review_json,
+                     validation_status, response_artifact_ref,
+                     response_sha256, created_at)
+                    SELECT ?, ?, ?, ?, ?, NULL, ?, ?, ?,
+                           response_artifact_ref, response_sha256, ?
+                    FROM app_server_turns WHERE turn_record_id=?
+                    """,
+                    (
+                        decision_batch_id,
+                        campaign_id,
+                        snapshot_id,
+                        trigger_id,
+                        turn_record_id,
+                        decision["campaign_assessment"],
+                        json.dumps(
+                            decision["next_review"], sort_keys=True
+                        ),
+                        batch_status,
+                        now,
+                        turn_record_id,
+                    ),
+                )
+            else:
+                database.execute(
+                    """
+                    INSERT INTO director_action_batches
+                    (decision_batch_id, campaign_id, snapshot_id, trigger_id,
+                     turn_record_id, scheduler_decision_id,
+                     campaign_assessment, next_review_json,
+                     validation_status, response_artifact_ref,
+                     response_sha256, created_at)
+                    VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, NULL, NULL, ?)
+                    """,
+                    (
+                        decision_batch_id,
+                        campaign_id,
+                        snapshot_id,
+                        trigger_id,
+                        scheduler_decision_id,
+                        decision["campaign_assessment"],
+                        json.dumps(
+                            decision["next_review"], sort_keys=True
+                        ),
+                        batch_status,
+                        now,
+                    ),
+                )
             if action_id_collisions:
                 for action_id in submitted_actions:
                     statuses[action_id] = (
                         "rejected_action_id_collision"
                         if action_id in action_id_collisions
                         else "blocked_action_id_collision"
+                    )
+                if scheduler_decision_id is not None:
+                    database.execute(
+                        """
+                        UPDATE passive_scheduler_decisions
+                        SET validation_status='rejected_action_id_collision',
+                            resulting_changes_json=?
+                        WHERE scheduler_decision_id=?
+                        """,
+                        (
+                            json.dumps(
+                                {"action_statuses": statuses},
+                                sort_keys=True,
+                            ),
+                            scheduler_decision_id,
+                        ),
+                    )
+                    database.execute(
+                        """
+                        UPDATE director_triggers SET status='rejected_invalid'
+                        WHERE trigger_id=?
+                        """,
+                        (trigger_id,),
                     )
                 return statuses
             for action in decision["actions"]:
@@ -1445,6 +1605,69 @@ class ResearchStore:
                             now=now,
                         )
                 statuses[action_id] = status
+            if scheduler_metadata is not None and any(
+                status != "accepted" for status in statuses.values()
+            ):
+                blocked = [
+                    action_id
+                    for action_id, status in statuses.items()
+                    if status == "accepted"
+                ]
+                if blocked:
+                    placeholders = ",".join("?" for _ in blocked)
+                    database.execute(
+                        f"""
+                        UPDATE director_actions
+                        SET validation_status='blocked_scheduler_batch',
+                            validation_detail=?
+                        WHERE action_id IN ({placeholders})
+                        """,
+                        (
+                            "another passive action in the same batch was rejected",
+                            *blocked,
+                        ),
+                    )
+                    database.execute(
+                        f"""
+                        UPDATE campaign_candidate_pins
+                        SET state='released', candidate_id=NULL,
+                            released_at=?, release_reason='scheduler_batch_rejected'
+                        WHERE action_id IN ({placeholders})
+                          AND state='active'
+                        """,
+                        (now, *blocked),
+                    )
+                    for action_id in blocked:
+                        statuses[action_id] = "blocked_scheduler_batch"
+                detail = json.dumps(
+                    {"action_statuses": statuses}, sort_keys=True
+                )
+                database.execute(
+                    """
+                    UPDATE director_action_batches
+                    SET validation_status='rejected'
+                    WHERE decision_batch_id=?
+                    """,
+                    (decision_batch_id,),
+                )
+                database.execute(
+                    """
+                    UPDATE passive_scheduler_decisions
+                    SET validation_status='rejected_batch',
+                        validation_detail=?,
+                        resulting_changes_json=?
+                    WHERE scheduler_decision_id=?
+                    """,
+                    (detail, detail, scheduler_decision_id),
+                )
+                database.execute(
+                    """
+                    UPDATE director_triggers SET status='rejected_invalid'
+                    WHERE trigger_id=?
+                    """,
+                    (trigger_id,),
+                )
+                return statuses
             for update in decision["hypothesis_updates"]:
                 previous = database.execute(
                     """
@@ -1501,7 +1724,147 @@ class ResearchStore:
                 "UPDATE director_triggers SET status='decided' WHERE trigger_id=?",
                 (trigger_id,),
             )
+            if scheduler_metadata is not None:
+                self._commit_passive_scheduler_state(
+                    database,
+                    campaign_id=campaign_id,
+                    scheduler_decision_id=str(scheduler_decision_id),
+                    metadata=scheduler_metadata,
+                    statuses=statuses,
+                    now=now,
+                )
         return statuses
+
+    def _insert_passive_scheduler_decision(
+        self,
+        database: sqlite3.Connection,
+        *,
+        scheduler_decision_id: str,
+        campaign_id: str,
+        snapshot_id: str,
+        metadata: dict[str, Any],
+        decision: dict[str, Any],
+        now: str,
+    ) -> None:
+        before = metadata["state_before"]
+        stored = database.execute(
+            """
+            SELECT state_version, state_json
+            FROM passive_scheduler_states WHERE campaign_id=?
+            """,
+            (campaign_id,),
+        ).fetchone()
+        if stored is None:
+            if int(before["state_version"]) != 0:
+                raise RuntimeError(
+                    "passive scheduler state is missing for a noninitial decision"
+                )
+        elif (
+            int(stored["state_version"]) != int(before["state_version"])
+            or json.loads(str(stored["state_json"])) != before
+        ):
+            raise RuntimeError("stale passive scheduler state")
+        database.execute(
+            """
+            INSERT INTO passive_scheduler_decisions
+            (scheduler_decision_id, campaign_id, execution_attempt_id,
+             policy_id, policy_version, scheduler_state_version,
+             state_version_before, state_version_after,
+             input_snapshot_id, input_snapshot_version,
+             input_metrics_json, reason_codes_json,
+             generated_action_ids_json, validation_status,
+             validation_detail, resulting_changes_json, created_at)
+            SELECT ?, ?, current_attempt_id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                   'accepted', NULL, '{}', ?
+            FROM research_campaigns WHERE campaign_id=?
+            """,
+            (
+                scheduler_decision_id,
+                campaign_id,
+                metadata["policy_id"],
+                metadata["policy_version"],
+                metadata["scheduler_state_version"],
+                before["state_version"],
+                metadata["state_after"]["state_version"],
+                snapshot_id,
+                metadata["input_snapshot_version"],
+                json.dumps(metadata["input_metrics"], sort_keys=True),
+                json.dumps(metadata["reason_codes"], sort_keys=True),
+                json.dumps(
+                    [
+                        str(action["action_id"])
+                        for action in decision["actions"]
+                    ],
+                    sort_keys=True,
+                ),
+                now,
+                campaign_id,
+            ),
+        )
+
+    @staticmethod
+    def _commit_passive_scheduler_state(
+        database: sqlite3.Connection,
+        *,
+        campaign_id: str,
+        scheduler_decision_id: str,
+        metadata: dict[str, Any],
+        statuses: dict[str, str],
+        now: str,
+    ) -> None:
+        after = metadata["state_after"]
+        database.execute(
+            """
+            INSERT INTO passive_scheduler_states
+            (campaign_id, policy_id, policy_version,
+             scheduler_state_version, state_version, rng_seed, rng_counter,
+             state_json, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(campaign_id) DO UPDATE SET
+              policy_id=excluded.policy_id,
+              policy_version=excluded.policy_version,
+              scheduler_state_version=excluded.scheduler_state_version,
+              state_version=excluded.state_version,
+              rng_seed=excluded.rng_seed,
+              rng_counter=excluded.rng_counter,
+              state_json=excluded.state_json,
+              updated_at=excluded.updated_at
+            """,
+            (
+                campaign_id,
+                metadata["policy_id"],
+                metadata["policy_version"],
+                metadata["scheduler_state_version"],
+                after["state_version"],
+                after["seed"],
+                after["rng_counter"],
+                json.dumps(after, sort_keys=True),
+                now,
+            ),
+        )
+        validation_status = (
+            "accepted"
+            if all(value == "accepted" for value in statuses.values())
+            else (
+                "partial_rejected"
+                if any(value == "accepted" for value in statuses.values())
+                else "rejected"
+            )
+        )
+        database.execute(
+            """
+            UPDATE passive_scheduler_decisions
+            SET validation_status=?, resulting_changes_json=?
+            WHERE scheduler_decision_id=?
+            """,
+            (
+                validation_status,
+                json.dumps(
+                    {"action_statuses": statuses}, sort_keys=True
+                ),
+                scheduler_decision_id,
+            ),
+        )
 
     def create_lane(
         self,

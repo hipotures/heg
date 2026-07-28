@@ -17,6 +17,7 @@ ADRs explain durable architectural decisions and their consequences.
 | [0011](0011-director-request-headroom-and-floor-recovery.md) | Director requests use token headroom and tightest-safe-state recovery; its 16,000 hard gate is superseded |
 | [0012](0012-director-client-context-hard-limit-32k.md) | Director client-owned requests use a 32,000-token hard gate |
 | [0013](0013-mandatory-optimized-cpp-heuristic-scorer.md) | Heuristic scoring has one mandatory optimized C++ implementation and fails closed |
+| [0014](0014-no-llm-passive-scheduler.md) | Campaigns may use a deterministic no-LLM scheduler through the shared reviewed action pipeline |
 
 ADRs are not implementation reports. They describe why the current design was
 chosen.

@@ -58,6 +58,15 @@ from .director import ActiveDirector
 from .export import export_campaign
 from .lanes import LaneManager
 from .orchestrator import ActiveResearchOrchestrator
+from .passive import (
+    PASSIVE_POLICY_ID,
+    PASSIVE_POLICY_VERSION,
+    PASSIVE_REVIEW_CANDIDATE_DELTA,
+    PASSIVE_SCHEDULER_STATE_VERSION,
+    PASSIVE_STAGNATION_WINDOWS,
+    DeterministicReviewTrigger,
+    PassiveScheduler,
+)
 from .providers import (
     AppServerDecisionProvider,
     SerialAppServerDecisionProvider,
@@ -94,6 +103,7 @@ CONTROLLER_MODES = {
     "random",
     "continuity_demo",
 }
+DIRECTOR_MODES = {"llm", "passive"}
 
 
 def _score_runtime_provenance() -> dict[str, Any]:
@@ -111,7 +121,7 @@ def _score_runtime_provenance() -> dict[str, Any]:
     }
 
 
-CAMPAIGN_PLAN_SCHEMA_VERSION = "1.1"
+CAMPAIGN_PLAN_SCHEMA_VERSION = "1.2"
 PRODUCTION_DIRECTOR_MODEL = "gpt-5.6-luna"
 PRODUCTION_DIRECTOR_EFFORT = "high"
 PRODUCTION_CONTEXT_MODE = DirectorContextMode.STATELESS_TURNS
@@ -187,6 +197,40 @@ def _campaign_plan_fingerprint(plan: dict[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def validate_campaign_plan_fingerprint(
+    plan: dict[str, Any], *, expected: str | None = None
+) -> str:
+    stored = plan.get("plan_fingerprint")
+    recomputed = _campaign_plan_fingerprint(plan)
+    if not isinstance(stored, str) or stored != recomputed:
+        raise CampaignPlanError("campaign plan fingerprint mismatch")
+    if expected is not None and stored != expected:
+        raise CampaignPlanError(
+            "campaign plan does not match the authorized fingerprint"
+        )
+    return stored
+
+
+def _attempt_contract_fingerprint(
+    plan: dict[str, Any], director_mode: str
+) -> str:
+    payload = canonical_json(
+        {
+            "campaign_plan_fingerprint": (
+                plan.get("plan_fingerprint")
+                or _campaign_plan_fingerprint(plan)
+            ),
+            "director_mode": director_mode,
+            "director_contract": plan.get("director", {}),
+            "passive_scheduler_contract": plan.get(
+                "passive_scheduler", {}
+            ),
+        },
+        max_bytes=128 * 1024,
+    )
+    return hashlib.sha256(payload).hexdigest()
+
+
 def _campaign_private_root(workspace: Path, campaign_id: str) -> Path:
     return (
         workspace.resolve()
@@ -226,7 +270,15 @@ def prepare_campaign_plan(
     workspace: Path,
     *,
     duration_seconds: float,
+    director_mode: str = "llm",
+    passive_seed: int = 0,
 ) -> dict[str, Any]:
+    if director_mode not in DIRECTOR_MODES:
+        raise CampaignPlanError("unsupported director mode")
+    if not 0 <= passive_seed < 2**63:
+        raise CampaignPlanError(
+            "passive scheduler seed must be in [0, 2**63)"
+        )
     root = workspace.resolve()
     marker = read_json(root / "workspace.json", default={})
     if (
@@ -264,6 +316,7 @@ def prepare_campaign_plan(
         plan = {
             "schema_version": CAMPAIGN_PLAN_SCHEMA_VERSION,
             "campaign_id": campaign_id,
+            "director_mode": director_mode,
             "target": "erdos_gyarfas",
             "target_definition_sha256": target_definition_sha256(),
             "stop_contract": {
@@ -287,6 +340,20 @@ def prepare_campaign_plan(
                 "model_tools": False,
                 "shell_or_code_requests": False,
                 "provider_recovery_attempts": 0,
+            },
+            "passive_scheduler": {
+                "policy_id": PASSIVE_POLICY_ID,
+                "policy_version": PASSIVE_POLICY_VERSION,
+                "scheduler_state_version": (
+                    PASSIVE_SCHEDULER_STATE_VERSION
+                ),
+                "seed": passive_seed,
+                "review_candidate_delta": (
+                    PASSIVE_REVIEW_CANDIDATE_DELTA
+                ),
+                "stagnation_windows": PASSIVE_STAGNATION_WINDOWS,
+                "decision_clock": "persisted_evaluation_boundaries",
+                "wall_clock_scientific_input": False,
             },
             "decision_policy": {
                 "valid_actions": "execute",
@@ -374,17 +441,25 @@ def prepare_campaign_plan(
                  target_definition_sha256, state, state_version, stop_mode,
                  deadline_at, effective_context_mode,
                  context_recommendation_basis, initial_state_sha256,
-                 initial_resource_plan_json)
+                 initial_resource_plan_json, director_mode)
                 VALUES (?, ?, ?, 'erdos_gyarfas', ?, 'prepared', 0,
-                        'time_limit', NULL, ?, ?, ?, ?)
+                        'time_limit', NULL, ?, ?, ?, ?, ?)
                 """,
                 (
                     campaign_id,
                     now,
                     now,
                     plan["target_definition_sha256"],
-                    PRODUCTION_CONTEXT_MODE.value,
-                    CONTEXT_RECOMMENDATION_BASIS,
+                    (
+                        PRODUCTION_CONTEXT_MODE.value
+                        if director_mode == "llm"
+                        else None
+                    ),
+                    (
+                        CONTEXT_RECOMMENDATION_BASIS
+                        if director_mode == "llm"
+                        else None
+                    ),
                     hashlib.sha256(
                         canonical_json(
                             {
@@ -397,6 +472,7 @@ def prepare_campaign_plan(
                         )
                     ).hexdigest(),
                     json.dumps(plan["search_limits"], sort_keys=True),
+                    director_mode,
                 ),
             )
         atomic_write_json(
@@ -435,14 +511,17 @@ def load_prepared_campaign_plan(
     plan = read_json(_prepared_plan_path(root, selected), default={})
     if plan.get("campaign_id") != selected:
         raise CampaignPlanError("prepared campaign ID mismatch")
-    stored = plan.get("plan_fingerprint")
-    recomputed = _campaign_plan_fingerprint(plan)
-    if not isinstance(stored, str) or stored != recomputed:
-        raise CampaignPlanError("prepared campaign fingerprint mismatch")
-    if expected_fingerprint is not None and stored != expected_fingerprint:
-        raise CampaignPlanError(
-            "prepared campaign does not match the authorized fingerprint"
+    director_mode = str(plan.get("director_mode", "llm"))
+    if director_mode not in DIRECTOR_MODES:
+        raise CampaignPlanError("prepared campaign director mode is invalid")
+    try:
+        validate_campaign_plan_fingerprint(
+            plan, expected=expected_fingerprint
         )
+    except CampaignPlanError as error:
+        raise CampaignPlanError(
+            str(error).replace("campaign plan", "prepared campaign", 1)
+        ) from error
     with ResearchStore(root / "results.sqlite3") as store:
         campaign = store.campaign(selected)
         if campaign["state"] != "prepared":
@@ -451,6 +530,8 @@ def load_prepared_campaign_plan(
             "target_definition_sha256"
         ]:
             raise CampaignPlanError("prepared target hash mismatch")
+        if str(campaign.get("director_mode", "llm")) != director_mode:
+            raise CampaignPlanError("prepared director mode mismatch")
         if store.connection.execute(
             "SELECT count(*) FROM app_server_turns WHERE campaign_id=?",
             (selected,),
@@ -521,6 +602,12 @@ def campaign_status(workspace: Path, campaign_id: str | None = None) -> dict[str
         if campaign is None:
             return {"campaign_id": selected, "state": "NOT_FOUND"}
         campaign_state = str(campaign["state"])
+        campaign_columns = set(campaign.keys())
+        director_mode = str(
+            campaign["director_mode"]
+            if "director_mode" in campaign_columns
+            else "llm"
+        )
         tables = {
             str(row[0])
             for row in connection.execute(
@@ -757,11 +844,54 @@ def campaign_status(workspace: Path, campaign_id: str | None = None) -> dict[str
                     "attempt_counters_json",
                     "authorization_provenance_json",
                     "runtime_provenance_json",
+                    "mode_transition_json",
                 ):
-                    value[key.removesuffix("_json")] = json.loads(
-                        str(value.pop(key))
-                    )
+                    if key in value:
+                        value[key.removesuffix("_json")] = json.loads(
+                            str(value.pop(key))
+                        )
                 attempts.append(value)
+        passive_scheduler = None
+        if "passive_scheduler_decisions" in tables:
+            row = connection.execute(
+                """
+                SELECT d.scheduler_decision_id, d.policy_id,
+                       d.policy_version, d.scheduler_state_version,
+                       d.state_version_before, d.state_version_after,
+                       d.input_snapshot_id, d.input_snapshot_version,
+                       d.reason_codes_json, d.validation_status,
+                       d.validation_detail, d.resulting_changes_json,
+                       d.created_at, s.rng_seed, s.rng_counter,
+                       s.state_json
+                FROM passive_scheduler_decisions AS d
+                LEFT JOIN passive_scheduler_states AS s
+                  ON s.campaign_id=d.campaign_id
+                WHERE d.campaign_id=?
+                ORDER BY d.created_at DESC, d.rowid DESC LIMIT 1
+                """,
+                (selected,),
+            ).fetchone()
+            if row is not None:
+                passive_scheduler = {
+                    **dict(row),
+                    "reason_codes": json.loads(
+                        str(row["reason_codes_json"])
+                    ),
+                    "resulting_changes": json.loads(
+                        str(row["resulting_changes_json"])
+                    ),
+                    "state": (
+                        json.loads(str(row["state_json"]))
+                        if row["state_json"]
+                        else None
+                    ),
+                }
+                for key in (
+                    "reason_codes_json",
+                    "resulting_changes_json",
+                    "state_json",
+                ):
+                    passive_scheduler.pop(key)
         memory = None
         if "campaign_memory_snapshots" in tables:
             row = connection.execute(
@@ -806,6 +936,17 @@ def campaign_status(workspace: Path, campaign_id: str | None = None) -> dict[str
                     (selected,),
                 ).fetchone()[0]
             ),
+            "scheduler_decisions": int(
+                connection.execute(
+                    """
+                    SELECT count(*) FROM passive_scheduler_decisions
+                    WHERE campaign_id=?
+                    """,
+                    (selected,),
+                ).fetchone()[0]
+                if "passive_scheduler_decisions" in tables
+                else 0
+            ),
             "actions": int(
                 connection.execute(
                     """
@@ -846,7 +987,19 @@ def campaign_status(workspace: Path, campaign_id: str | None = None) -> dict[str
         )
         return {
             **dict(campaign),
-            "auth_imported": auth_is_imported(auth_data),
+            "director_mode": director_mode,
+            "director_mode_label": (
+                "No-LLM passive search"
+                if director_mode == "passive"
+                else "AI Director"
+            ),
+            "auth_applicable": director_mode == "llm",
+            "auth_imported": (
+                auth_is_imported(auth_data)
+                if director_mode == "llm"
+                else False
+            ),
+            "model_usage_applicable": director_mode == "llm",
             "process": process,
             "lanes": lanes,
             "active_lane_count": sum(
@@ -869,6 +1022,7 @@ def campaign_status(workspace: Path, campaign_id: str | None = None) -> dict[str
             ),
             "cumulative_counters": cumulative,
             "scientific_memory": memory,
+            "passive_scheduler": passive_scheduler,
             "maximum_director_turns": (
                 plan_summary.get("director", {}).get("maximum_cycles")
                 or plan_summary.get("director", {}).get(
@@ -940,6 +1094,8 @@ class ResearchCampaignRunner:
         repair_acknowledgement: str | None = None,
         attempt_reason: str | None = None,
         code_commit: str | None = None,
+        director_mode: str | None = None,
+        passive_seed: int = 0,
     ):
         if stop_mode not in {"time_limit", "until_success"}:
             raise ValueError("invalid stop mode")
@@ -947,6 +1103,12 @@ class ResearchCampaignRunner:
             raise ValueError(f"unsupported target: {target}")
         if controller_mode not in CONTROLLER_MODES:
             raise ValueError("unsupported campaign controller mode")
+        if director_mode not in DIRECTOR_MODES | {None}:
+            raise ValueError("unsupported director mode")
+        if not 0 <= passive_seed < 2**63:
+            raise ValueError(
+                "passive scheduler seed must be in [0, 2**63)"
+            )
         if maximum_director_turns is not None and not (
             1 <= maximum_director_turns <= 1000
         ):
@@ -965,6 +1127,8 @@ class ResearchCampaignRunner:
         self.poll_seconds = poll_seconds
         self.controller_mode = controller_mode
         self.controller_seed = controller_seed
+        self.director_mode = director_mode
+        self.passive_seed = passive_seed
         self.maximum_director_turns = maximum_director_turns
         self.context_mode = DirectorContextMode(context_mode)
         self.prepared_plan = prepared_plan
@@ -1010,6 +1174,38 @@ class ResearchCampaignRunner:
             durable_plan = campaign_plan(
                 self.workspace, str(self.campaign_id)
             )
+            if durable_plan.get("plan_fingerprint") is not None:
+                validate_campaign_plan_fingerprint(durable_plan)
+        if self.prepared_plan is not None:
+            effective_director_mode = str(
+                self.prepared_plan.get("director_mode", "llm")
+            )
+            if (
+                self.director_mode is not None
+                and self.director_mode != effective_director_mode
+            ):
+                raise ValueError(
+                    "start mode does not match the prepared campaign"
+                )
+        elif is_resume and self.director_mode is None:
+            with ResearchStore(
+                self.workspace / "results.sqlite3"
+            ) as mode_store:
+                effective_director_mode = str(
+                    mode_store.campaign(str(self.campaign_id)).get(
+                        "director_mode", "llm"
+                    )
+                )
+        else:
+            effective_director_mode = self.director_mode or "llm"
+        if effective_director_mode not in DIRECTOR_MODES:
+            raise ValueError("durable campaign has an unsupported director mode")
+        self.effective_director_mode = effective_director_mode
+        passive_plan = (durable_plan or {}).get("passive_scheduler", {})
+        effective_passive_seed = int(
+            passive_plan.get("seed", self.passive_seed)
+        )
+        if is_resume:
             director_contract = durable_plan.get("director") or {}
             expected_context = str(
                 director_contract.get(
@@ -1027,7 +1223,10 @@ class ResearchCampaignRunner:
                     raise ValueError(
                         "Resume cannot change the fake Director contract"
                     )
-            elif self.controller_mode not in {"active_ai", "serial_ai"}:
+            elif (
+                effective_director_mode == "llm"
+                and self.controller_mode not in {"active_ai", "serial_ai"}
+            ):
                 raise ValueError(
                     "Resume cannot replace the authenticated Director"
                 )
@@ -1040,7 +1239,10 @@ class ResearchCampaignRunner:
             if durable_plan is not None
             else self.workspace / ".sglab"
         )
-        uses_app_server = self.controller_mode in {"active_ai", "serial_ai"}
+        uses_app_server = (
+            effective_director_mode == "llm"
+            and self.controller_mode in {"active_ai", "serial_ai"}
+        )
         if uses_app_server and not auth_is_imported(
             credential_application_data
         ):
@@ -1052,10 +1254,22 @@ class ResearchCampaignRunner:
             generate_protocol_preflight(self.codex)
             if uses_app_server
             else {
-                "codex_version_output": "synthetic-control-v1",
-                "codex_executable_sha256": "synthetic-control",
+                "codex_version_output": (
+                    "passive-scheduler-v1"
+                    if effective_director_mode == "passive"
+                    else "synthetic-control-v1"
+                ),
+                "codex_executable_sha256": (
+                    "not-applicable"
+                    if effective_director_mode == "passive"
+                    else "synthetic-control"
+                ),
                 "canonical_schema_hashes": {
-                    "director-decision-v1": "synthetic-control"
+                    "director-decision-v1": (
+                        "reviewed-passive-contract"
+                        if effective_director_mode == "passive"
+                        else "synthetic-control"
+                    )
                 },
             }
         )
@@ -1187,10 +1401,12 @@ class ResearchCampaignRunner:
                 context_recommendation_basis=(
                     CONTEXT_RECOMMENDATION_BASIS if uses_app_server else None
                 ),
+                director_mode=effective_director_mode,
             )
             generated_plan = {
                 "schema_version": CAMPAIGN_PLAN_SCHEMA_VERSION,
                 "campaign_id": campaign_id,
+                "director_mode": effective_director_mode,
                 "target": self.target,
                 "target_definition_sha256": target_definition_sha256(
                     self.target
@@ -1198,18 +1414,36 @@ class ResearchCampaignRunner:
                 "director": {
                     "model": (
                         PRODUCTION_DIRECTOR_MODEL
-                        if uses_app_server
+                        if self.controller_mode
+                        in {"active_ai", "serial_ai"}
                         else f"{self.controller_mode}-control"
                     ),
                     "reasoning_effort": (
                         PRODUCTION_DIRECTOR_EFFORT
-                        if uses_app_server
+                        if self.controller_mode
+                        in {"active_ai", "serial_ai"}
                         else "none"
                     ),
                     "context_mode": self.context_mode.value,
                     "maximum_turns_including_replans": (
                         self.maximum_director_turns
                     ),
+                },
+                "passive_scheduler": {
+                    "policy_id": PASSIVE_POLICY_ID,
+                    "policy_version": PASSIVE_POLICY_VERSION,
+                    "scheduler_state_version": (
+                        PASSIVE_SCHEDULER_STATE_VERSION
+                    ),
+                    "seed": effective_passive_seed,
+                    "review_candidate_delta": (
+                        PASSIVE_REVIEW_CANDIDATE_DELTA
+                    ),
+                    "stagnation_windows": PASSIVE_STAGNATION_WINDOWS,
+                    "decision_clock": (
+                        "persisted_evaluation_boundaries"
+                    ),
+                    "wall_clock_scientific_input": False,
                 },
                 "search_limits": {
                     **search_plan,
@@ -1248,11 +1482,19 @@ class ResearchCampaignRunner:
                 },
                 "runtime_limits": {},
             }
+            generated_plan["plan_fingerprint"] = (
+                _campaign_plan_fingerprint(generated_plan)
+            )
             atomic_write_json(
                 campaign_dir / "campaign-plan.json", generated_plan
             )
+            durable_plan = generated_plan
+            self._effective_campaign_plan = generated_plan
         else:
             campaign = store.campaign(campaign_id)
+            previous_director_mode = str(
+                campaign.get("director_mode", "llm")
+            )
             resume_state_version = int(campaign["state_version"])
             if self.target != str(campaign["target"]):
                 raise ValueError("Resume cannot change the scientific target")
@@ -1339,6 +1581,7 @@ class ResearchCampaignRunner:
                 code_commit=self.code_commit,
                 additional_wall_seconds=additional,
                 resources=effective_resources,
+                director_mode=effective_director_mode,
             )
             store.create_execution_attempt(
                 attempt_id=attempt_id,
@@ -1365,9 +1608,32 @@ class ResearchCampaignRunner:
                 runtime_provenance={
                     "fresh_process": True,
                     "historical_stale_actions_terminalized": stale_actions,
+                    "director_mode": effective_director_mode,
+                    "passive_scheduler": (
+                        {
+                            "policy_id": PASSIVE_POLICY_ID,
+                            "policy_version": PASSIVE_POLICY_VERSION,
+                            "seed": effective_passive_seed,
+                        }
+                        if effective_director_mode == "passive"
+                        else None
+                    ),
                     **_score_runtime_provenance(),
                 },
                 process_id=os.getpid(),
+                director_mode=effective_director_mode,
+                previous_director_mode=previous_director_mode,
+                mode_transition={
+                    "previous_mode": previous_director_mode,
+                    "new_mode": effective_director_mode,
+                    "changed": (
+                        previous_director_mode
+                        != effective_director_mode
+                    ),
+                },
+                contract_fingerprint=_attempt_contract_fingerprint(
+                    durable_plan, effective_director_mode
+                ),
             )
             recovery = CampaignRecovery(
                 store=store,
@@ -1383,6 +1649,7 @@ class ResearchCampaignRunner:
             )
         if attempt_id is None:
             attempt_id = new_id("execution-attempt")
+            initial_previous_mode = None
             store.create_execution_attempt(
                 attempt_id=attempt_id,
                 campaign_id=campaign_id,
@@ -1394,8 +1661,30 @@ class ResearchCampaignRunner:
                 starting_memory_snapshot_id=None,
                 starting_memory_sha256=None,
                 starting_checkpoint_refs=[],
-                runtime_provenance=_score_runtime_provenance(),
+                runtime_provenance={
+                    "director_mode": effective_director_mode,
+                    "passive_scheduler": (
+                        {
+                            "policy_id": PASSIVE_POLICY_ID,
+                            "policy_version": PASSIVE_POLICY_VERSION,
+                            "seed": effective_passive_seed,
+                        }
+                        if effective_director_mode == "passive"
+                        else None
+                    ),
+                    **_score_runtime_provenance(),
+                },
                 process_id=os.getpid(),
+                director_mode=effective_director_mode,
+                previous_director_mode=initial_previous_mode,
+                mode_transition={
+                    "previous_mode": initial_previous_mode,
+                    "new_mode": effective_director_mode,
+                    "changed": False,
+                },
+                contract_fingerprint=_attempt_contract_fingerprint(
+                    durable_plan or {}, effective_director_mode
+                ),
             )
         application_data = campaign_attempt_application_data(
             self.workspace, campaign_id, attempt_id
@@ -1489,6 +1778,13 @@ class ResearchCampaignRunner:
                 if self.controller_mode == "active_ai"
                 else SerialAppServerDecisionProvider(director, manager)
             )
+        elif effective_director_mode == "passive":
+            director = PassiveScheduler(
+                store=store,
+                campaign_id=campaign_id,
+                seed=effective_passive_seed,
+            )
+            provider = director
         else:
             director = SyntheticControlProvider(
                 store=store,
@@ -1528,6 +1824,16 @@ class ResearchCampaignRunner:
         scientific = ScientificActionDispatcher(
             store=store, campaign_id=campaign_id, campaign_dir=campaign_dir
         )
+        passive_state = (
+            store.passive_scheduler_state(campaign_id)
+            if effective_director_mode == "passive"
+            else None
+        )
+        passive_state_payload = (
+            json.loads(str(passive_state["state_json"]))
+            if passive_state is not None
+            else {}
+        )
         orchestrator = ActiveResearchOrchestrator(
             store=store,
             manager=manager,
@@ -1540,7 +1846,23 @@ class ResearchCampaignRunner:
                 memory_policy=memory_policy,
             ),
             provider=provider,
-            triggers=TriggerEngine(),
+            triggers=(
+                DeterministicReviewTrigger(
+                    last_review_evaluations=int(
+                        passive_state_payload.get(
+                            "last_review_evaluations", 0
+                        )
+                    ),
+                    candidate_delta=int(
+                        passive_plan.get(
+                            "review_candidate_delta",
+                            PASSIVE_REVIEW_CANDIDATE_DELTA,
+                        )
+                    ),
+                )
+                if effective_director_mode == "passive"
+                else TriggerEngine()
+            ),
             campaign_id=campaign_id,
             candidates=candidates,
             verification=verification,
@@ -1556,14 +1878,28 @@ class ResearchCampaignRunner:
             self._sample_runtime_resources(
                 campaign_id,
                 campaign_dir,
-                stage="before_app_server_start",
+                stage=(
+                    "before_passive_scheduler_start"
+                    if effective_director_mode == "passive"
+                    else "before_app_server_start"
+                ),
                 force=True,
             )
-            await director.start(resume_thread_id=resume_thread_id)
+            await director.start(
+                resume_thread_id=(
+                    None
+                    if effective_director_mode == "passive"
+                    else resume_thread_id
+                )
+            )
             self._sample_runtime_resources(
                 campaign_id,
                 campaign_dir,
-                stage="after_app_server_start",
+                stage=(
+                    "after_passive_scheduler_start"
+                    if effective_director_mode == "passive"
+                    else "after_app_server_start"
+                ),
                 force=True,
             )
             orchestrator.bootstrap()
@@ -1604,7 +1940,10 @@ class ResearchCampaignRunner:
                         provider.director = director
                         orchestrator.triggers.offer("recovery")
                     else:
-                        if cycle is not None:
+                        if (
+                            cycle is not None
+                            and effective_director_mode != "passive"
+                        ):
                             completed_director_turns += (
                                 1 + int(cycle.replan_count)
                             )
@@ -1647,7 +1986,8 @@ class ResearchCampaignRunner:
                     )
                     break
                 turn_budget_available = (
-                    self.maximum_director_turns is None
+                    effective_director_mode == "passive"
+                    or self.maximum_director_turns is None
                     or completed_director_turns < self.maximum_director_turns
                 )
                 if (
@@ -1787,8 +2127,11 @@ class ResearchCampaignRunner:
         accounting = account_execution_root(
             private_root,
             research_workspace=self.workspace,
-            trusted_symlink_roots=discover_trusted_codex_roots(
-                (self.codex,)
+            trusted_symlink_roots=(
+                ()
+                if getattr(self, "effective_director_mode", "llm")
+                == "passive"
+                else discover_trusted_codex_roots((self.codex,))
             ),
         )
         limits = self._effective_campaign_plan.get("runtime_limits", {})

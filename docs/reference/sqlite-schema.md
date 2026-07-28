@@ -2,7 +2,7 @@
 
 ## Version
 
-The documented baseline uses SQLite schema version **16**.
+The documented baseline uses SQLite schema version **17**.
 
 ```sql
 PRAGMA user_version;
@@ -28,6 +28,16 @@ PRAGMA foreign_key_check;
 - decision batches/actions;
 - validations and hypotheses;
 - evidence/action registries.
+
+`director_action_batches` has exactly one durable source: an App Server turn
+or a passive scheduler decision.
+
+### Passive scheduler
+
+- `passive_scheduler_states`;
+- `passive_scheduler_decisions`;
+- policy/state version, review counters, bounded metrics and reason codes;
+- seed/counter RNG lineage and shared action-batch linkage.
 
 ### Search
 
@@ -96,3 +106,8 @@ Every migration must:
 The v15→v16 migration only adds non-null `provenance_json` columns with the
 default `{}`. New retained candidates store schema-v2 provenance; candidate
 pinning copies the exact JSON into the immutable M4 snapshot.
+
+The v16→v17 migration adds mode provenance and passive scheduler tables, then
+rebuilds only `director_action_batches` so its source may be either a model
+turn or scheduler decision. Historical batch IDs and fingerprints are copied
+unchanged and verified with `foreign_key_check`.

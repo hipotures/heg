@@ -2,6 +2,26 @@
 
 Last implementation audit: **2026-07-28**.
 
+## No-LLM passive scheduler
+
+Campaigns now support explicit `director_mode=llm|passive`. The versioned
+`balanced_v1` passive policy uses persisted evaluation boundaries, bounded
+telemetry, deterministic reason codes, checkpoint-aware stagnation restarts,
+an exploration floor, and SHA-256 counter RNG lineage. Its decisions pass
+through the existing schema/semantic validation, action tables, dispatcher,
+resource controls, checkpoints, candidate pinning, and M4 broker.
+
+Schema 17 records campaign/attempt modes, immutable transition provenance,
+mode-specific contract fingerprints, passive decisions, and resumable
+scheduler state. Passive startup creates no App Server session/turn or private
+Codex home and does not perform token accounting. CLI and dashboard creation,
+Resume preview/start, status, attempt history, and export provenance are
+mode-aware; switching modes is explicit and restricted to a new attempt.
+
+Focused deterministic and bounded live-smoke evidence is documented in
+`docs/reports/PASSIVE_SCHEDULER_ACCEPTANCE.md`; the architectural choice is
+ADR 0014.
+
 ## Mandatory optimized C++ heuristic scorer
 
 Heuristic search now has one production scoring implementation: the

@@ -23,6 +23,11 @@ Fingerprint-stable fields include:
 
 Resume cannot silently change scientific-contract fields.
 
+`director_mode` is `llm` by default or `passive`. The fingerprint also covers
+the fixed passive policy ID/version, scheduler-state version, seed,
+evaluation-review delta, and stagnation threshold. These fields are reviewed
+data, not arbitrary executable policy configuration.
+
 ## Resume execution resources
 
 Attempt-local override fields include:
@@ -34,6 +39,10 @@ Attempt-local override fields include:
 - lane memory;
 - verifier concurrency/memory;
 - reviewed queue bounds.
+
+`--director-mode` may explicitly select the already fingerprinted LLM or
+passive contract for the new attempt. Omitting it preserves the current mode
+and passive scheduler state.
 
 ## Search profiling
 

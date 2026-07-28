@@ -5,7 +5,7 @@ from typing import Any, Iterable
 import json
 import sqlite3
 
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 MAX_METRIC_ROWS = 100_000
 
 BASE_SCHEMA_SQL = """
@@ -990,7 +990,105 @@ CREATE TABLE IF NOT EXISTS campaign_candidate_pins (
 CREATE INDEX IF NOT EXISTS idx_campaign_candidate_pins_active
     ON campaign_candidate_pins(campaign_id, candidate_id, state);
 
-PRAGMA user_version=16;
+"""
+
+PASSIVE_SCHEDULER_SCHEMA_SQL = """
+PRAGMA foreign_keys=OFF;
+BEGIN IMMEDIATE;
+
+ALTER TABLE research_campaigns
+    ADD COLUMN director_mode TEXT NOT NULL DEFAULT 'llm';
+ALTER TABLE campaign_execution_attempts
+    ADD COLUMN director_mode TEXT NOT NULL DEFAULT 'llm';
+ALTER TABLE campaign_execution_attempts
+    ADD COLUMN previous_director_mode TEXT;
+ALTER TABLE campaign_execution_attempts
+    ADD COLUMN mode_transition_json TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE campaign_execution_attempts
+    ADD COLUMN contract_fingerprint TEXT;
+
+CREATE TABLE passive_scheduler_states (
+    campaign_id TEXT PRIMARY KEY REFERENCES research_campaigns(campaign_id),
+    policy_id TEXT NOT NULL,
+    policy_version INTEGER NOT NULL,
+    scheduler_state_version INTEGER NOT NULL,
+    state_version INTEGER NOT NULL,
+    rng_seed INTEGER NOT NULL,
+    rng_counter INTEGER NOT NULL,
+    state_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    CHECK(policy_version >= 1),
+    CHECK(scheduler_state_version >= 1),
+    CHECK(state_version >= 0),
+    CHECK(rng_seed >= 0),
+    CHECK(rng_counter >= 0)
+);
+
+CREATE TABLE passive_scheduler_decisions (
+    scheduler_decision_id TEXT PRIMARY KEY,
+    campaign_id TEXT NOT NULL REFERENCES research_campaigns(campaign_id),
+    execution_attempt_id TEXT REFERENCES campaign_execution_attempts(attempt_id),
+    policy_id TEXT NOT NULL,
+    policy_version INTEGER NOT NULL,
+    scheduler_state_version INTEGER NOT NULL,
+    state_version_before INTEGER NOT NULL,
+    state_version_after INTEGER,
+    input_snapshot_id TEXT NOT NULL REFERENCES director_snapshots(snapshot_id),
+    input_snapshot_version INTEGER NOT NULL,
+    input_metrics_json TEXT NOT NULL,
+    reason_codes_json TEXT NOT NULL,
+    generated_action_ids_json TEXT NOT NULL,
+    validation_status TEXT NOT NULL,
+    validation_detail TEXT,
+    resulting_changes_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    CHECK(policy_version >= 1),
+    CHECK(scheduler_state_version >= 1),
+    CHECK(state_version_before >= 0),
+    CHECK(state_version_after IS NULL OR state_version_after > state_version_before)
+);
+
+CREATE INDEX idx_passive_scheduler_decisions_campaign
+    ON passive_scheduler_decisions(campaign_id, created_at);
+
+CREATE TABLE director_action_batches_v17 (
+    decision_batch_id TEXT PRIMARY KEY,
+    campaign_id TEXT NOT NULL REFERENCES research_campaigns(campaign_id),
+    snapshot_id TEXT NOT NULL REFERENCES director_snapshots(snapshot_id),
+    trigger_id TEXT NOT NULL REFERENCES director_triggers(trigger_id),
+    turn_record_id TEXT REFERENCES app_server_turns(turn_record_id),
+    scheduler_decision_id TEXT
+        REFERENCES passive_scheduler_decisions(scheduler_decision_id),
+    campaign_assessment TEXT NOT NULL,
+    next_review_json TEXT NOT NULL,
+    validation_status TEXT NOT NULL,
+    response_artifact_ref TEXT,
+    response_sha256 TEXT,
+    created_at TEXT NOT NULL,
+    CHECK(
+        (turn_record_id IS NOT NULL AND scheduler_decision_id IS NULL)
+        OR
+        (turn_record_id IS NULL AND scheduler_decision_id IS NOT NULL)
+    )
+);
+
+INSERT INTO director_action_batches_v17
+    (decision_batch_id, campaign_id, snapshot_id, trigger_id,
+     turn_record_id, scheduler_decision_id, campaign_assessment,
+     next_review_json, validation_status, response_artifact_ref,
+     response_sha256, created_at)
+SELECT decision_batch_id, campaign_id, snapshot_id, trigger_id,
+       turn_record_id, NULL, campaign_assessment, next_review_json,
+       validation_status, response_artifact_ref, response_sha256, created_at
+FROM director_action_batches;
+
+DROP TABLE director_action_batches;
+ALTER TABLE director_action_batches_v17
+    RENAME TO director_action_batches;
+
+PRAGMA user_version=17;
+COMMIT;
+PRAGMA foreign_keys=ON;
 """
 
 
@@ -1034,6 +1132,7 @@ def migrate(connection: sqlite3.Connection) -> None:
     _ensure_comparison_arm_policy_schema(connection)
     _ensure_campaign_continuity_schema(connection)
     _ensure_candidate_provenance_schema(connection)
+    _ensure_passive_scheduler_schema(connection)
 
 
 def _ensure_m6_lane_columns(connection: sqlite3.Connection) -> None:
@@ -1460,7 +1559,8 @@ def _ensure_campaign_continuity_schema(
                 connection.execute(
                     f"ALTER TABLE {table} ADD COLUMN {name} {definition}"
                 )
-    connection.execute("PRAGMA user_version=15")
+    if int(connection.execute("PRAGMA user_version").fetchone()[0]) < 15:
+        connection.execute("PRAGMA user_version=15")
     connection.commit()
 
 
@@ -1488,8 +1588,83 @@ def _ensure_candidate_provenance_schema(
                 ADD COLUMN provenance_json TEXT NOT NULL DEFAULT '{{}}'
                 """
             )
-    connection.execute("PRAGMA user_version=16")
+    if int(connection.execute("PRAGMA user_version").fetchone()[0]) < 16:
+        connection.execute("PRAGMA user_version=16")
     connection.commit()
+
+
+def _ensure_passive_scheduler_schema(
+    connection: sqlite3.Connection,
+) -> None:
+    if int(connection.execute("PRAGMA user_version").fetchone()[0]) >= 17:
+        return
+    exists = connection.execute(
+        """
+        SELECT 1 FROM sqlite_master
+        WHERE type='table' AND name='research_campaigns'
+        """
+    ).fetchone()
+    if exists is None:
+        return
+    required_tables = {
+        str(row[0])
+        for row in connection.execute(
+            """
+            SELECT name FROM sqlite_master
+            WHERE type='table' AND name IN (
+                'campaign_execution_attempts',
+                'director_action_batches'
+            )
+            """
+        )
+    }
+    if required_tables != {
+        "campaign_execution_attempts",
+        "director_action_batches",
+    }:
+        return
+    campaign_columns = {
+        str(row[1])
+        for row in connection.execute(
+            "PRAGMA table_info(research_campaigns)"
+        )
+    }
+    batch_columns = {
+        str(row[1])
+        for row in connection.execute(
+            "PRAGMA table_info(director_action_batches)"
+        )
+    }
+    scheduler_tables = {
+        str(row[0])
+        for row in connection.execute(
+            """
+            SELECT name FROM sqlite_master
+            WHERE type='table' AND name IN (
+                'passive_scheduler_states',
+                'passive_scheduler_decisions'
+            )
+            """
+        )
+    }
+    if (
+        "director_mode" in campaign_columns
+        and "scheduler_decision_id" in batch_columns
+        and scheduler_tables
+        == {
+            "passive_scheduler_states",
+            "passive_scheduler_decisions",
+        }
+    ):
+        connection.execute("PRAGMA user_version=17")
+        connection.commit()
+        return
+    connection.executescript(PASSIVE_SCHEDULER_SCHEMA_SQL)
+    violations = connection.execute("PRAGMA foreign_key_check").fetchall()
+    if violations:
+        raise RuntimeError(
+            "passive scheduler migration created foreign-key violations"
+        )
 
 
 def insert_run(

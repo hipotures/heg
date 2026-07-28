@@ -54,6 +54,9 @@ class DirectorEvidence:
     turn_id: str
     first_item_latency_seconds: float | None = None
     final_answer_latency_seconds: float | None = None
+    source_kind: str = "app_server"
+    source_record_id: str | None = None
+    source_metadata: dict[str, Any] | None = None
 
 
 def base_instructions() -> str:

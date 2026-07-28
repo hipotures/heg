@@ -5,13 +5,16 @@ This is the authoritative engineering-invariant matrix.
 | Invariant | Enforced in | Evidence/tests | Failure behavior |
 |---|---|---|---|
 | Decision committed before dispatch | Director/store/action dispatcher | decision-before-search and campaign tests | action is not delivered |
-| Invalid decision never executes | schema/semantic validator | invalid/replan tests | persist, one repair, then clean stop |
+| Invalid decision never executes | schema/semantic validator | invalid/replan/passive-fault tests | persist; LLM permits one repair, passive faults immediately |
 | M4 alone certifies success | verification broker/terminal event | two-verifier gates | unknown/reject; no success |
 | Accepted candidate target is pinned | candidate store/action transaction | pin/pruning tests | reject action transaction |
 | M4 consumes immutable snapshot | verification job input | candidate snapshot tests | no mutable-row lookup |
 | Resume keeps campaign ID | campaign/attempt store | 65+65 continuation demo | Resume refused on mismatch |
 | Resume creates new attempt | campaign runtime | attempt lifecycle tests | no process reuse |
-| Scientific contract cannot change on Resume | plan/preview validation | Resume contract tests | require fresh campaign |
+| Scientific contract cannot change on Resume | plan/preview validation | Resume contract tests | require fresh campaign; choosing a pre-fingerprinted orchestration mode is attempt provenance, not a target/model/prompt change |
+| Orchestration mode changes only on a new attempt | campaign/attempt store | passive mode-transition tests | reject active-attempt mutation |
+| LLM failures never trigger passive fallback | campaign supervisor | no-fallback tests | retain LLM fault and stop fail-closed |
+| Passive decisions create no model turns | passive scheduler/store | no-credential/App Server guard tests | scheduler fault |
 | Cumulative counters never reset | attempt accounting | continuation demo | integrity failure |
 | Terminal actions/jobs are not repeated | recovery/idempotency | recovery tests | duplicate/no-op or reject |
 | Raw history survives compaction | memory store | compaction tests | overflow before inference |

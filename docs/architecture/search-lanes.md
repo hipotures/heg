@@ -5,6 +5,11 @@
 Search lanes are concurrent, stateful graph-search workers controlled through
 reviewed Director actions.
 
+They may be coordinated by either the AI Director or the `balanced_v1`
+no-LLM scheduler. Only the source of reviewed actions changes; worker
+algorithms, micro-batch boundaries, checkpoint integrity, and M4 authority are
+identical.
+
 ## Lane identity
 
 A lane persists across process generations and records:
@@ -147,6 +152,11 @@ checkpoint-before-telemetry ordering remain unchanged.
 
 The coordinator remains the single SQLite writer. Workers communicate through
 bounded queues. The Director may reason while lanes continue searching.
+
+Passive reviews are due at persisted aggregate evaluation boundaries. Routine
+telemetry arrival time and wall-clock timing do not select scientific actions;
+critical worker, resource, lease, and verifier-integrity events may force a
+fail-closed review.
 
 ## Resource changes
 

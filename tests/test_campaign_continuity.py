@@ -46,7 +46,7 @@ class CampaignContinuityTests(unittest.TestCase):
             )
         )
 
-    def test_schema_15_online_backup_migrates_to_16(self) -> None:
+    def test_schema_15_online_backup_migrates_to_current(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = connect(root / "source.sqlite3")
@@ -70,9 +70,10 @@ class CampaignContinuityTests(unittest.TestCase):
             snapshot.close()
             source.close()
             migrated = connect(snapshot_path)
-            self.assertEqual(SCHEMA_VERSION, 16)
+            self.assertEqual(SCHEMA_VERSION, 17)
             self.assertEqual(
-                migrated.execute("PRAGMA user_version").fetchone()[0], 16
+                migrated.execute("PRAGMA user_version").fetchone()[0],
+                SCHEMA_VERSION,
             )
             self.assertEqual(
                 migrated.execute("PRAGMA integrity_check").fetchone()[0],

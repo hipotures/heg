@@ -9,6 +9,7 @@ from sglab.db import (
     APP_SERVER_COMPLIANCE_SCHEMA_SQL,
     APP_SERVER_TURN_LIFECYCLE_SCHEMA_SQL,
     BASE_SCHEMA_SQL,
+    PASSIVE_SCHEDULER_SCHEMA_SQL,
     SCHEMA_VERSION,
     connect,
     insert_metrics,
@@ -53,6 +54,15 @@ class ConfigAndDatabaseTests(unittest.TestCase):
         self.assertEqual(
             normalize(lifecycle),
             normalize(APP_SERVER_TURN_LIFECYCLE_SCHEMA_SQL),
+        )
+        passive = (
+            Path(__file__).parents[1]
+            / "sql"
+            / "017_passive_scheduler.sql"
+        ).read_text(encoding="utf-8")
+        self.assertEqual(
+            normalize(passive),
+            normalize(PASSIVE_SCHEDULER_SCHEMA_SQL),
         )
 
     def test_recursive_config_merge(self) -> None:

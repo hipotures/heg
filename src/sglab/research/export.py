@@ -52,6 +52,15 @@ def export_campaign(
         database_bytes = database_path.read_bytes()
         files.append(("campaign.sqlite3", database_bytes))
         total += len(database_bytes)
+        campaign = store.campaign(campaign_id)
+        scheduler = store.connection.execute(
+            """
+            SELECT policy_id, policy_version, scheduler_state_version,
+                   state_version, rng_seed, rng_counter
+            FROM passive_scheduler_states WHERE campaign_id=?
+            """,
+            (campaign_id,),
+        ).fetchone()
 
         for path in sorted(root.rglob("*")):
             if not path.is_file() or path.is_symlink():
@@ -76,6 +85,12 @@ def export_campaign(
         manifest = {
             "schema_version": "1.0",
             "campaign_id": campaign_id,
+            "director_mode": str(
+                campaign.get("director_mode", "llm")
+            ),
+            "passive_scheduler": (
+                dict(scheduler) if scheduler is not None else None
+            ),
             "created_at": utc_now(),
             "database": {
                 "path": "campaign.sqlite3",

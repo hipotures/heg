@@ -407,14 +407,31 @@ class DashboardServer(ThreadingHTTPServer):
                 and self.campaign_runner.poll() is None
             ) or _research_campaign_is_live(self):
                 return 409, {"error": "a research campaign is already active"}
-            if not auth_is_imported(self.workspace / ".sglab"):
+            if set(payload) - {
+                "stop_mode",
+                "duration",
+                "director_mode",
+                "passive_seed",
+            }:
+                return 400, {"error": "unsupported campaign input"}
+            director_mode = str(payload.get("director_mode", "llm"))
+            if director_mode not in {"llm", "passive"}:
+                return 400, {"error": "invalid director mode"}
+            try:
+                passive_seed = int(payload.get("passive_seed", 0))
+            except (TypeError, ValueError):
+                return 400, {"error": "passive_seed must be an integer"}
+            if not 0 <= passive_seed < 2**63:
+                return 400, {"error": "passive_seed is outside its bounds"}
+            if (
+                director_mode == "llm"
+                and not auth_is_imported(self.workspace / ".sglab")
+            ):
                 return 409, {
                     "error": (
                         "Director authentication has not been explicitly imported"
                     )
                 }
-            if set(payload) - {"stop_mode", "duration"}:
-                return 400, {"error": "unsupported campaign input"}
             stop_mode = payload.get("stop_mode")
             command = [
                 sys.executable,
@@ -424,6 +441,10 @@ class DashboardServer(ThreadingHTTPServer):
                 "start",
                 "--workspace",
                 str(self.workspace),
+                "--director-mode",
+                director_mode,
+                "--passive-seed",
+                str(passive_seed),
             ]
             if stop_mode == "time_limit":
                 duration = payload.get("duration")
@@ -461,6 +482,7 @@ class DashboardServer(ThreadingHTTPServer):
                 "pid": self.campaign_runner.pid,
                 "target": "erdos_gyarfas",
                 "stop_mode": stop_mode,
+                "director_mode": director_mode,
             }
 
     def resume_campaign(
@@ -477,6 +499,7 @@ class DashboardServer(ThreadingHTTPServer):
             "verifier_memory_bytes",
             "verification_queue_depth",
             "repair_acknowledgement",
+            "director_mode",
         }
         if set(payload) - allowed:
             return 400, {"error": "unsupported campaign resume input"}
@@ -515,6 +538,11 @@ class DashboardServer(ThreadingHTTPServer):
                 code_commit=repository_commit(
                     Path(__file__).resolve().parents[2]
                 ),
+                director_mode=(
+                    str(payload["director_mode"])
+                    if payload.get("director_mode") is not None
+                    else None
+                ),
             )
         except (RuntimeError, ValueError) as error:
             return 409, {"error": str(error)}
@@ -526,8 +554,16 @@ class DashboardServer(ThreadingHTTPServer):
                 and self.campaign_runner.poll() is None
             ) or _research_campaign_is_live(self):
                 return 409, {"error": "a research campaign is already active"}
-            if not auth_is_imported(
-                campaign_application_data(self.workspace, campaign_id)
+            requested_mode = str(
+                preview["requested_director_mode"]
+            )
+            if (
+                requested_mode == "llm"
+                and not auth_is_imported(
+                    campaign_application_data(
+                        self.workspace, campaign_id
+                    )
+                )
             ):
                 return 409, {
                     "error": (
@@ -566,6 +602,10 @@ class DashboardServer(ThreadingHTTPServer):
             if isinstance(acknowledgement, str) and acknowledgement:
                 command.extend(
                     ("--repair-acknowledgement", acknowledgement)
+                )
+            if payload.get("director_mode") is not None:
+                command.extend(
+                    ("--director-mode", requested_mode)
                 )
             logs = self.workspace / "logs"
             logs.mkdir(parents=True, exist_ok=True)
@@ -606,6 +646,7 @@ class DashboardServer(ThreadingHTTPServer):
                 "campaign_id": campaign_id,
                 "attempt_id": attempt_id,
                 "startup_confirmed": startup_confirmed,
+                "director_mode": requested_mode,
             }
 
 

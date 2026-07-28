@@ -44,9 +44,25 @@ Preparation is deterministic. It creates:
 
 Review the printed plan and fingerprint.
 
+To run without an LLM, prepare the explicit passive contract instead:
+
+```bash
+sglab research-campaign prepare \
+  --workspace ./workspace/my-first-campaign \
+  --time-limit 1h \
+  --director-mode passive \
+  --passive-seed 37
+```
+
+The passive seed and `balanced_v1` policy version are part of the reviewed
+plan and fingerprint.
+
 [screenshot: ID=USR-QUICKSTART-01; save as docs/assets/screenshots/user/quickstart/prepared-campaign-plan.png; open the prepared campaign page, crop the complete “Prepared plan” or equivalent immutable plan card including campaign ID, fingerprint, Director contract, stop condition, maximum turns, search limits, and the “not authorized/not started” state; exclude browser chrome and unrelated comparison cards.]
 
 ## 4. Import authorized Codex credentials
+
+Skip this step for a passive plan. Passive mode does not read a Codex home,
+copy credentials, start App Server, or consume model tokens.
 
 Use an explicitly authorized Codex home. The runtime copies only `auth.json`
 into a private campaign home.
@@ -75,7 +91,8 @@ Open `http://127.0.0.1:8788`.
 sglab research-campaign start   --workspace ./workspace/my-first-campaign   --time-limit 1h   --plan-fingerprint <fingerprint>
 ```
 
-The start path recomputes the fingerprint before App Server startup.
+The start path recomputes the fingerprint before App Server startup in `llm`
+mode or before deterministic scheduler startup in `passive` mode.
 
 ## 7. Observe
 

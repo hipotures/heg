@@ -29,6 +29,8 @@ Exports should:
 
 - plan and fingerprint;
 - campaign/attempt records;
+- current mode, per-attempt mode transitions, and contract fingerprints;
+- passive scheduler state/decisions, reason codes, and RNG lineage;
 - scientific-memory snapshots;
 - lane checkpoints and hashes;
 - retained candidate snapshots;
@@ -61,3 +63,4 @@ Periodically verify that an export can reconstruct:
 - candidates;
 - M4 outcomes;
 - cumulative counters.
+- the active mode and passive scheduler continuation state.

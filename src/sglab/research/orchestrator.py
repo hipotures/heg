@@ -10,6 +10,7 @@ from .effects import EffectEvaluator
 from .diagnostics import ScientificActionDispatcher
 from .lanes import LaneManager
 from .providers import DecisionProvider
+from .passive import PassiveSchedulerFault
 from .snapshot import SnapshotBuilder
 from .store import ResearchStore, new_id
 from .triggers import TriggerBatch, TriggerEngine
@@ -116,13 +117,28 @@ class ActiveResearchOrchestrator:
             batch = self.triggers.consume(
                 total_candidates=self.manager.total_candidates()
             )
+            if self.provider_source_kind == "passive_scheduler":
+                setattr(
+                    self.provider,
+                    "review_boundary_evaluations",
+                    int(
+                        getattr(
+                            self.triggers,
+                            "last_review_evaluations",
+                            self.manager.total_candidates(),
+                        )
+                    ),
+                )
             first = await self._run_cycle(batch)
             replan_statuses = {
                 "stale_target",
                 "rejected_action_id_collision",
             }
-            if not (
+            if (
+                self.provider_source_kind == "passive_scheduler"
+                or not (
                 replan_statuses & set(first.action_statuses.values())
+                )
             ):
                 return first
             second = await self._run_cycle(
@@ -206,15 +222,58 @@ class ActiveResearchOrchestrator:
             raise
         if not evidence.validation.accepted:
             self.store.mark_trigger_status(trigger_id, "rejected_invalid")
+            if evidence.source_kind == "passive_scheduler":
+                detail = "; ".join(
+                    f"{issue.path}: {issue.message}"
+                    for issue in evidence.validation.issues
+                )
+                if (
+                    evidence.source_record_id is None
+                    or evidence.source_metadata is None
+                ):
+                    raise PassiveSchedulerFault(
+                        "invalid passive decision lacks durable provenance"
+                    )
+                self.store.record_passive_scheduler_fault(
+                    scheduler_decision_id=evidence.source_record_id,
+                    campaign_id=self.campaign_id,
+                    snapshot_id=str(snapshot["snapshot_id"]),
+                    metadata=evidence.source_metadata,
+                    decision=evidence.decision,
+                    detail=detail,
+                )
+                raise PassiveSchedulerFault(
+                    f"passive scheduler generated an invalid action: {detail}"
+                )
             raise RuntimeError("Director response remained invalid after repair")
+        passive = evidence.source_kind == "passive_scheduler"
         statuses = self.store.commit_decision_batch(
             decision_batch_id=new_id("decision-batch"),
             campaign_id=self.campaign_id,
             snapshot_id=str(snapshot["snapshot_id"]),
             trigger_id=trigger_id,
-            turn_record_id=evidence.turn_record_ids[-1],
+            turn_record_id=(
+                None if passive else evidence.turn_record_ids[-1]
+            ),
             decision=evidence.decision,
+            scheduler_decision_id=(
+                evidence.source_record_id if passive else None
+            ),
+            scheduler_metadata=(
+                evidence.source_metadata if passive else None
+            ),
         )
+        if passive and any(
+            status != "accepted" for status in statuses.values()
+        ):
+            detail = ", ".join(
+                f"{action_id}={status}"
+                for action_id, status in sorted(statuses.items())
+            )
+            raise PassiveSchedulerFault(
+                "passive scheduler batch was rejected; no action was "
+                f"dispatched: {detail}"
+            )
         self.triggers.configure(evidence.decision["next_review"])
         if any(
             status in {
@@ -233,4 +292,10 @@ class ActiveResearchOrchestrator:
             candidates_during_inference=max(
                 0, self.manager.total_candidates() - before
             ),
+        )
+
+    @property
+    def provider_source_kind(self) -> str:
+        return str(
+            getattr(self.provider, "source_kind", "app_server")
         )

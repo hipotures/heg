@@ -48,6 +48,7 @@ from .research.campaign import (
     parse_duration,
     prepare_campaign_plan,
     request_campaign_control,
+    validate_campaign_plan_fingerprint,
 )
 from .research.compliance import run_no_model_compliance_audit
 from .research.control_study import ControlStudyBudget, ControlStudyRunner
@@ -57,7 +58,7 @@ from .research.context_screen import (
 )
 from .research.export import export_campaign
 from .research.continuity import repository_commit
-from .research.resume import build_resume_preview
+from .research.resume import build_resume_preview, campaign_plan
 from .research.experiment import (
     run_authenticated_experiment,
     run_phase_a_audit,
@@ -554,15 +555,24 @@ def cmd_research_campaign(args: Namespace) -> int:
         report = prepare_campaign_plan(
             workspace,
             duration_seconds=duration,
+            director_mode=args.director_mode,
+            passive_seed=args.passive_seed,
         )
         print(json.dumps(report, indent=2, sort_keys=True))
         return 0
     if command == "auth-import":
-        plan = load_prepared_campaign_plan(
-            workspace,
-            campaign_id=args.campaign_id,
-            expected_fingerprint=args.plan_fingerprint,
-        )
+        current = campaign_status(workspace, args.campaign_id)
+        if current.get("state") == "prepared":
+            plan = load_prepared_campaign_plan(
+                workspace,
+                campaign_id=args.campaign_id,
+                expected_fingerprint=args.plan_fingerprint,
+            )
+        else:
+            plan = campaign_plan(workspace, args.campaign_id)
+            validate_campaign_plan_fingerprint(
+                plan, expected=args.plan_fingerprint
+            )
         import_authorized_auth(
             Path(args.from_codex_home),
             campaign_application_data(
@@ -619,6 +629,8 @@ def cmd_research_campaign(args: Namespace) -> int:
             maximum_director_turns=maximum_cycles,
             context_mode=context_mode,
             prepared_plan=prepared,
+            director_mode=args.director_mode,
+            passive_seed=args.passive_seed,
         ).run()
         print(json.dumps(report, indent=2, sort_keys=True))
         return 0
@@ -651,6 +663,7 @@ def cmd_research_campaign(args: Namespace) -> int:
                 resource_overrides=overrides,
                 repair_acknowledgement=args.repair_acknowledgement,
                 code_commit=commit,
+                director_mode=args.director_mode,
             )
             print(json.dumps(report, indent=2, sort_keys=True))
             return 0
@@ -666,6 +679,7 @@ def cmd_research_campaign(args: Namespace) -> int:
             resume_resource_overrides=overrides,
             repair_acknowledgement=args.repair_acknowledgement,
             code_commit=commit,
+            director_mode=args.director_mode,
         ).run()
         print(json.dumps(report, indent=2, sort_keys=True))
         return 0
@@ -990,10 +1004,20 @@ def build_parser() -> ArgumentParser:
     campaign_stop_mode.add_argument("--until-success", action="store_true")
     campaign_start.add_argument("--workspace", required=True)
     campaign_start.add_argument("--plan-fingerprint")
+    campaign_start.add_argument(
+        "--director-mode", choices=["llm", "passive"]
+    )
+    campaign_start.add_argument("--passive-seed", type=int, default=0)
     campaign_start.set_defaults(func=cmd_research_campaign)
     campaign_prepare = campaign_commands.add_parser("prepare")
     campaign_prepare.add_argument("--workspace", required=True)
     campaign_prepare.add_argument("--time-limit", required=True)
+    campaign_prepare.add_argument(
+        "--director-mode",
+        choices=["llm", "passive"],
+        default="llm",
+    )
+    campaign_prepare.add_argument("--passive-seed", type=int, default=0)
     campaign_prepare.set_defaults(func=cmd_research_campaign)
     campaign_auth = campaign_commands.add_parser("auth-import")
     campaign_auth.add_argument("--workspace", required=True)
@@ -1019,6 +1043,9 @@ def build_parser() -> ArgumentParser:
     campaign_resume.add_argument("--verifier-memory-bytes", type=int)
     campaign_resume.add_argument("--verification-queue-depth", type=int)
     campaign_resume.add_argument("--repair-acknowledgement")
+    campaign_resume.add_argument(
+        "--director-mode", choices=["llm", "passive"]
+    )
     campaign_resume.add_argument("--preview", action="store_true")
     campaign_resume.set_defaults(func=cmd_research_campaign)
     for name in ("pause", "continue", "stop"):

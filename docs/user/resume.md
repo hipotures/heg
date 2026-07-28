@@ -54,6 +54,11 @@ Per attempt, you may change:
 
 These are recorded as requested and effective resources.
 
+You may explicitly select `--director-mode llm|passive` for the new attempt.
+This is the only supported mode-change boundary. The attempt records the
+previous/new modes and a contract fingerprint; omitting the option preserves
+the current mode.
+
 Resume may not silently change:
 
 - research target;
@@ -64,6 +69,9 @@ Resume may not silently change:
 - scientific prompt contract.
 
 A scientifically different contract requires a new campaign.
+Selecting the already fingerprinted passive or LLM orchestration contract is
+an explicit execution-attempt transition, not a silent scientific-contract
+change.
 
 ## Preview first
 
@@ -82,6 +90,7 @@ Review:
 - resource differences;
 - previous fault and repair acknowledgement;
 - stale historical actions excluded from execution.
+- previous/requested orchestration modes and whether the attempt changes mode.
 
 [screenshot: ID=USR-RESUME-01; save as docs/assets/screenshots/user/resume/resume-preview.png; open the Resume preview for a campaign with at least one prior attempt and a historical fault, crop the entire preview card including same campaign ID, proposed new attempt ID, additional time, CPU workers, max lanes, memory/verifier overrides, reused checkpoints, scientific-memory snapshot, previous fault, and repair acknowledgement; exclude lower campaign telemetry.]
 
@@ -89,6 +98,12 @@ Review:
 
 After reviewing the same contract, omit `--preview` or use the protected
 dashboard control.
+
+Passive Resume restores the scheduler review index, last evaluation boundary,
+per-lane stagnation counters, exploration cursor, seed, and RNG counter. It
+does not reset the portfolio policy. Switching to `llm` requires an authorized
+credential import for the exact campaign plan; switching to `passive` does
+not read credentials.
 
 ```bash
 sglab research-campaign resume   --workspace workspace/first-real-graph-campaign-01   --campaign-id <campaign-id>   --additional-time 2h   --cpu-workers 16   --max-active-lanes 8   --lane-memory-bytes 536870912   --verifier-concurrency 2   --repair-acknowledgement "candidate pin repair installed"

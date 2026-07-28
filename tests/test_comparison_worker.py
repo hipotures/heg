@@ -1327,7 +1327,7 @@ class ComparisonWorkerMigrationTests(unittest.TestCase):
                     canonical_sha256(metadata["materials"]["output_schema"]),
                 )
 
-    def test_v11_online_backup_migrates_to_v16_and_preserves_rows(self) -> None:
+    def test_v11_online_backup_migrates_to_current_and_preserves_rows(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = root / "source.sqlite3"
@@ -1369,8 +1369,11 @@ class ComparisonWorkerMigrationTests(unittest.TestCase):
             backup.close()
             connection.close()
             migrated = connect(backup_path)
-            self.assertEqual(SCHEMA_VERSION, 16)
-            self.assertEqual(migrated.execute("PRAGMA user_version").fetchone()[0], 16)
+            self.assertEqual(SCHEMA_VERSION, 17)
+            self.assertEqual(
+                migrated.execute("PRAGMA user_version").fetchone()[0],
+                SCHEMA_VERSION,
+            )
             self.assertEqual(
                 migrated.execute("PRAGMA integrity_check").fetchone()[0],
                 "ok",
@@ -1388,7 +1391,7 @@ class ComparisonWorkerMigrationTests(unittest.TestCase):
             self.assertEqual(tuple(preserved), (1, 1, 1, None))
             migrated.close()
 
-    def test_v12_online_backup_migrates_to_v16_without_rewriting_suite(
+    def test_v12_online_backup_migrates_to_current_without_rewriting_suite(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -1452,7 +1455,7 @@ class ComparisonWorkerMigrationTests(unittest.TestCase):
             migrated = connect(backup_path)
             self.assertEqual(
                 migrated.execute("PRAGMA user_version").fetchone()[0],
-                16,
+                SCHEMA_VERSION,
             )
             suite = migrated.execute(
                 """
@@ -1476,7 +1479,7 @@ class ComparisonWorkerMigrationTests(unittest.TestCase):
             )
             migrated.close()
 
-    def test_v13_online_backup_migrates_to_v16_without_rewriting_plan(
+    def test_v13_online_backup_migrates_to_current_without_rewriting_plan(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -1513,7 +1516,7 @@ class ComparisonWorkerMigrationTests(unittest.TestCase):
             migrated = connect(backup_path)
             self.assertEqual(
                 migrated.execute("PRAGMA user_version").fetchone()[0],
-                16,
+                SCHEMA_VERSION,
             )
             suite = migrated.execute(
                 """

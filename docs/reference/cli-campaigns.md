@@ -14,10 +14,10 @@ Creates the workspace structure and SQLite database.
 sglab research-campaign prepare   --workspace <workspace>   --time-limit 1h
 ```
 
-Alternative stop contract:
+Prepare the no-LLM contract with a reproducible seed:
 
 ```bash
-sglab research-campaign prepare   --workspace <workspace>   --until-success
+sglab research-campaign prepare   --workspace <workspace>   --time-limit 1h   --director-mode passive   --passive-seed 37
 ```
 
 Preparation creates the campaign and exact fingerprint without auth or model
@@ -39,6 +39,14 @@ sglab research-campaign start   --workspace <workspace>   --time-limit 1h   --pl
 ```
 
 The runtime recomputes the fingerprint before private runtime startup.
+For a passive prepared plan, the plan already supplies the mode and seed; no
+auth import is required.
+
+An unprepared bounded passive campaign may be started explicitly:
+
+```bash
+sglab research-campaign start   --workspace <workspace>   --time-limit 1h   --director-mode passive   --passive-seed 37
+```
 
 ## Status and live control
 
@@ -64,6 +72,11 @@ Start a new attempt by reviewing the same contract and omitting `--preview`.
 Resume preserves campaign ID and scientific state; it creates a new execution
 attempt.
 
+Add `--director-mode passive` or `--director-mode llm` only when explicitly
+selecting the reviewed mode for the new attempt. Omitting it preserves the
+current mode. A transition to `llm` requires an exact-plan auth import; a
+passive attempt never accesses auth.
+
 ## Export
 
 ```bash
@@ -77,6 +90,7 @@ and `d`.
 
 ## Normal-versus-legacy boundary
 
-Normal Active Director campaigns expose the stop condition and Resume resource
-overrides. Scientific algorithms, graph orders, mutation parameters, and
-review cadence are Director-controlled.
+Normal campaigns expose the stop condition, `llm|passive` orchestration mode,
+and Resume resource overrides. Scientific algorithms, graph orders, mutation
+parameters, and hot-loop operations remain controlled by reviewed contracts,
+not arbitrary CLI input.

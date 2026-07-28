@@ -28,6 +28,11 @@ prepared → running → terminal
 Terminal outcomes include budget/deadline, operator stop, fault, interruption,
 and certified success.
 
+Each attempt has one immutable orchestration mode, `llm` or `passive`. An
+explicit mode transition is recorded only on the edge that creates the next
+attempt. It never changes a running attempt and is never an automatic fault
+fallback.
+
 ## Director turn
 
 ```text
@@ -41,6 +46,10 @@ timed_out
 ```
 
 Final answer and usage are nullable.
+
+Passive attempts do not enter this state machine. They append
+`passive_scheduler_decisions` and advance `passive_scheduler_states`
+atomically with the shared reviewed action batch.
 
 ## Lane
 

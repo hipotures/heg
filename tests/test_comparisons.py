@@ -87,12 +87,15 @@ def suite_payload(**changes):
 
 
 class ComparisonDatabaseTests(unittest.TestCase):
-    def test_schema_v16_tables_foreign_keys_and_integrity(self) -> None:
+    def test_current_schema_tables_foreign_keys_and_integrity(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             database = Path(directory) / "results.sqlite3"
             connection = connect(database)
-            self.assertEqual(SCHEMA_VERSION, 16)
-            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 16)
+            self.assertEqual(SCHEMA_VERSION, 17)
+            self.assertEqual(
+                connection.execute("PRAGMA user_version").fetchone()[0],
+                SCHEMA_VERSION,
+            )
             tables = {
                 row[0]
                 for row in connection.execute(

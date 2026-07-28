@@ -16,12 +16,16 @@ keeps action/checkpoint ordering explicit.
 
 ## Current schema
 
-The documented baseline uses schema version 16.
+The documented baseline uses schema version 17.
 
 Major domains include:
 
 - campaign and execution attempts;
+- campaign/attempt orchestration mode and immutable mode-transition
+  provenance;
 - Director sessions/turns/decisions/actions/hypotheses;
+- passive scheduler state and decisions, including bounded inputs, reason
+  codes, validation, and RNG lineage;
 - lanes, checkpoints, telemetry, candidates;
 - candidate pins and immutable snapshots;
 - structured candidate provenance copied into immutable snapshots;
@@ -38,6 +42,8 @@ See [SQLite Schema](../reference/sqlite-schema.md).
 Critical transactions include:
 
 - decision commit before dispatch;
+- passive decision, next scheduler state, and shared action batch before
+  dispatch;
 - action ID/idempotency validation;
 - candidate pin/snapshot plus accepted targeted action;
 - inference reservation before model start;

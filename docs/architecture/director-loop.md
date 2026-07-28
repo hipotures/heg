@@ -1,5 +1,10 @@
 # AI Research Director Loop
 
+The reviewed decision/validation/dispatch pipeline has two orchestration
+sources. `llm` uses the AI Research Director described below. `passive` uses
+the deterministic host scheduler described in the final section; it never
+impersonates an App Server turn.
+
 ## Context mode
 
 Production uses `stateless_turns` by default. Each turn starts fresh and
@@ -122,3 +127,20 @@ whole batch before insertion.
 The Director cannot invoke search, shell, code, filesystem, or verification
 tools directly. It proposes reviewed actions; the host validates, commits, and
 executes them.
+
+## No-LLM passive scheduler
+
+`balanced_v1` produces the same decision schema and submits it to the same
+schema, semantic, target, lane-version, capacity, and resource validation.
+Its accepted decision and next scheduler state are committed before dispatch.
+Invalid internal output is persisted as a scheduler implementation fault and
+executes nothing; there is no repair turn.
+
+The scheduler persists policy/state versions, bounded input metrics,
+deterministic reason codes, generated action IDs, validation, review index,
+stagnation counters, exploration cursor, and SHA-256 counter-based RNG
+lineage. It creates a conservative reviewed-algorithm portfolio, keeps a
+random-restart exploration floor, fills unused capacity gradually, prefers
+valid checkpoints for stagnant-lane restarts, and uses the existing M4
+verification action. It never selects vertices, edges, mutations, shell
+commands, or hot-loop operations.

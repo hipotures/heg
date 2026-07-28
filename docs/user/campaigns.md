@@ -42,6 +42,20 @@ The Director works through a reviewed action catalog. It may:
 The operator does not normally choose algorithms or mutation parameters for
 the Active Director campaign.
 
+## No-LLM passive search
+
+Choose `director_mode=passive` when graph search should run without Codex
+credentials, App Server, model turns, repairs, or token accounting. The
+dashboard labels this **No-LLM passive search**.
+
+The versioned `balanced_v1` scheduler uses the same reviewed action catalog,
+validation, durable action IDs, lane-version checks, dispatcher, checkpoint
+integrity, resource limits, and M4 broker. Its reason codes explain whether a
+review initialized or filled the portfolio, preserved exploration, continued
+promising lanes, restarted stagnation from a checkpoint, rebalanced
+resources, or scheduled exact verification. Passive means orchestration is
+model-free; the graph search remains active.
+
 ## Campaign budgets
 
 A prepared campaign fingerprints:
@@ -87,6 +101,9 @@ Measure progress with:
 - exact-verifier outcomes;
 - hypothesis changes;
 - time and model usage.
+
+For passive attempts, model/token usage is not applicable and the useful
+orchestration counter is passive scheduler decisions.
 
 Do not use only the final best score.
 

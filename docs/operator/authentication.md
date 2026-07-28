@@ -35,6 +35,17 @@ Before credential access:
 
 Authorization is not reusable for a changed plan.
 
+## Passive mode
+
+`director_mode=passive` bypasses the credential and App Server path entirely:
+it does not require or read `auth.json`, create a private Codex home, start the
+protocol client, create model/repair turns, or account tokens. An auth,
+quota, protocol, or model failure never changes an LLM attempt into passive
+mode automatically.
+
+An operator planning a later `passive -> llm` attempt must import credentials
+against the same stored plan fingerprint before starting that attempt.
+
 ## Private runtime
 
 Use separate:

@@ -29,6 +29,15 @@ links.
 The browser receives bounded summaries rather than raw SQLite dumps.
 Technical JSON remains secondary disclosure.
 
+Campaign creation and Resume expose an explicit Director-mode selector. The
+default `llm` mode retains the credential gate. `passive` is labelled
+**No-LLM passive search**, accepts a bounded deterministic seed, and does not
+require or report Director authentication. Status and attempt cards project
+the persisted mode, mode transition, contract fingerprint, passive policy
+version, latest reason codes, and scheduler-decision count. Model-token fields
+are rendered as not applicable in passive mode rather than as an
+authentication or connection fault.
+
 ## Live updates
 
 The dashboard polls bounded APIs and avoids rebuilding unchanged large DOM

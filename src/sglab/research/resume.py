@@ -44,6 +44,7 @@ def proposed_attempt_id(
     code_commit: str,
     additional_wall_seconds: float,
     resources: dict[str, Any],
+    director_mode: str = "llm",
 ) -> str:
     payload = canonical_json(
         {
@@ -53,6 +54,7 @@ def proposed_attempt_id(
             "code_commit": code_commit,
             "additional_wall_seconds": additional_wall_seconds,
             "resources": resources,
+            "director_mode": director_mode,
         },
         max_bytes=128 * 1024,
     )
@@ -67,6 +69,7 @@ def build_resume_preview(
     resource_overrides: dict[str, Any] | None = None,
     repair_acknowledgement: str | None = None,
     code_commit: str,
+    director_mode: str | None = None,
 ) -> dict[str, Any]:
     if additional_wall_seconds <= 0:
         raise CampaignResumeError("additional wall time must be positive")
@@ -93,6 +96,17 @@ def build_resume_preview(
         if campaign is None:
             raise CampaignResumeError("campaign not found")
         state = str(campaign["state"])
+        campaign_columns = set(campaign.keys())
+        previous_director_mode = str(
+            campaign["director_mode"]
+            if "director_mode" in campaign_columns
+            else plan.get("director_mode", "llm")
+        )
+        requested_director_mode = (
+            director_mode or previous_director_mode
+        )
+        if requested_director_mode not in {"llm", "passive"}:
+            raise CampaignResumeError("unsupported director mode")
         active_process = active_campaign_process(root, campaign_id)
         host_restart = state == "running" and not active_process
         if state in NON_RESUMABLE_CAMPAIGN_STATES and not host_restart:
@@ -169,6 +183,7 @@ def build_resume_preview(
             code_commit=code_commit,
             additional_wall_seconds=additional_wall_seconds,
             resources=effective,
+            director_mode=requested_director_mode,
         )
         previous_resources = (
             json.loads(str(attempts[-1]["effective_resource_json"]))
@@ -185,6 +200,15 @@ def build_resume_preview(
             "proposed_attempt_id": attempt_id,
             "proposed_attempt_index": attempt_index,
             "attempt_reason": reason,
+            "previous_director_mode": previous_director_mode,
+            "requested_director_mode": requested_director_mode,
+            "mode_transition": {
+                "previous_mode": previous_director_mode,
+                "new_mode": requested_director_mode,
+                "changed": (
+                    previous_director_mode != requested_director_mode
+                ),
+            },
             "code_commit": code_commit,
             "additional_wall_seconds": additional_wall_seconds,
             "requested_resources": requested_values,
@@ -211,6 +235,9 @@ def build_resume_preview(
                     "target_definition_sha256"
                 ],
                 "director": plan.get("director", {}),
+                "passive_scheduler": plan.get(
+                    "passive_scheduler", {}
+                ),
                 "unchanged": True,
             },
             "scientific_memory": {
@@ -517,6 +544,17 @@ def _counters(
     ).fetchone()
     return {
         "director_turns": int(turns[0]),
+        "scheduler_decisions": (
+            _count(connection, "passive_scheduler_decisions", campaign_id)
+            if connection.execute(
+                """
+                SELECT 1 FROM sqlite_master
+                WHERE type='table' AND name='passive_scheduler_decisions'
+                """
+            ).fetchone()
+            is not None
+            else 0
+        ),
         "server_tokens": int(turns[1]),
         "director_wall_seconds": float(turns[2]),
         "actions": _count(connection, "director_actions", campaign_id),

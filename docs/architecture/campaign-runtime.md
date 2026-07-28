@@ -11,6 +11,11 @@ Preparation creates a durable campaign row and exact plan before:
 
 The plan fingerprint binds the scientific and runtime contract.
 
+The plan also binds `director_mode`. `llm` remains the default; `passive`
+selects the versioned `balanced_v1` host scheduler and its seed. Both reviewed
+contracts remain in the plan so a later execution attempt may explicitly
+select either mode without rewriting campaign history.
+
 ## Start
 
 Start performs:
@@ -29,6 +34,10 @@ The first start and every Resume create immutable attempts under one campaign.
 
 An attempt owns process-level resources and provenance. The campaign owns
 scientific continuity.
+
+Every attempt records its active mode, previous mode, transition record, and a
+mode-specific contract fingerprint. A mode change is accepted only while
+creating a new attempt; an active attempt never falls back automatically.
 
 ## Live loop
 
@@ -56,6 +65,13 @@ sequenceDiagram
         C->>D: one fresh repair turn
     end
 ```
+
+In `passive` mode the Director participant is replaced by the deterministic
+host scheduler. The coordinator starts no App Server and creates no private
+Codex home, model session, repair turn, or token record. It restores persisted
+scheduler state and reviews at evaluation-count boundaries plus critical
+integrity events. Wall-clock time still enforces the campaign deadline, but is
+not a scientific scheduling input.
 
 ## Fault semantics
 
