@@ -20,6 +20,32 @@
     second: '2-digit',
     hourCycle: 'h23',
   }).format(new Date());
+  const CYCLE_COLORS = [
+    '#d34a42',
+    '#c27a0a',
+    '#218562',
+    '#356fc4',
+    '#8b5eb1',
+    '#b64f79',
+    '#567b2d',
+    '#8d5c35',
+  ];
+  const CYCLE_DASHES = ['', '10 5', '3 5', '14 5 3 5', '7 4'];
+  const cyclePaletteIndex = length => {
+    const numericLength = Number(length);
+    if (Number.isInteger(numericLength) && numericLength >= 4) {
+      const power = Math.log2(numericLength);
+      if (Number.isInteger(power)) return (power - 2) % CYCLE_COLORS.length;
+    }
+    return Math.abs(Math.trunc(numericLength || 0)) % CYCLE_COLORS.length;
+  };
+  const cycleStyle = length => {
+    const index = cyclePaletteIndex(length);
+    return {
+      color: CYCLE_COLORS[index],
+      dash: CYCLE_DASHES[index % CYCLE_DASHES.length],
+    };
+  };
 
   window.createScientificObservatory = options => {
     const {root, api, esc, fmt, label, shortId, badge} = options;
@@ -312,10 +338,6 @@
       if (state.tab === 'graph') renderGraphSummary();
     };
 
-    const cycleClass = length =>
-      [4, 8, 16, 32].includes(Number(length))
-        ? `cycle-${length}` : 'cycle-other';
-
     const layoutGraph = (graph, prior) => {
       const width = 1000;
       const height = 680;
@@ -380,12 +402,82 @@
       return points;
     };
 
+    const cycleStyleAttribute = length => {
+      const style = cycleStyle(length);
+      return `--cycle-color:${style.color};--cycle-dash:${style.dash || 'none'}`;
+    };
+
+    const cycleKeyMarkup = length => {
+      const style = cycleStyle(length);
+      return `<svg class="cycle-key" viewBox="0 0 36 12" aria-hidden="true">
+        <line x1="1" y1="6" x2="35" y2="6"
+          style="--cycle-color:${style.color};--cycle-dash:${style.dash || 'none'}"></line>
+      </svg>`;
+    };
+
+    const exactCycleKeyMarkup = length =>
+      `<svg class="cycle-key cycle-key-exact" viewBox="0 0 36 12" aria-hidden="true">
+        <line class="cycle-key-exact-outline" x1="1" y1="6" x2="35" y2="6"></line>
+        <line class="cycle-key-exact-core" x1="1" y1="6" x2="35" y2="6"
+          style="${cycleStyleAttribute(length)}"></line>
+      </svg>`;
+
+    const boundedCycleLayers = data => data.cycle_examples
+      .filter(item => Array.isArray(item.vertices) && item.vertices.length)
+      .map((item, index) => ({
+        id: `bounded-${Number(item.length)}-${index}`,
+        length: Number(item.length),
+        vertices: item.vertices.map(Number),
+        authority: item.authority,
+      }))
+      .sort((first, second) =>
+        first.length - second.length || first.id.localeCompare(second.id)
+      );
+
+    const cycleEdgeMarkup = data => {
+      const edges = new Map();
+      for (const cycle of boundedCycleLayers(data)) {
+        const seen = new Set();
+        for (let index = 0; index < cycle.vertices.length; index += 1) {
+          const first = cycle.vertices[index];
+          const second = cycle.vertices[(index + 1) % cycle.vertices.length];
+          if (!Number.isInteger(first) || !Number.isInteger(second) || first === second) {
+            continue;
+          }
+          const u = Math.min(first, second);
+          const v = Math.max(first, second);
+          const edgeKey = `${u}:${v}`;
+          if (seen.has(edgeKey)) continue;
+          seen.add(edgeKey);
+          if (!edges.has(edgeKey)) edges.set(edgeKey, []);
+          edges.get(edgeKey).push(cycle);
+        }
+      }
+      return [...edges.entries()].sort(([first], [second]) =>
+        first.localeCompare(second, undefined, {numeric: true})
+      ).flatMap(([edgeKey, cycles]) => {
+        const [u, v] = edgeKey.split(':').map(Number);
+        return cycles.map(cycle => {
+          const style = cycleStyle(cycle.length);
+          return `<line class="cycle-edge"
+            data-edge-u="${u}" data-edge-v="${v}"
+            data-cycle-edge="${edgeKey}"
+            data-cycle-id="${esc(cycle.id)}"
+            data-cycle-length="${cycle.length}"
+            data-cycle-dash="${esc(style.dash)}"
+            data-cycle-authority="${esc(cycle.authority)}"
+            style="${cycleStyleAttribute(cycle.length)}"></line>`;
+        });
+      }).join('');
+    };
+
     const cycleMarkup = (vertices, length, classes, authority) => {
       if (!Array.isArray(vertices) || !vertices.length) return '';
       return `<polyline class="cycle-overlay ${classes}"
         data-cycle-vertices="${esc(vertices.join(','))}"
         data-cycle-length="${esc(length)}"
-        data-cycle-authority="${esc(authority)}"></polyline>`;
+        data-cycle-authority="${esc(authority)}"
+        style="${cycleStyleAttribute(length)}"></polyline>`;
     };
 
     const applyPositions = positions => {
@@ -399,8 +491,7 @@
       }
       for (const vertex of svg.querySelectorAll('[data-vertex]')) {
         const point = positions[Number(vertex.dataset.vertex)];
-        vertex.setAttribute('cx', point.x);
-        vertex.setAttribute('cy', point.y);
+        vertex.setAttribute('transform', `translate(${point.x} ${point.y})`);
       }
       for (const cycle of svg.querySelectorAll('[data-cycle-vertices]')) {
         const vertices = cycle.dataset.cycleVertices.split(',').map(Number);
@@ -410,6 +501,70 @@
         }).join(' ');
         cycle.setAttribute('points', path);
       }
+    };
+
+    const vertexSectorPath = (index, count, radius = 8) => {
+      const start = -Math.PI / 2 + index * 2 * Math.PI / count;
+      const end = -Math.PI / 2 + (index + 1) * 2 * Math.PI / count;
+      const coordinate = value => Math.abs(value) < .0005
+        ? 0
+        : Number(value.toFixed(3));
+      const x1 = coordinate(Math.cos(start) * radius);
+      const y1 = coordinate(Math.sin(start) * radius);
+      const x2 = coordinate(Math.cos(end) * radius);
+      const y2 = coordinate(Math.sin(end) * radius);
+      const largeArc = end - start > Math.PI ? 1 : 0;
+      return `M 0 0 L ${x1} ${y1} A ${radius} ${radius} 0 ${largeArc} 1 ${x2} ${y2} Z`;
+    };
+
+    const vertexMarkup = (vertex, memberships, exactLength) => {
+      const membershipLabel = memberships.length
+        ? `displayed cycles ${memberships.map(length => `C${length}`).join(', ')}`
+        : 'no displayed cycle';
+      const exactLabel = exactLength === null ? '' : `; exact M4 C${exactLength}`;
+      const labelText = `Vertex ${vertex}; ${membershipLabel}${exactLabel}`;
+      const fill = memberships.length === 0
+        ? '<circle class="graph-vertex-base" r="8"></circle>'
+        : memberships.length === 1
+          ? `<circle class="graph-vertex-sector" r="8"
+              style="${cycleStyleAttribute(memberships[0])}"></circle>`
+          : memberships.map((length, index) =>
+              `<path class="graph-vertex-sector"
+                d="${vertexSectorPath(index, memberships.length)}"
+                style="${cycleStyleAttribute(length)}"></path>`
+            ).join('');
+      const exactRing = exactLength === null
+        ? ''
+        : `<circle class="graph-vertex-exact-outline" r="11"></circle>
+           <circle class="graph-vertex-exact-core" r="11"
+             style="${cycleStyleAttribute(exactLength)}"></circle>`;
+      return `<g class="graph-vertex${state.selectedVertex === vertex ? ' selected' : ''}"
+          data-vertex="${vertex}"
+          data-cycle-memberships="${esc(memberships.join(','))}"
+          tabindex="0" role="button" aria-label="${esc(labelText)}">
+          ${fill}<circle class="graph-vertex-outline" r="8"></circle>${exactRing}
+          <title>${esc(labelText)}</title>
+        </g>`;
+    };
+
+    const renderVertices = () => {
+      const group = svg.querySelector('[data-graph-vertices]');
+      if (!group || !state.graph) return;
+      const visibleCycles = boundedCycleLayers(state.graph).filter(cycle =>
+        state.layers.get(String(cycle.length)) !== false
+      );
+      const exactWitness = state.layers.get('exact') === false
+        ? null
+        : state.graph.exact_verification?.witnesses?.[0] || null;
+      group.innerHTML = state.graph.graph.vertices.map(vertex => {
+        const memberships = visibleCycles
+          .filter(cycle => cycle.vertices.includes(vertex))
+          .map(cycle => cycle.length);
+        const exactLength = exactWitness?.vertices?.includes(vertex)
+          ? Number(exactWitness.length)
+          : null;
+        return vertexMarkup(vertex, memberships, exactLength);
+      }).join('');
     };
 
     const updateViewport = () => {
@@ -432,14 +587,7 @@
       const sameOrder = oldPositions?.length === data.graph.vertices.length;
       const positions = layoutGraph(data.graph, sameOrder ? oldPositions : null);
       state.positions = positions;
-      const heuristic = data.cycle_examples.map(item =>
-        cycleMarkup(
-          item.vertices,
-          item.length,
-          cycleClass(item.length),
-          item.authority,
-        )
-      ).join('');
+      const heuristic = cycleEdgeMarkup(data);
       const exactWitness = data.exact_verification?.witnesses?.[0];
       const exact = exactWitness
         ? cycleMarkup(
@@ -462,15 +610,9 @@
             ).join('')}
           </g>
           <g aria-label="Cycle overlays">${heuristic}${exact}</g>
-          <g aria-label="Graph vertices">
-            ${data.graph.vertices.map(vertex =>
-              `<circle class="graph-vertex" data-vertex="${vertex}" r="7"
-                tabindex="0" role="button" aria-label="Vertex ${vertex}">
-                <title>Vertex ${vertex}</title>
-              </circle>`
-            ).join('')}
-          </g>
+          <g aria-label="Graph vertices" data-graph-vertices></g>
         </g>`;
+      renderVertices();
       applyPositions(sameOrder ? oldPositions : positions);
       updateViewport();
       graphEmpty.hidden = true;
@@ -571,13 +713,13 @@
             : 'display budget exhausted';
         return `<label><input type="checkbox" data-cycle-toggle="${length}"
           ${state.layers.get(String(length)) ? 'checked' : ''}>
-          <span class="cycle-key key-${[4, 8, 16, 32].includes(length) ? length : 'other'}"></span>
+          ${cycleKeyMarkup(length)}
           Cycle ${length} · ${esc(suffix)}</label>`;
       }).join('');
       const exactRow = exact?.witnesses?.length
         ? `<label><input type="checkbox" data-cycle-toggle="exact"
              ${state.layers.get('exact') ? 'checked' : ''}>
-             <span class="cycle-key key-exact"></span>
+             ${exactCycleKeyMarkup(exact.witnesses[0].length)}
              Exact M4 witness · cycle ${exact.witnesses[0].length}</label>`
         : '<div class="meta">No exact M4 witness is available for this candidate.</div>';
       setHtml(inspector, `
@@ -610,11 +752,36 @@
     };
 
     const applyLayerVisibility = () => {
-      for (const cycle of svg.querySelectorAll('[data-cycle-length]')) {
-        const exact = cycle.dataset.cycleAuthority === 'persisted_M4_manifest';
-        const key = exact ? 'exact' : cycle.dataset.cycleLength;
-        cycle.hidden = state.layers.get(String(key)) === false;
+      for (const cycle of svg.querySelectorAll('[data-cycle-vertices]')) {
+        cycle.hidden = state.layers.get('exact') === false;
       }
+      const edgeGroups = new Map();
+      for (const edge of svg.querySelectorAll('[data-cycle-edge]')) {
+        if (!edgeGroups.has(edge.dataset.cycleEdge)) {
+          edgeGroups.set(edge.dataset.cycleEdge, []);
+        }
+        edgeGroups.get(edge.dataset.cycleEdge).push(edge);
+      }
+      const segmentLength = 12;
+      for (const edges of edgeGroups.values()) {
+        const visible = edges
+          .filter(edge => state.layers.get(String(edge.dataset.cycleLength)) !== false)
+          .sort((first, second) =>
+            Number(first.dataset.cycleLength) - Number(second.dataset.cycleLength)
+              || first.dataset.cycleId.localeCompare(second.dataset.cycleId)
+          );
+        for (const edge of edges) edge.hidden = !visible.includes(edge);
+        visible.forEach((edge, index) => {
+          const shared = visible.length > 1;
+          edge.classList.toggle('is-shared', shared);
+          edge.style.strokeDasharray = shared
+            ? `${segmentLength} ${segmentLength * (visible.length - 1)}`
+            : edge.dataset.cycleDash || 'none';
+          edge.style.strokeDashoffset = shared ? String(-segmentLength * index) : '0';
+        });
+      }
+      renderVertices();
+      if (state.positions) applyPositions(state.positions);
     };
 
     const renderGraphSummary = () => {
@@ -640,19 +807,38 @@
       const displayMemberships = vertex === null
         ? []
         : state.graph.cycle_examples
-          .filter(item => item.vertices?.includes(vertex))
+          .filter(item =>
+            state.layers.get(String(item.length)) !== false
+              && item.vertices?.includes(vertex)
+          )
           .map(item => Number(item.length))
           .sort((a, b) => a - b);
       const exactMemberships = vertex === null
+        || state.layers.get('exact') === false
         ? []
         : (exact?.witnesses || [])
           .filter(item => item.vertices?.includes(vertex))
           .map(item => Number(item.length))
           .sort((a, b) => a - b);
+      const visibleLengths = [...new Set(
+        state.graph.cycle_examples
+          .filter(item =>
+            state.layers.get(String(item.length)) !== false
+              && item.vertices?.length
+          )
+          .map(item => Number(item.length))
+      )].sort((a, b) => a - b);
+      const boundedLegend = visibleLengths.map(length =>
+        `<span>${cycleKeyMarkup(length)} C${length} bounded example</span>`
+      ).join('');
+      const exactLegend = exact?.witnesses?.length
+        && state.layers.get('exact') !== false
+        ? `<span>${exactCycleKeyMarkup(exact.witnesses[0].length)}
+            Exact M4 C${esc(exact.witnesses[0].length)}</span>`
+        : '';
       setHtml(panel, `
         <div class="observatory-legend">
-          <span><span class="cycle-key"></span>Bounded display examples</span>
-          <span><span class="cycle-key key-exact"></span>Persisted exact M4 witness</span>
+          ${boundedLegend}${exactLegend}
         </div>
         <p class="meta">The layout is deterministic for the selected graph. Display scans never certify absence. ${exact
           ? `M4 artifact integrity: ${esc(label(exact.integrity_status))}.`
@@ -844,6 +1030,7 @@
       if (!toggle) return;
       state.layers.set(String(toggle.dataset.cycleToggle), toggle.checked);
       applyLayerVisibility();
+      if (state.tab === 'graph') renderGraphSummary();
     });
     root.addEventListener('click', event => {
       const tab = event.target.closest('[data-observatory-tab]');

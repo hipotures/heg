@@ -11,20 +11,24 @@
 .graph-stage svg.is-dragging{cursor:grabbing}
 .graph-stage svg.is-entering{animation:observatory-enter .42s cubic-bezier(.22,1,.36,1)}
 .graph-stage .graph-edge{stroke:color-mix(in srgb,var(--muted) 50%,transparent);stroke-width:1.15;vector-effect:non-scaling-stroke}
-.graph-stage .graph-vertex{fill:var(--surface);stroke:var(--text);stroke-width:1.5;vector-effect:non-scaling-stroke;cursor:pointer}
-.graph-stage .graph-vertex:hover,.graph-stage .graph-vertex.selected{fill:var(--accent-soft);stroke:var(--accent-strong);stroke-width:2.5}
+.graph-stage .graph-vertex{cursor:pointer}
+.graph-stage .graph-vertex-base{fill:var(--surface)}
+.graph-stage .graph-vertex-sector{fill:var(--cycle-color)}
+.graph-stage .graph-vertex-outline{fill:none;stroke:var(--text);stroke-width:1.5;vector-effect:non-scaling-stroke}
+.graph-stage .graph-vertex:hover .graph-vertex-outline,.graph-stage .graph-vertex.selected .graph-vertex-outline,.graph-stage .graph-vertex:focus .graph-vertex-outline{stroke:var(--accent-strong);stroke-width:3}
+.graph-stage .graph-vertex:focus{outline:none}
+.graph-stage .graph-vertex-exact-outline,.graph-stage .graph-vertex-exact-core{fill:none;vector-effect:non-scaling-stroke;pointer-events:none}
+.graph-stage .graph-vertex-exact-outline{stroke:var(--text);stroke-width:4}
+.graph-stage .graph-vertex-exact-core{stroke:var(--cycle-color);stroke-width:2}
+.graph-stage .cycle-edge{fill:none;stroke:var(--cycle-color);stroke-width:4;stroke-linecap:butt;vector-effect:non-scaling-stroke;pointer-events:none}
 .graph-stage .cycle-overlay{fill:none;stroke-width:4;stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke;pointer-events:none}
-.graph-stage .cycle-4{stroke:#d34a42}
-.graph-stage .cycle-8{stroke:#d08b16;stroke-dasharray:10 5}
-.graph-stage .cycle-16{stroke:#2a8b66;stroke-dasharray:3 5}
-.graph-stage .cycle-32{stroke:#356fc4;stroke-dasharray:14 5 3 5}
-.graph-stage .cycle-other{stroke:#8b5eb1;stroke-dasharray:7 4}
 .graph-stage .cycle-exact{stroke:var(--text);stroke-width:7;opacity:.92}
-.graph-stage .cycle-exact-core{stroke:#f2bd68;stroke-width:3}
+.graph-stage .cycle-exact-core{stroke:var(--cycle-color);stroke-width:3}
 .graph-stage-controls{position:absolute;top:.7rem;right:.7rem;display:flex;gap:.35rem;z-index:2}
 .graph-stage-controls button{min-width:2.5rem;min-height:2.5rem;padding:.35rem;background:color-mix(in srgb,var(--surface) 92%,transparent)}
 .graph-stage-controls output{display:grid;place-items:center;min-width:3.5rem;padding:.35rem;color:var(--muted);font:600 .75rem/1 var(--sans);background:color-mix(in srgb,var(--surface) 92%,transparent);border:1px solid var(--line);border-radius:7px}
 .graph-empty{min-height:34rem;display:grid;place-items:center;padding:2rem;color:var(--muted);text-align:center}
+.graph-empty[hidden]{display:none}
 .observatory-inspector{min-width:0;padding:.2rem 0;display:flex;flex-direction:column;gap:1rem}
 .observatory-inspector h3{font-size:1.05rem;margin:0;overflow-wrap:anywhere}
 .observatory-inspector p{margin:.2rem 0}
@@ -33,9 +37,10 @@
 .layer-controls{display:grid;gap:.45rem;padding-top:.8rem;border-top:1px solid var(--line)}
 .layer-controls label{display:flex;grid-template-columns:none;align-items:center;gap:.5rem;min-height:2.25rem;color:var(--text);font-weight:550}
 .layer-controls input{width:1.05rem;height:1.05rem;padding:0}
-.cycle-key{display:inline-block;width:2rem;height:0;border-top:3px solid currentColor;flex:0 0 auto}
-.cycle-key.key-8{border-top-style:dashed}.cycle-key.key-16{border-top-style:dotted}.cycle-key.key-32{border-top:4px double currentColor}
-.cycle-key.key-exact{border-top-width:6px;color:var(--text)}
+.cycle-key{display:block;width:2.25rem;height:.75rem;flex:0 0 auto;overflow:visible}
+.cycle-key line{stroke:var(--cycle-color);stroke-width:4;stroke-dasharray:var(--cycle-dash,none);stroke-linecap:butt;vector-effect:non-scaling-stroke}
+.cycle-key-exact .cycle-key-exact-outline{stroke:var(--text);stroke-width:7;stroke-dasharray:none}
+.cycle-key-exact .cycle-key-exact-core{stroke:var(--cycle-color);stroke-width:3;stroke-dasharray:none}
 .observatory-tabs{display:flex;gap:.25rem;overflow-x:auto;border-bottom:1px solid var(--line);scrollbar-width:thin}
 .observatory-tabs button{border:0;border-radius:7px 7px 0 0;background:transparent;color:var(--muted);white-space:nowrap}
 .observatory-tabs button[aria-selected=true]{background:var(--surface-2);color:var(--text);box-shadow:inset 0 -3px var(--accent)}

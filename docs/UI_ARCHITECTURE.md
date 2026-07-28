@@ -52,7 +52,11 @@ inside the same page. Its graph and series view models are server-bounded and
 read-only. The component updates in place during the five-second dashboard
 poll, preserving the selected source, tab, layers, pan/zoom, selected vertex,
 and page scroll position. Exact M4 witness paths and bounded display-only cycle
-examples have deliberately different labels and styles. See
+examples have deliberately different labels and styles. Cycle-length colors
+are deterministic browser presentation tokens shared by edge overlays, vertex
+sectors, and SVG legend samples. Shared-edge segmentation and vertex
+memberships are derived only from the bounded cycle lists already present in
+the view model; they do not extend the API or alter graph identity. See
 `docs/SCIENTIFIC_OBSERVATORY.md`.
 
 ## Theme contract

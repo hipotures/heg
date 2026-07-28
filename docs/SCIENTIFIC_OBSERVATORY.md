@@ -38,11 +38,23 @@ verified against their stored SHA-256 before decoding. When the campaign is not
 running, the toolbar says `Frontier paused` and shows the campaign state/fault
 without presenting a stale sample timestamp.
 
-Cycle layers use separate styles for lengths 4, 8, 16, 32, and other relevant
-lengths. Display-cycle examples come from a bounded local scan and are always
-labelled non-certifying. An exact M4 witness is shown only after the persisted
-manifest passes path containment, size, graph-hash, and witness-edge checks.
-The exact witness is visually distinct from every heuristic overlay.
+Every displayed cycle length has a stable color derived only from its length;
+the graph, vertex sectors, layer controls, and graph legend reuse that exact
+color. On an edge shared by several visible bounded examples, equal-length
+colored segments repeat in ascending cycle-length order. The edge direction is
+canonicalized from the lower vertex ID to the higher ID, so the segment order
+does not depend on cycle traversal or refresh order. Hiding a layer immediately
+recomputes the remaining segments.
+
+Vertices render above all edge overlays. A vertex outside every visible
+bounded example remains hollow, one membership produces a solid fill, and
+multiple memberships produce equal clockwise sectors ordered by cycle length.
+The accessible vertex label names the same memberships. Display-cycle examples
+come from a bounded local scan and are always labelled non-certifying. An exact
+M4 witness is shown only after the persisted manifest passes path containment,
+size, graph-hash, and witness-edge checks. Its double outline remains the
+authority cue while its inner stroke and vertex ring use the stable color of
+the witness length.
 
 Selecting a vertex opens a small inspector with its degree, adjacent vertex
 IDs, membership in displayed cycle examples, and membership in the persisted

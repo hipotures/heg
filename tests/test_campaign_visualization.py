@@ -26,6 +26,42 @@ CAMPAIGN_ID = "campaign-visualization-test"
 
 
 class CampaignVisualizationTests(unittest.TestCase):
+    def test_cycle_overlay_rendering_contract(self) -> None:
+        repository = Path(__file__).parents[1]
+        script = (repository / "web" / "observatory.js").read_text(
+            encoding="utf-8"
+        )
+        stylesheet = (repository / "web" / "observatory.css").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("const CYCLE_COLORS = [", script)
+        self.assertIn("const cycleStyle = length =>", script)
+        self.assertIn("const u = Math.min(first, second);", script)
+        self.assertIn('const edgeKey = `${u}:${v}`;', script)
+        self.assertIn('data-cycle-edge="${edgeKey}"', script)
+        self.assertIn(
+            "Number(first.dataset.cycleLength)"
+            " - Number(second.dataset.cycleLength)",
+            script,
+        )
+        self.assertIn(
+            "`${segmentLength} ${segmentLength * (visible.length - 1)}`",
+            script,
+        )
+        self.assertIn("String(-segmentLength * index)", script)
+        self.assertIn("const vertexSectorPath =", script)
+        self.assertIn(
+            'data-cycle-memberships="${esc(memberships.join(\',\'))}"',
+            script,
+        )
+        self.assertIn("${cycleKeyMarkup(length)}", script)
+        self.assertIn("${exactCycleKeyMarkup(exact.witnesses[0].length)}", script)
+        self.assertIn("stroke:var(--cycle-color)", stylesheet)
+        self.assertIn(".graph-stage .graph-vertex-sector", stylesheet)
+        self.assertIn(".graph-empty[hidden]{display:none}", stylesheet)
+        self.assertNotIn(".graph-stage .cycle-other", stylesheet)
+
     def test_live_refresh_preserves_active_text_selection(self) -> None:
         script = (
             Path(__file__).parents[1] / "web" / "observatory.js"

@@ -1,6 +1,23 @@
 # Implementation Status
 
-Last implementation audit: **2026-07-27**.
+Last implementation audit: **2026-07-28**.
+
+## Deterministic cycle-overlay readability
+
+The scientific observatory now assigns each displayed cycle length one stable
+color reused by highlighted edges, vertex membership fills, layer controls,
+and the graph legend. Shared highlighted edges render repeating equal colored
+segments in ascending cycle-length order from the lower endpoint ID to the
+higher endpoint ID. Toggling a layer recomputes the pattern from the remaining
+visible cycles.
+
+Vertices remain above all edges and now render hollow for no displayed-cycle
+membership, solid for one membership, and as equal clockwise sectors for
+multiple memberships. Exact M4 witnesses retain their double authority outline
+while using the same length color in the core and vertex ring. Ordinary graph
+edges, bounded visualization payloads, search, scoring, mutation, and M4
+semantics are unchanged. See
+`docs/reports/M6_CYCLE_OVERLAY_READABILITY.md`.
 
 ## Director evidence-reference schema
 

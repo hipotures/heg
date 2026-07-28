@@ -75,6 +75,16 @@ Resume also establishes a new measurement boundary. Metric windows completed
 before the current execution attempt's `started_at` remain historical and do
 not contribute to current per-lane or aggregate throughput. The UI shows
 `0/s` until the first new window completes.
+Visible bounded cycle examples use deterministic length-based presentation
+tokens. The same token colors the cycle's highlighted edge segments, vertex
+membership sectors, and SVG legend sample. When visible cycles share an edge,
+the browser canonicalizes its direction by vertex ID and repeats equal colored
+segments in ascending cycle-length order. Vertices are rendered after edge
+overlays and use a hollow marker for zero memberships, a solid fill for one,
+and equal ordered sectors for multiple memberships. Layer visibility changes
+recompute both representations locally. Exact M4 authority retains a double
+outline with a length-colored core. These are read-only projections over the
+existing bounded cycle and witness payloads.
 
 ## Graph visualization
 

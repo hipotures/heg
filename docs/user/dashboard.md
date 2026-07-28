@@ -72,6 +72,14 @@ The observatory may include:
 
 The 2D/3D drawing is a visualization of the same abstract graph. Moving or
 rotating vertices does not change graph adjacency or mathematical properties.
+Each visible cycle length keeps one color across highlighted edges, vertex
+fills, and the legend. Shared highlighted edges alternate equal colored
+segments in cycle-length order. A hollow vertex is outside every visible
+bounded cycle; a solid vertex belongs to one, and a vertex split into equal
+sectors belongs to several. Use the layer checkboxes to remove a cycle length;
+shared-edge segments and vertex sectors update to reflect only the remaining
+visible layers. The double-outlined M4 witness remains separately identified
+as exact evidence.
 When viewing the live search frontier, use the seconds dropdown immediately
 after the graph-source selector to choose a 1–5 second refresh interval. The
 choice lasts for the current browser session. During a long search batch the
