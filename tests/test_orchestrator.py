@@ -12,6 +12,7 @@ from sglab.research.actions import LaneActionDispatcher
 from sglab.research.director import DirectorEvidence
 from sglab.research.lanes import LaneManager
 from sglab.research.orchestrator import ActiveResearchOrchestrator
+from sglab.research.passive import PassiveScheduler, PassiveSchedulerFault
 from sglab.research.snapshot import SnapshotBuilder
 from sglab.research.store import ResearchStore
 from sglab.research.triggers import TriggerEngine
@@ -345,7 +346,187 @@ class StaleCandidateReplanProvider:
         )
 
 
+class CampaignRacePassiveScheduler(PassiveScheduler):
+    def __init__(self, *, race_count: int, **kwargs):
+        super().__init__(**kwargs)
+        self.race_count = race_count
+        self.decision_count = 0
+
+    async def decide(
+        self,
+        *,
+        snapshot: dict,
+        trigger_id: str,
+        context: DecisionContext,
+    ) -> DirectorEvidence:
+        evidence = await super().decide(
+            snapshot=snapshot,
+            trigger_id=trigger_id,
+            context=context,
+        )
+        self.decision_count += 1
+        if self.decision_count <= self.race_count:
+            with self.store.transaction() as database:
+                database.execute(
+                    """
+                    UPDATE research_campaigns
+                    SET state_version=state_version+1
+                    WHERE campaign_id=?
+                    """,
+                    (self.campaign_id,),
+                )
+        return evidence
+
+
 class ActiveResearchOrchestratorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_passive_stale_campaign_gets_one_fresh_replan(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = ResearchStore(root / "campaign.sqlite3")
+            manager = LaneManager(
+                root,
+                max_active_lanes=2,
+                telemetry_windows=8,
+            )
+            campaign_id = "campaign-passive-race"
+            store.create_campaign(
+                campaign_id=campaign_id,
+                target="erdos_gyarfas",
+                target_definition_sha256="a" * 64,
+                stop_mode="until_success",
+                deadline_at=None,
+                director_mode="passive",
+            )
+            dispatcher = LaneActionDispatcher(
+                store=store,
+                manager=manager,
+                campaign_id=campaign_id,
+            )
+            provider = CampaignRacePassiveScheduler(
+                store=store,
+                campaign_id=campaign_id,
+                seed=91,
+                race_count=1,
+            )
+            await provider.start()
+            orchestrator = ActiveResearchOrchestrator(
+                store=store,
+                manager=manager,
+                dispatcher=dispatcher,
+                snapshots=SnapshotBuilder(
+                    store=store,
+                    manager=manager,
+                    campaign_id=campaign_id,
+                    campaign_dir=root,
+                ),
+                provider=provider,
+                triggers=TriggerEngine(debounce_seconds=0),
+                campaign_id=campaign_id,
+                inference_poll_seconds=0.005,
+            )
+            try:
+                orchestrator.bootstrap()
+                result = await orchestrator.run_due_cycle()
+                self.assertEqual(provider.decision_count, 2)
+                self.assertEqual(result.replan_count, 1)
+                self.assertFalse(result.replan_exhausted)
+                self.assertIn(
+                    "rejected_stale_campaign",
+                    result.action_statuses.values(),
+                )
+                self.assertIn("accepted", result.action_statuses.values())
+                self.assertEqual(
+                    store.connection.execute(
+                        """
+                        SELECT count(*) FROM passive_scheduler_decisions
+                        WHERE validation_status='rejected_batch'
+                        """
+                    ).fetchone()[0],
+                    1,
+                )
+                self.assertIsNotNone(
+                    store.passive_scheduler_state(campaign_id)
+                )
+            finally:
+                manager.shutdown()
+                store.close()
+
+    async def test_passive_second_stale_campaign_faults(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = ResearchStore(root / "campaign.sqlite3")
+            manager = LaneManager(
+                root,
+                max_active_lanes=2,
+                telemetry_windows=8,
+            )
+            campaign_id = "campaign-passive-repeat-race"
+            store.create_campaign(
+                campaign_id=campaign_id,
+                target="erdos_gyarfas",
+                target_definition_sha256="a" * 64,
+                stop_mode="until_success",
+                deadline_at=None,
+                director_mode="passive",
+            )
+            dispatcher = LaneActionDispatcher(
+                store=store,
+                manager=manager,
+                campaign_id=campaign_id,
+            )
+            provider = CampaignRacePassiveScheduler(
+                store=store,
+                campaign_id=campaign_id,
+                seed=91,
+                race_count=2,
+            )
+            await provider.start()
+            orchestrator = ActiveResearchOrchestrator(
+                store=store,
+                manager=manager,
+                dispatcher=dispatcher,
+                snapshots=SnapshotBuilder(
+                    store=store,
+                    manager=manager,
+                    campaign_id=campaign_id,
+                    campaign_dir=root,
+                ),
+                provider=provider,
+                triggers=TriggerEngine(debounce_seconds=0),
+                campaign_id=campaign_id,
+                inference_poll_seconds=0.005,
+            )
+            try:
+                orchestrator.bootstrap()
+                with self.assertRaisesRegex(
+                    PassiveSchedulerFault,
+                    "one fresh passive scheduler replan",
+                ):
+                    await orchestrator.run_due_cycle()
+                self.assertEqual(provider.decision_count, 2)
+                self.assertEqual(
+                    store.connection.execute(
+                        """
+                        SELECT count(*) FROM director_actions
+                        WHERE validation_status='accepted'
+                        """
+                    ).fetchone()[0],
+                    0,
+                )
+                self.assertIsNone(
+                    store.passive_scheduler_state(campaign_id)
+                )
+                await provider.start()
+                orchestrator.bootstrap()
+                resumed = await orchestrator.run_due_cycle()
+                self.assertIn("accepted", resumed.action_statuses.values())
+                self.assertIsNotNone(
+                    store.passive_scheduler_state(campaign_id)
+                )
+            finally:
+                manager.shutdown()
+                store.close()
+
     async def test_stale_candidate_gets_one_fresh_replan_and_continues(
         self,
     ) -> None:

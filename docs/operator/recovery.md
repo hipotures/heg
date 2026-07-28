@@ -48,6 +48,12 @@ answer/usage.
 Stateless Director mode rebuilds context from scientific memory rather than
 relying on conversation recovery.
 
+The passive scheduler has one narrower host-side concurrency recovery: a
+commit-time `rejected_stale_campaign` dispatches nothing, publishes a fresh
+snapshot, and performs one fresh deterministic review. This is not an App
+Server/provider retry. A repeated conflict remains a fault requiring normal
+repair acknowledgement and Resume.
+
 ## Repaired faults
 
 A fault Resume requires:

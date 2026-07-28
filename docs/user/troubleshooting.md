@@ -33,6 +33,17 @@ action is not run. One replan receives the current candidate registry.
 This is not a generic runtime fault unless the replan also fails or another
 invariant breaks.
 
+## `rejected_stale_campaign` in passive mode
+
+This means durable campaign progress advanced after the passive scheduler
+published its snapshot but before the reviewed batch committed. The stale
+batch remains in history and no action from it runs.
+
+Current builds automatically publish one fresh snapshot and run one fresh
+deterministic scheduler review. The campaign continues if that batch commits.
+A second conflict stops as `PassiveSchedulerFault`; inspect recurring event or
+state-version churn before acknowledging and resuming the fault.
+
 ## Invalid Director response
 
 The response is preserved as evidence and never executed. One fresh stateless

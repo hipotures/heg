@@ -19,7 +19,10 @@ host scheduler constructs the same typed decision object and submits it to the
 same semantic validator, durable action-batch store, and dispatcher. Passive
 decisions have a scheduler-decision source instead of an App Server turn
 source; they do not create repair turns. A rejected passive decision is
-persisted as a scheduler fault and no action from that batch is dispatched.
+persisted and no action from that batch is dispatched. Invalid output and
+commit-time target/lane rejection fault immediately. The narrower
+`rejected_stale_campaign` concurrency status permits one fresh deterministic
+review from a newly published snapshot; a repeated conflict faults.
 
 The submitted action space uses separate compact lists for active executable
 lanes, historical lanes, candidate targets, and checkpoint targets, plus one

@@ -73,6 +73,13 @@ scheduler state and reviews at evaluation-count boundaries plus critical
 integrity events. Wall-clock time still enforces the campaign deadline, but is
 not a scientific scheduling input.
 
+If concurrent durable progress advances the campaign version after a passive
+snapshot is published but before its action batch is committed, the stale
+batch is persisted and dispatches nothing. The coordinator publishes one fresh
+snapshot and performs one fresh deterministic scheduler review. A second
+`rejected_stale_campaign`, or any other rejected passive batch, stops
+fail-closed.
+
 ## Fault semantics
 
 Infrastructure, protocol, resource, authentication, and verifier-integrity

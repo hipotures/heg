@@ -155,6 +155,7 @@ class PassiveScheduler:
         self.seed = seed
         self.state = self._initial_state(seed)
         self.review_boundary_evaluations: int | None = None
+        self._decision_attempt = 0
         self._started = False
 
     @staticmethod
@@ -184,20 +185,30 @@ class PassiveScheduler:
             raise PassiveSchedulerFault(
                 "passive scheduler cannot resume an App Server thread"
             )
-        stored = self.store.passive_scheduler_state(self.campaign_id)
-        if stored is not None:
-            state = json.loads(str(stored["state_json"]))
-            if (
-                state.get("policy_id") != PASSIVE_POLICY_ID
-                or int(state.get("policy_version", -1))
-                != PASSIVE_POLICY_VERSION
-                or int(state.get("seed", -1)) != self.seed
-            ):
-                raise PassiveSchedulerFault(
-                    "persisted passive scheduler contract does not match"
-                )
-            self.state = state
+        self.state = self._committed_state()
+        self._decision_attempt = 0
         self._started = True
+
+    def _committed_state(self) -> dict[str, Any]:
+        stored = self.store.passive_scheduler_state(self.campaign_id)
+        if stored is None:
+            return self._initial_state(self.seed)
+        state = json.loads(str(stored["state_json"]))
+        if (
+            state.get("policy_id") != PASSIVE_POLICY_ID
+            or int(state.get("policy_version", -1))
+            != PASSIVE_POLICY_VERSION
+            or int(state.get("seed", -1)) != self.seed
+        ):
+            raise PassiveSchedulerFault(
+                "persisted passive scheduler contract does not match"
+            )
+        return state
+
+    def rewind_after_stale_campaign(self) -> None:
+        """Restore the last committed state for one fresh snapshot review."""
+
+        self.state = self._committed_state()
 
     async def close(self) -> None:
         self._started = False
@@ -218,9 +229,16 @@ class PassiveScheduler:
         if not self._started:
             raise PassiveSchedulerFault("passive scheduler is not started")
         before = copy.deepcopy(self.state)
-        decision, after, metrics, reason_codes = self._decision(
-            snapshot, context
+        self._decision_attempt = self.store.passive_scheduler_decision_count(
+            self.campaign_id,
+            state_version_before=int(before["state_version"]),
         )
+        try:
+            decision, after, metrics, reason_codes = self._decision(
+                snapshot, context
+            )
+        finally:
+            self._decision_attempt = 0
         validation = validate_decision(decision, context)
         identity_payload = canonical_json(
             {
@@ -608,18 +626,18 @@ class PassiveScheduler:
     def _common_action(
         self, state: dict[str, Any], index: int, action_type: str
     ) -> dict[str, Any]:
-        payload = canonical_json(
-            {
-                "campaign_id": self.campaign_id,
-                "policy_id": PASSIVE_POLICY_ID,
-                "policy_version": PASSIVE_POLICY_VERSION,
-                "state_version": state["state_version"],
-                "review_index": state["review_index"],
-                "action_index": index,
-                "action_type": action_type,
-            },
-            max_bytes=4096,
-        )
+        identity = {
+            "campaign_id": self.campaign_id,
+            "policy_id": PASSIVE_POLICY_ID,
+            "policy_version": PASSIVE_POLICY_VERSION,
+            "state_version": state["state_version"],
+            "review_index": state["review_index"],
+            "action_index": index,
+            "action_type": action_type,
+        }
+        if self._decision_attempt:
+            identity["decision_attempt"] = self._decision_attempt
+        payload = canonical_json(identity, max_bytes=4096)
         suffix = hashlib.sha256(payload).hexdigest()[:24]
         return {
             "action_id": f"passive-{action_type}-{suffix}",

@@ -130,15 +130,65 @@ class ActiveResearchOrchestrator:
                     ),
                 )
             first = await self._run_cycle(batch)
+            if self.provider_source_kind == "passive_scheduler":
+                if not first.action_statuses or set(
+                    first.action_statuses.values()
+                ) != {"rejected_stale_campaign"}:
+                    return first
+                rewind = getattr(
+                    self.provider,
+                    "rewind_after_stale_campaign",
+                    None,
+                )
+                if not callable(rewind):
+                    raise PassiveSchedulerFault(
+                        "passive scheduler cannot restore committed state "
+                        "for stale-campaign recovery"
+                    )
+                rewind()
+                second = await self._run_cycle(
+                    TriggerBatch(
+                        reasons=("passive_stale_campaign_replan",),
+                        first_event_at=utc_now(),
+                    )
+                )
+                if set(second.action_statuses.values()) == {
+                    "rejected_stale_campaign"
+                }:
+                    detail = ", ".join(
+                        f"{action_id}={status}"
+                        for action_id, status in sorted(
+                            second.action_statuses.items()
+                        )
+                    )
+                    raise PassiveSchedulerFault(
+                        "one fresh passive scheduler replan was also "
+                        "rejected as stale; no action was dispatched: "
+                        f"{detail}"
+                    )
+                return DirectorCycleResult(
+                    trigger_id=second.trigger_id,
+                    snapshot_id=second.snapshot_id,
+                    reasons=tuple(
+                        dict.fromkeys((*first.reasons, *second.reasons))
+                    ),
+                    action_statuses={
+                        **first.action_statuses,
+                        **second.action_statuses,
+                    },
+                    candidates_during_inference=(
+                        first.candidates_during_inference
+                        + second.candidates_during_inference
+                    ),
+                    replan_count=1,
+                    replan_exhausted=False,
+                )
             replan_statuses = {
                 "stale_target",
                 "rejected_action_id_collision",
             }
-            if (
-                self.provider_source_kind == "passive_scheduler"
-                or not (
+            if not (
                 replan_statuses & set(first.action_statuses.values())
-                )
             ):
                 return first
             second = await self._run_cycle(
@@ -263,6 +313,20 @@ class ActiveResearchOrchestrator:
                 evidence.source_metadata if passive else None
             ),
         )
+        if (
+            passive
+            and statuses
+            and set(statuses.values()) == {"rejected_stale_campaign"}
+        ):
+            return DirectorCycleResult(
+                trigger_id=trigger_id,
+                snapshot_id=str(snapshot["snapshot_id"]),
+                reasons=batch.reasons,
+                action_statuses=statuses,
+                candidates_during_inference=max(
+                    0, self.manager.total_candidates() - before
+                ),
+            )
         if passive and any(
             status != "accepted" for status in statuses.values()
         ):

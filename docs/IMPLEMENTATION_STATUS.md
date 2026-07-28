@@ -2,6 +2,23 @@
 
 Last implementation audit: **2026-07-28**.
 
+## Passive stale-campaign concurrency recovery
+
+The no-LLM passive scheduler now treats a commit-time
+`rejected_stale_campaign` as a bounded optimistic-concurrency conflict rather
+than immediately pausing the campaign. The rejected decision and batch remain
+immutable evidence and dispatch nothing; the coordinator publishes one fresh
+snapshot and performs one fresh deterministic review. A second stale campaign
+conflict, or any other passive batch rejection, still stops fail-closed.
+Rejected reviews do not advance committed scheduler state, and a durable
+per-state decision-attempt ordinal prevents regenerated action IDs from
+colliding with preserved rejected actions after retry or Resume.
+
+Focused orchestration regressions cover both successful recovery after one
+race, failure after a repeated race without an accepted action, and a later
+restart from the last committed scheduler state. See
+`docs/reports/PASSIVE_STALE_CAMPAIGN_RECOVERY.md`.
+
 ## Resume compaction of duplicated continuity summaries
 
 The long-running first graph campaign reached a 32,760-byte durable scientific

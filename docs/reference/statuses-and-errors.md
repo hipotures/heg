@@ -31,6 +31,7 @@ Always distinguish:
 | `schema_invalid` | Structure not allowed |
 | `semantic_invalid` | Structure valid but contract violated |
 | `stale_target` | Target no longer executable |
+| `rejected_stale_campaign` | Snapshot version lost a commit-time race; passive mode retries once from a fresh snapshot |
 | action ID collision | Non-idempotent workspace ID reuse |
 
 ## Verification

@@ -781,6 +781,21 @@ class ResearchStore:
         ).fetchone()
         return dict(row) if row is not None else None
 
+    def passive_scheduler_decision_count(
+        self,
+        campaign_id: str,
+        *,
+        state_version_before: int,
+    ) -> int:
+        row = self.connection.execute(
+            """
+            SELECT count(*) FROM passive_scheduler_decisions
+            WHERE campaign_id=? AND state_version_before=?
+            """,
+            (campaign_id, state_version_before),
+        ).fetchone()
+        return int(row[0])
+
     def record_passive_scheduler_fault(
         self,
         *,
