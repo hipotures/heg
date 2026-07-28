@@ -378,7 +378,94 @@ class CampaignRacePassiveScheduler(PassiveScheduler):
         return evidence
 
 
+class CampaignProgressDuringPassiveDecisionOrchestrator(
+    ActiveResearchOrchestrator
+):
+    """Model durable lane progress if a passive review pumps events."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.pump_count = 0
+
+    def pump_events(self, maximum: int = 64) -> list[dict]:
+        del maximum
+        self.pump_count += 1
+        with self.store.transaction() as database:
+            database.execute(
+                """
+                UPDATE research_campaigns
+                SET state_version=state_version+1
+                WHERE campaign_id=?
+                """,
+                (self.campaign_id,),
+            )
+        return []
+
+
 class ActiveResearchOrchestratorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_passive_snapshot_to_commit_does_not_pump_events(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = ResearchStore(root / "campaign.sqlite3")
+            manager = LaneManager(
+                root,
+                max_active_lanes=2,
+                telemetry_windows=8,
+            )
+            campaign_id = "campaign-passive-commit-boundary"
+            store.create_campaign(
+                campaign_id=campaign_id,
+                target="erdos_gyarfas",
+                target_definition_sha256="a" * 64,
+                stop_mode="until_success",
+                deadline_at=None,
+                director_mode="passive",
+            )
+            dispatcher = LaneActionDispatcher(
+                store=store,
+                manager=manager,
+                campaign_id=campaign_id,
+            )
+            provider = PassiveScheduler(
+                store=store,
+                campaign_id=campaign_id,
+                seed=91,
+            )
+            await provider.start()
+            orchestrator = (
+                CampaignProgressDuringPassiveDecisionOrchestrator(
+                    store=store,
+                    manager=manager,
+                    dispatcher=dispatcher,
+                    snapshots=SnapshotBuilder(
+                        store=store,
+                        manager=manager,
+                        campaign_id=campaign_id,
+                        campaign_dir=root,
+                    ),
+                    provider=provider,
+                    triggers=TriggerEngine(debounce_seconds=0),
+                    campaign_id=campaign_id,
+                    inference_poll_seconds=0.005,
+                )
+            )
+            try:
+                orchestrator.bootstrap()
+                result = await orchestrator.run_due_cycle()
+                self.assertEqual(orchestrator.pump_count, 0)
+                self.assertEqual(
+                    set(result.action_statuses.values()),
+                    {"accepted"},
+                )
+                self.assertIsNotNone(
+                    store.passive_scheduler_state(campaign_id)
+                )
+            finally:
+                manager.shutdown()
+                store.close()
+
     async def test_passive_stale_campaign_gets_one_fresh_replan(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

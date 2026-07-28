@@ -22,7 +22,10 @@ source; they do not create repair turns. A rejected passive decision is
 persisted and no action from that batch is dispatched. Invalid output and
 commit-time target/lane rejection fault immediately. The narrower
 `rejected_stale_campaign` concurrency status permits one fresh deterministic
-review from a newly published snapshot; a repeated conflict faults.
+review from a newly published snapshot; a repeated conflict faults. The
+host-local passive review and commit do not pump lane events after that
+snapshot is published, so ordinary queued lane outcomes cannot create this
+conflict themselves.
 
 The submitted action space uses separate compact lists for active executable
 lanes, historical lanes, candidate targets, and checkpoint targets, plus one

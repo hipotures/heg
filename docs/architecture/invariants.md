@@ -15,7 +15,7 @@ This is the authoritative engineering-invariant matrix.
 | Orchestration mode changes only on a new attempt | campaign/attempt store | passive mode-transition tests | reject active-attempt mutation |
 | LLM failures never trigger passive fallback | campaign supervisor | no-fallback tests | retain LLM fault and stop fail-closed |
 | Passive decisions create no model turns | passive scheduler/store | no-credential/App Server guard tests | scheduler fault |
-| Stale passive campaign snapshots never dispatch | passive scheduler/orchestrator/store | passive stale-campaign retry tests | persist rejection; one fresh deterministic review; repeated conflict faults |
+| Stale passive campaign snapshots never dispatch | passive scheduler/orchestrator/store | passive commit-boundary and stale-campaign retry tests | persist rejection; one fresh deterministic review; repeated conflict faults |
 | Cumulative counters never reset | attempt accounting | continuation demo | integrity failure |
 | Terminal actions/jobs are not repeated | recovery/idempotency | recovery tests | duplicate/no-op or reject |
 | Raw history survives compaction | memory store | compaction tests | overflow before inference |

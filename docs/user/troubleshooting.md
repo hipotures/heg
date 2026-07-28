@@ -41,8 +41,12 @@ batch remains in history and no action from it runs.
 
 Current builds automatically publish one fresh snapshot and run one fresh
 deterministic scheduler review. The campaign continues if that batch commits.
-A second conflict stops as `PassiveSchedulerFault`; inspect recurring event or
-state-version churn before acknowledging and resuming the fault.
+They also drain ordinary lane events before publishing the snapshot and do not
+apply more of those events until the passive review commits. A second conflict
+stops as `PassiveSchedulerFault`; on an older build, upgrade before Resume if
+unrelated lane completions caused both rapid conflicts. On a current build,
+inspect an external writer or unexpected state-version change before
+acknowledging and resuming the fault.
 
 ## Invalid Director response
 

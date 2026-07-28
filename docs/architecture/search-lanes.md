@@ -153,6 +153,12 @@ checkpoint-before-telemetry ordering remain unchanged.
 The coordinator remains the single SQLite writer. Workers communicate through
 bounded queues. The Director may reason while lanes continue searching.
 
+For a passive review, queued lane events are drained before the scientific
+snapshot is published. The deterministic host review and commit then form one
+coordinator scheduling step with no intervening event pump. Lanes may continue
+computing, but their queued outcomes are applied only after that commit. An LLM
+review retains event pumping while inference is in flight.
+
 Passive reviews are due at persisted aggregate evaluation boundaries. Routine
 telemetry arrival time and wall-clock timing do not select scientific actions;
 critical worker, resource, lease, and verifier-integrity events may force a

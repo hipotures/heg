@@ -141,13 +141,17 @@ schema, semantic, target, lane-version, capacity, and resource validation.
 Its accepted decision and next scheduler state are committed before dispatch.
 Invalid internal output is persisted as a scheduler implementation fault and
 executes nothing; there is no schema/semantic repair turn. A commit-time
-`rejected_stale_campaign` is instead an optimistic-concurrency conflict: the
-rejected batch remains evidence, dispatches nothing, and permits one fresh
-snapshot plus one fresh deterministic scheduler review. If that review is
-also stale, or is rejected for another reason, the scheduler faults
-fail-closed. Rejected reviews do not advance committed scheduler state; a
-durable per-state decision-attempt ordinal keeps regenerated action IDs unique
-without rewriting the rejected history, including after Resume.
+`rejected_stale_campaign` is instead an optimistic-concurrency conflict. The
+coordinator drains lane events before snapshot publication and does not pump
+or dispatch more events between a passive snapshot, its host-local review, and
+the batch commit. The global campaign-version check remains authoritative, so
+an unexpected external version change still persists the rejected batch,
+dispatches nothing, and permits one fresh snapshot plus one fresh
+deterministic scheduler review. If that review is also stale, or is rejected
+for another reason, the scheduler faults fail-closed. Rejected reviews do not
+advance committed scheduler state; a durable per-state decision-attempt
+ordinal keeps regenerated action IDs unique without rewriting the rejected
+history, including after Resume.
 
 The scheduler persists policy/state versions, bounded input metrics,
 deterministic reason codes, generated action IDs, validation, review index,

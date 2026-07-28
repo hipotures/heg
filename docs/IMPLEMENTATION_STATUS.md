@@ -2,6 +2,22 @@
 
 Last implementation audit: **2026-07-28**.
 
+## Passive snapshot-to-commit boundary
+
+Passive review no longer runs as a background task while the same orchestrator
+pumps and dispatches lane events. The coordinator drains those events before a
+due snapshot, then performs the deterministic host review and action-batch
+commit without another event pump between them. This closes the observed
+multi-lane race in which unrelated accepted outcomes advanced the global
+campaign version from 493 to 495 and invalidated a restart whose target lane
+version was still current.
+
+The global snapshot-version check and existing one-fresh-review recovery remain
+unchanged for genuine external conflicts. Focused orchestration regressions
+prove the passive boundary does not pump events and that an explicitly injected
+first conflict still retries while a second injected conflict still faults
+without dispatch or scheduler-state advancement.
+
 ## Passive stale-campaign concurrency recovery
 
 The no-LLM passive scheduler now treats a commit-time

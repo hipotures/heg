@@ -254,19 +254,31 @@ class ActiveResearchOrchestrator:
             snapshot_id=str(snapshot["snapshot_id"]),
         )
         before = self.manager.total_candidates()
-        task = asyncio.create_task(
-            self.provider.decide(
-                snapshot=snapshot,
-                trigger_id=trigger_id,
-                context=context,
-            )
+        passive_provider = (
+            self.provider_source_kind == "passive_scheduler"
         )
         try:
-            while not task.done():
-                self.pump_events()
-                self.dispatcher.dispatch_pending()
-                await asyncio.sleep(self.inference_poll_seconds)
-            evidence = await task
+            if passive_provider:
+                # Keep the host-local review on the snapshot's coordinator
+                # step; pumping here would make queued lane progress stale it.
+                evidence = await self.provider.decide(
+                    snapshot=snapshot,
+                    trigger_id=trigger_id,
+                    context=context,
+                )
+            else:
+                task = asyncio.create_task(
+                    self.provider.decide(
+                        snapshot=snapshot,
+                        trigger_id=trigger_id,
+                        context=context,
+                    )
+                )
+                while not task.done():
+                    self.pump_events()
+                    self.dispatcher.dispatch_pending()
+                    await asyncio.sleep(self.inference_poll_seconds)
+                evidence = await task
         except BaseException:
             self.store.mark_trigger_status(trigger_id, "failed")
             raise
