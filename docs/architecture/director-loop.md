@@ -27,6 +27,12 @@ discarding the entire reduction. Exact-verifier facts and current executable
 IDs remain non-droppable. If the complete request still exceeds the hard gate,
 the turn fails closed before inference.
 
+Scientific-memory reduction removes duplicated historical candidate and lane
+summaries only after their rich fields have been reduced. Exact-verifier
+outcomes, current executable candidate/checkpoint IDs, and the live applicable
+action space remain authoritative; full candidate and lane rows remain in
+SQLite.
+
 ## Submitted material
 
 A Director request contains:

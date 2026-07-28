@@ -1,0 +1,17 @@
+[Unit]
+Description=Structural Graph Lab campaign dashboard
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/sglab/dashboard.env
+ExecStart=%h/.local/libexec/sglab/run-dashboard-service
+Restart=on-failure
+RestartSec=2
+KillMode=process
+UMask=0077
+StandardOutput=append:%h/.local/state/sglab/dashboard.log
+StandardError=append:%h/.local/state/sglab/dashboard.log
+
+[Install]
+WantedBy=default.target

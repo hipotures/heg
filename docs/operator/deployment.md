@@ -68,6 +68,35 @@ The project can be placed under systemd or another supervisor, but paid or
 authenticated campaign Resume must remain explicit. Do not automatically
 resume model execution after host restart without a reviewed plan.
 
+The repository includes a user-service template and a launcher that keep
+machine-specific options out of `ExecStart`:
+
+```bash
+install -Dm755 scripts/run_dashboard_service.sh \
+  ~/.local/libexec/sglab/run-dashboard-service
+install -Dm644 deploy/systemd/sglab-graph-dashboard.service \
+  ~/.config/systemd/user/sglab-graph-dashboard.service
+install -Dm600 deploy/systemd/dashboard.env.example \
+  ~/.config/sglab/dashboard.env
+```
+
+Edit `~/.config/sglab/dashboard.env`. Set absolute repository and workspace
+paths, host, port, Python executable, and the path to a separate mode-600
+token file. The environment file contains deployment options, not the token.
+
+Enable or restart the service:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now sglab-graph-dashboard.service
+systemctl --user restart sglab-graph-dashboard.service
+systemctl --user status sglab-graph-dashboard.service
+```
+
+Changing an option requires only editing `dashboard.env` and restarting the
+service. Restarting the dashboard does not Resume a campaign or change its
+orchestration mode.
+
 ## Health checks
 
 ```bash

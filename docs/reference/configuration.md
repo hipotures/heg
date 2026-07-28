@@ -83,10 +83,28 @@ Common environment settings:
 
 ```text
 SGLAB_WEB_TOKEN
+SGLAB_DASHBOARD_TOKEN
 ```
 
 Auth source for controlled runtime is configured server-side and must not be
 browser-editable.
+
+The systemd launcher reads deployment options from
+`~/.config/sglab/dashboard.env`:
+
+```text
+SGLAB_DASHBOARD_REPOSITORY
+SGLAB_DASHBOARD_WORKSPACE
+SGLAB_DASHBOARD_HOST
+SGLAB_DASHBOARD_PORT
+SGLAB_DASHBOARD_PYTHON
+SGLAB_DASHBOARD_TOKEN_FILE
+SGLAB_CODEX_AUTH_SOURCE  # optional
+```
+
+Repository/workspace paths must be absolute. The token-file variable points
+to a separate regular file; its contents are exported only to the dashboard
+process.
 
 ## App Server
 

@@ -368,6 +368,19 @@ class ScientificMemoryCompactor:
                         ).hexdigest()
                         rich["statement"] = ""
                         continue
+                candidates = continuity.get("candidate_ledger")
+                if isinstance(candidates, list) and candidates:
+                    # Exact verifier outcomes and currently executable
+                    # candidate IDs have their own non-droppable ledgers.
+                    # The duplicated candidate summary is policy-droppable.
+                    candidates.pop()
+                    continue
+                lanes = continuity.get("lane_and_checkpoint_ledger")
+                if isinstance(lanes, list) and lanes:
+                    # Current executable lanes remain in allowed_action_space
+                    # and checkpoint IDs remain in their exact registry.
+                    lanes.pop()
+                    continue
             break
 
 

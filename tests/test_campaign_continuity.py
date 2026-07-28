@@ -492,6 +492,65 @@ class CampaignContinuityTests(unittest.TestCase):
             )
         )
 
+    def test_duplicate_continuity_summaries_yield_to_exact_facts(self) -> None:
+        policy = ScientificMemoryPolicy(
+            soft_limit_bytes=8192,
+            hard_limit_bytes=16_384,
+        )
+        compactor = ScientificMemoryCompactor(policy)
+        state = self._memory_state()
+        candidate_ids = [
+            f"candidate-{'x' * 72}-{index:02d}"
+            for index in range(64)
+        ]
+        exact_outcomes = [
+            {
+                "candidate_id": candidate_id,
+                "state": "completed",
+                "certification_status": "INVALID_CANDIDATE",
+            }
+            for candidate_id in candidate_ids[:32]
+        ]
+        state["continuity"] = {
+            "candidate_ledger": [
+                {
+                    "candidate_id": candidate_id,
+                    "state": "retained",
+                    "certification_status": None,
+                }
+                for candidate_id in candidate_ids
+            ],
+            "current_executable_candidate_ids": candidate_ids,
+            "current_executable_checkpoint_ids": [],
+            "exact_verifier_outcomes": exact_outcomes,
+            "lane_and_checkpoint_ledger": [],
+            "hypothesis_ledger": [],
+        }
+
+        projected = compactor.project(state)
+
+        self.assertLessEqual(
+            len(compactor.encode(projected)),
+            policy.hard_limit_bytes,
+        )
+        self.assertEqual(
+            projected["continuity"][
+                "current_executable_candidate_ids"
+            ],
+            candidate_ids,
+        )
+        self.assertEqual(
+            projected["continuity"]["exact_verifier_outcomes"],
+            exact_outcomes,
+        )
+        self.assertLess(
+            len(projected["continuity"]["candidate_ledger"]),
+            len(state["continuity"]["candidate_ledger"]),
+        )
+        self.assertEqual(
+            len(state["continuity"]["candidate_ledger"]), 64
+        )
+
     def test_exact_verifier_continuity_fact_omits_durable_artifact_path(
         self,
     ) -> None:

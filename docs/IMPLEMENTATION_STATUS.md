@@ -2,6 +2,19 @@
 
 Last implementation audit: **2026-07-28**.
 
+## Resume compaction of duplicated continuity summaries
+
+The long-running first graph campaign reached a 32,760-byte durable scientific
+memory and then failed Resume when new source rows produced a 34,371-byte
+projection. Existing reduction exhausted rich candidate/lane fields but kept
+their duplicated historical summary objects.
+
+The deterministic secondary bound now drops oldest duplicated candidate and
+lane summaries after rich-field reduction. Exact-verifier outcomes, current
+executable candidate/checkpoint IDs, applicable action-space IDs, and all raw
+SQLite history remain unchanged. A focused regression forces this final
+reduction and verifies the exact/current ledgers byte-for-byte.
+
 ## No-LLM passive scheduler
 
 Campaigns now support explicit `director_mode=llm|passive`. The versioned
