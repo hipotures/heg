@@ -19,7 +19,7 @@ This is the authoritative engineering-invariant matrix.
 | Cumulative counters never reset | attempt accounting | continuation demo | integrity failure |
 | Terminal actions/jobs are not repeated | recovery/idempotency | recovery tests | duplicate/no-op or reject |
 | Raw history survives compaction | memory store | compaction tests | overflow before inference |
-| Exact facts/current executable IDs are non-droppable | memory projection, irreducible-floor recovery and complete-request compaction before final Director limit | forced-compaction, floor-search, request-budget and SnapshotBuilder ordering tests | `scientific_state_overflow` |
+| Exact facts/current executable IDs are non-droppable | memory projection, integrity-checked recovery registry, irreducible-floor recovery and complete-request compaction before final Director limit | missing-checkpoint, forced-compaction, floor-search, request-budget and SnapshotBuilder ordering tests | unavailable references remain historical; `scientific_state_overflow` |
 | Distinct fresh campaigns remain independent | workspace/campaign creation | isolation tests | no implicit import |
 | Evidence visibility does not imply executability | registries/action schema | applicability tests | validation rejection |
 | Action IDs are workspace-unique | schema + transaction | collision tests | batch rejected before insert |
@@ -30,7 +30,7 @@ This is the authoritative engineering-invariant matrix.
 | Auth content never enters public artifacts | auth/report/manifests | scans and runtime audits | abort/report failure |
 | Byte-quota error requires true inequality | resource accounting | quota tests | separate failure domain |
 | Symlink targets are not followed | `lstat` accounting/policy | wrapper/escape/race tests | policy fail closed |
-| Worker child is reaped by owner | dashboard process registry | reaper tests | stale process state corrected |
+| Worker child is reaped by owner | dashboard process registry, lane-manager shutdown | reaper and queue-closure tests | stale process state corrected |
 | SQLite migration preserves history | migration harness | Online Backup + canonical hashes | migration rejected |
 | Missing usage remains null | turn lifecycle | timeout/missing usage tests | no fabricated zero |
 | Timeout is unknown, not proof | verifier/SAT/runtime | timeout tests | unknown/fault |

@@ -38,6 +38,13 @@ version, latest reason codes, and scheduler-decision count. Model-token fields
 are rendered as not applicable in passive mode rather than as an
 authentication or connection fault.
 
+The dashboard launches a campaign runner as a detached child so a dashboard
+restart does not silently terminate a healthy scientific attempt. The runner
+therefore owns and closes all lane multiprocessing resources when its attempt
+becomes terminal. A dead PID in the active-campaign pointer is not considered
+live; a terminal runner must not survive merely because queue feeder resources
+remain open.
+
 ## Live updates
 
 The dashboard polls bounded APIs and avoids rebuilding unchanged large DOM

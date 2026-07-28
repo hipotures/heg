@@ -304,6 +304,8 @@ class SnapshotBuilder:
                     else None
                 )
             )
+            if checkpoint_id not in self.manager.checkpoints:
+                checkpoint_id = None
             if checkpoint_id is not None:
                 evidence.add(f"checkpoint:{checkpoint_id}")
             values.append(

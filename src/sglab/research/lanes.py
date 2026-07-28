@@ -2265,6 +2265,7 @@ class LaneManager:
         self._pinned_checkpoint_ids: set[str] = set()
         self._pinned_checkpoint_order: deque[str] = deque()
         self._deferred_events: deque[dict[str, Any]] = deque()
+        self._queues_closed = False
         self.checkpoint_dir = self.campaign_dir / "lane-checkpoints"
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
@@ -2463,6 +2464,8 @@ class LaneManager:
     def poll(self, timeout: float = 0.1) -> dict[str, Any] | None:
         if self._deferred_events:
             return self._deferred_events.popleft()
+        if self._queues_closed:
+            return None
         try:
             event = self.events.get(timeout=timeout)
         except Empty:
@@ -2653,6 +2656,20 @@ class LaneManager:
                 runtime.process.join(timeout=1)
             if runtime.state not in {"failed", "stopped"}:
                 runtime.state = "stopped"
+        if not self._queues_closed:
+            while True:
+                try:
+                    event = self.events.get_nowait()
+                except Empty:
+                    break
+                self._apply_event(event)
+                self._deferred_events.append(event)
+            for runtime in self.lanes.values():
+                runtime.commands.cancel_join_thread()
+                runtime.commands.close()
+            self.events.cancel_join_thread()
+            self.events.close()
+            self._queues_closed = True
 
 
 def _score_payload(score: ScoreResult) -> dict[str, Any]:

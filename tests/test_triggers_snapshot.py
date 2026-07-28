@@ -49,6 +49,78 @@ class TriggerEngineTests(unittest.TestCase):
 
 
 class SnapshotBuilderTests(unittest.TestCase):
+    def test_missing_checkpoint_is_history_not_an_executable_target(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = ResearchStore(root / "campaign.sqlite3")
+            manager = LaneManager(root)
+            try:
+                store.create_campaign(
+                    campaign_id="campaign-missing-checkpoint",
+                    target="erdos_gyarfas",
+                    target_definition_sha256="a" * 64,
+                    stop_mode="until_success",
+                    deadline_at=None,
+                )
+                store.create_lane(
+                    lane_id="lane-missing-checkpoint",
+                    campaign_id="campaign-missing-checkpoint",
+                    target="erdos_gyarfas",
+                    parent_lane_id=None,
+                    parent_checkpoint_ref=None,
+                    action_id="bootstrap-missing-checkpoint",
+                    algorithm="simulated_annealing",
+                    graph_family="connected_cubic",
+                    parameters={"order": 8},
+                    seed_lineage=[7],
+                    resource_share=1.0,
+                    lease_expires_at=None,
+                )
+                checkpoint_ref = (
+                    "lane-checkpoints/checkpoint-missing.json"
+                )
+                with store.connection:
+                    store.connection.execute(
+                        """
+                        UPDATE research_lanes
+                        SET state='paused', checkpoint_ref=?
+                        WHERE lane_id='lane-missing-checkpoint'
+                        """,
+                        (checkpoint_ref,),
+                    )
+                snapshot, context = SnapshotBuilder(
+                    store=store,
+                    manager=manager,
+                    campaign_id="campaign-missing-checkpoint",
+                    campaign_dir=root,
+                ).publish()
+
+                lane = next(
+                    item
+                    for item in snapshot["lanes"]
+                    if item["lane_id"] == "lane-missing-checkpoint"
+                )
+                self.assertIsNone(lane["checkpoint_id"])
+                self.assertNotIn(
+                    "checkpoint-missing",
+                    context.executable_target_ids,
+                )
+                ledger = next(
+                    item
+                    for item in snapshot["continuity"][
+                        "lane_and_checkpoint_ledger"
+                    ]
+                    if item["lane_id"] == "lane-missing-checkpoint"
+                )
+                self.assertEqual(
+                    ledger["checkpoint_id"], "checkpoint-missing"
+                )
+            finally:
+                manager.shutdown()
+                store.close()
+
     def test_snapshot_ancestry_is_bounded_without_changing_full_outcome(
         self,
     ) -> None:

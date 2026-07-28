@@ -39,6 +39,12 @@ Selecting the faster `delta_local_v2` duplicate key requires an explicit
 algorithmic restart that creates fresh local duplicate state. It is not a
 Resume migration.
 
+A missing historical checkpoint must remain visible in the continuity ledger
+but absent from `checkpoint_target_ids`. If a prior build faults with
+`KeyError: checkpoint is not available`, upgrade before Resume and confirm
+that the latest existing checkpoint is loaded into the recovery registry.
+Do not recreate or rewrite the missing historical artifact.
+
 ## App Server recovery
 
 No automatic provider retry is used in the strict campaign contract unless it
@@ -67,6 +73,11 @@ A fault Resume requires:
 - new attempt;
 - one current executable registry;
 - no replay of terminal actions or completed verifier jobs.
+
+If systemd reports a terminal campaign runner left in the dashboard cgroup,
+confirm the attempt is terminal before stopping that exact orphan once.
+Current runners close their multiprocessing queues after final-event drainage,
+so manual process cleanup must not be part of ordinary Resume.
 
 For `DirectorContextBudgetExceeded: DirectorStateV2 remains oversized after
 deterministic compaction`, confirm that the running code applies secondary

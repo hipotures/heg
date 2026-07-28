@@ -67,6 +67,10 @@ blocked
 
 Process generation may change while lane identity remains stable.
 
+If checkpoint recovery fails, the lane becomes `failed`; its checkpoint
+reference remains historical evidence but is absent from the current
+executable-target registry.
+
 Resume and trajectory-preserving fork keep the checkpoint's
 `duplicate_key_scheme`. A reviewed algorithmic restart is the explicit
 transition that may clear local duplicate state and select a newer scheme.

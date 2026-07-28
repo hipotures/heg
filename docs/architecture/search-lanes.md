@@ -163,6 +163,12 @@ graph/RNG/search checkpoint ID identical to an uninstrumented run.
 
 Resume verifies hashes and starts a new process generation.
 
+An unavailable historical checkpoint remains in the durable lane/checkpoint
+ledger but is not an executable checkpoint target. Executability requires the
+artifact to have passed recovery and to be present in the current
+`LaneManager` checkpoint registry. Snapshot publication never promotes a
+database reference alone into an executable ID.
+
 Live-frontier samples are not checkpoints. The coordinator atomically
 overwrites one SHA-256-protected `live-frontier-*.json` file per lane, keeps no
 history, and creates no SQLite row. Durable post-batch checkpoints and their
@@ -183,6 +189,11 @@ Passive reviews are due at persisted aggregate evaluation boundaries. Routine
 telemetry arrival time and wall-clock timing do not select scientific actions;
 critical worker, resource, lease, and verifier-integrity events may force a
 fail-closed review.
+
+On terminal cleanup, the coordinator preserves already received final events,
+reaps or kills every owned lane process within the bounded shutdown window,
+and closes its command and event queues. Polling the drained deferred events
+remains safe after those queues close.
 
 ## Resource changes
 

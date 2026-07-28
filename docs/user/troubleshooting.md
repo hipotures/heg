@@ -13,6 +13,17 @@ preview Resume with a repair acknowledgement, then start a new attempt.
 
 [screenshot: ID=USR-TROUBLE-01; save as docs/assets/screenshots/user/troubleshooting/fault-detail.png; crop the campaign status and fault card showing full fault kind and detail, the “fail-closed” explanation, prior attempt status, disabled live controls, and available Resume preview control; exclude lower unrelated sections.]
 
+If the detail is `KeyError: checkpoint is not available`, the referenced
+artifact is historical but missing from the recovered checkpoint registry.
+Upgrade before Resume. Current builds keep that reference as evidence while
+excluding it from executable checkpoint targets.
+
+If the terminal attempt is followed by `a research campaign is already
+active`, an older runner may have retained multiprocessing queue resources
+after finishing. Confirm the attempt is terminal before cleaning that one
+orphan. Current builds close those resources automatically; repeated manual
+process termination is not an expected workflow.
+
 ## Resume button is disabled
 
 Possible reasons:

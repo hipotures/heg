@@ -110,6 +110,17 @@ It:
 - records repair acknowledgement;
 - never silently changes the scientific contract.
 
+Checkpoint references remain immutable history even when their artifact is no
+longer available. Before and during recovery, only integrity-checked
+checkpoints loaded into the current lane manager are exposed as executable
+targets. A missing historical artifact therefore cannot be pinned or selected
+by a new Director cycle.
+
+Terminal attempt cleanup drains final lane events, reaps lane processes, and
+closes the manager-owned multiprocessing queues before the runner returns.
+This lets the dashboard's detached campaign child exit instead of leaving a
+terminal attempt as a live process.
+
 ## Control operations
 
 - pause/continue affect a live attempt;

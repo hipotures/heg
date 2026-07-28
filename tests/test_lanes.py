@@ -5,7 +5,7 @@ import time
 import unittest
 from pathlib import Path
 from queue import Queue
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from sglab.research.lanes import (
     LaneManager,
@@ -57,6 +57,30 @@ def poll_until(manager: LaneManager, predicate, timeout: float = 8.0) -> None:
 
 
 class LaneManagerTests(unittest.TestCase):
+    def test_shutdown_closes_owned_multiprocessing_queues(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            manager = LaneManager(Path(directory))
+            commands = manager.context.Queue(maxsize=1)
+            process = Mock()
+            process.is_alive.return_value = False
+            manager.lanes["lane-shutdown"] = LaneRuntime(
+                spec=lane_spec(
+                    "lane-shutdown", "simulated_annealing"
+                ),
+                process=process,
+                commands=commands,
+                stop_event=Mock(),
+                pause_event=Mock(),
+            )
+
+            manager.shutdown()
+            manager.shutdown()
+
+            with self.assertRaisesRegex(ValueError, "closed"):
+                commands.put_nowait({"kind": "stop"})
+            with self.assertRaisesRegex(ValueError, "closed"):
+                manager.events.put_nowait({"kind": "exit"})
+
     def test_live_frontier_publication_reuses_score_and_overwrites_file(
         self,
     ) -> None:

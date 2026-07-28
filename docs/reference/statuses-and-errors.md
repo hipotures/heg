@@ -34,6 +34,11 @@ Always distinguish:
 | `rejected_stale_campaign` | Snapshot version lost a genuine commit-time race; passive mode does not pump ordinary lane events across its snapshot/commit boundary and retries an unexpected conflict once from a fresh snapshot |
 | action ID collision | Non-idempotent workspace ID reuse |
 
+`checkpoint is not available` means the referenced artifact is historical but
+was not loaded into the integrity-checked current checkpoint registry. Current
+snapshots retain the historical reference but omit it from executable target
+IDs, so this condition must not surface as an orchestrator `KeyError`.
+
 ## Verification
 
 | Status | Interpretation |

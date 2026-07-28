@@ -1,6 +1,24 @@
 # Implementation Status
 
-Last implementation audit: **2026-07-28**.
+Last implementation audit: **2026-07-29**.
+
+## Missing-checkpoint executability and terminal runner cleanup
+
+Resume and snapshot publication now distinguish immutable checkpoint history
+from current executability. An active-looking database lane reference is
+exposed as an executable checkpoint only when its integrity-checked object is
+present in the current `LaneManager` registry. Missing historical artifacts
+remain in the continuity ledger and cannot reach the orchestrator pin boundary
+or trigger `KeyError`.
+
+`LaneManager.shutdown()` now preserves final queued events for the dispatcher,
+reaps lane processes, and idempotently closes every owned multiprocessing
+command/event queue. A detached campaign runner can therefore exit after a
+terminal fault instead of remaining in the dashboard service cgroup and
+blocking the next Resume.
+
+Focused regressions cover the missing-checkpoint evidence/executable split,
+queue closure, repeated shutdown, and live lane shutdown.
 
 ## Seed-generation retry and latency telemetry
 
