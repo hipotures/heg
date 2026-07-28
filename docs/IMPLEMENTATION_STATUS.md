@@ -11,6 +11,11 @@ present in the current `LaneManager` registry. Missing historical artifacts
 remain in the continuity ledger and cannot reach the orchestrator pin boundary
 or trigger `KeyError`.
 
+The orchestrator now validates and pins its complete executable checkpoint set
+in one atomic manager operation. The batch is kept ahead of older unrelated
+pins during retention eviction, preventing a capacity-sized review from
+deleting a not-yet-visited target according to set iteration order.
+
 `LaneManager.shutdown()` now preserves final queued events for the dispatcher,
 reaps lane processes, and idempotently closes every owned multiprocessing
 command/event queue. A detached campaign runner can therefore exit after a
@@ -18,7 +23,8 @@ terminal fault instead of remaining in the dashboard service cgroup and
 blocking the next Resume.
 
 Focused regressions cover the missing-checkpoint evidence/executable split,
-queue closure, repeated shutdown, and live lane shutdown.
+capacity-sized batch self-eviction, queue closure, repeated shutdown, and live
+lane shutdown.
 
 ## Seed-generation retry and latency telemetry
 

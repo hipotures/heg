@@ -17,6 +17,9 @@ If the detail is `KeyError: checkpoint is not available`, the referenced
 artifact is historical but missing from the recovered checkpoint registry.
 Upgrade before Resume. Current builds keep that reference as evidence while
 excluding it from executable checkpoint targets.
+If successive faults name different checkpoint IDs, upgrade to a build that
+pins the complete checkpoint target set atomically. Do not keep retrying or
+increase the checkpoint limit as a workaround.
 
 If the terminal attempt is followed by `a research campaign is already
 active`, an older runner may have retained multiprocessing queue resources

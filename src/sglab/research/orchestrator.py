@@ -237,10 +237,14 @@ class ActiveResearchOrchestrator:
         self, batch: TriggerBatch
     ) -> DirectorCycleResult:
         snapshot, context = self.snapshots.publish()
-        for checkpoint_id in (
-            context.checkpoint_ids & context.executable_target_ids
-        ):
-            self.manager.pin_checkpoint(checkpoint_id)
+        self.manager.pin_checkpoints(
+            tuple(
+                sorted(
+                    context.checkpoint_ids
+                    & context.executable_target_ids
+                )
+            )
+        )
         trigger_id = new_id("trigger")
         campaign_version = int(
             snapshot["campaign"]["state_version"]

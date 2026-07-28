@@ -44,6 +44,9 @@ but absent from `checkpoint_target_ids`. If a prior build faults with
 `KeyError: checkpoint is not available`, upgrade before Resume and confirm
 that the latest existing checkpoint is loaded into the recovery registry.
 Do not recreate or rewrite the missing historical artifact.
+If successive attempts name different missing checkpoint IDs while exposing a
+full retention-sized target set, require atomic checkpoint-batch pinning before
+another Resume; increasing the retention limit only masks the ordering bug.
 
 ## App Server recovery
 

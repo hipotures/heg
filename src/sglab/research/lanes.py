@@ -2573,12 +2573,34 @@ class LaneManager:
         atomic_write_json(path, preview)
 
     def pin_checkpoint(self, checkpoint_id: str) -> None:
-        if checkpoint_id not in self.checkpoints:
-            raise KeyError(f"checkpoint is not available: {checkpoint_id}")
-        if checkpoint_id in self._pinned_checkpoint_ids:
-            return
-        self._pinned_checkpoint_ids.add(checkpoint_id)
-        self._pinned_checkpoint_order.append(checkpoint_id)
+        self.pin_checkpoints((checkpoint_id,))
+
+    def pin_checkpoints(self, checkpoint_ids: tuple[str, ...]) -> None:
+        identifiers = tuple(dict.fromkeys(checkpoint_ids))
+        missing = [
+            checkpoint_id
+            for checkpoint_id in identifiers
+            if checkpoint_id not in self.checkpoints
+        ]
+        if missing:
+            raise KeyError(
+                f"checkpoint is not available: {missing[0]}"
+            )
+        if len(identifiers) > self.pinned_checkpoints:
+            raise ValueError(
+                "checkpoint pin batch exceeds the retention limit"
+            )
+        desired = set(identifiers)
+        retained = [
+            checkpoint_id
+            for checkpoint_id in self._pinned_checkpoint_order
+            if (
+                checkpoint_id in self._pinned_checkpoint_ids
+                and checkpoint_id not in desired
+            )
+        ]
+        self._pinned_checkpoint_ids = set(retained) | desired
+        self._pinned_checkpoint_order = deque((*retained, *identifiers))
         while len(self._pinned_checkpoint_order) > self.pinned_checkpoints:
             expired = self._pinned_checkpoint_order.popleft()
             self._pinned_checkpoint_ids.discard(expired)

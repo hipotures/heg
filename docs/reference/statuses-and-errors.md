@@ -38,6 +38,8 @@ Always distinguish:
 was not loaded into the integrity-checked current checkpoint registry. Current
 snapshots retain the historical reference but omit it from executable target
 IDs, so this condition must not surface as an orchestrator `KeyError`.
+Executable checkpoint targets are pinned as one validated batch; reaching the
+pin-retention limit cannot make the result depend on set iteration order.
 
 ## Verification
 

@@ -114,7 +114,9 @@ Checkpoint references remain immutable history even when their artifact is no
 longer available. Before and during recovery, only integrity-checked
 checkpoints loaded into the current lane manager are exposed as executable
 targets. A missing historical artifact therefore cannot be pinned or selected
-by a new Director cycle.
+by a new Director cycle. The complete executable checkpoint set for one cycle
+is pinned atomically, so retention eviction cannot remove a target that the
+same cycle has not pinned yet.
 
 Terminal attempt cleanup drains final lane events, reaps lane processes, and
 closes the manager-owned multiprocessing queues before the runner returns.

@@ -57,6 +57,39 @@ def poll_until(manager: LaneManager, predicate, timeout: float = 8.0) -> None:
 
 
 class LaneManagerTests(unittest.TestCase):
+    def test_checkpoint_batch_pinning_does_not_evict_its_own_targets(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manager = LaneManager(root, pinned_checkpoints=2)
+            for suffix in ("a", "b", "c"):
+                checkpoint_id = f"checkpoint-{suffix}"
+                manager.checkpoints[checkpoint_id] = {
+                    "checkpoint_id": checkpoint_id,
+                    "lane_id": f"lane-{suffix}",
+                }
+                (
+                    manager.checkpoint_dir / f"{checkpoint_id}.json"
+                ).write_text("{}", encoding="utf-8")
+            try:
+                manager.pin_checkpoint("checkpoint-a")
+                manager.pin_checkpoint("checkpoint-b")
+
+                manager.pin_checkpoints(
+                    ("checkpoint-c", "checkpoint-a")
+                )
+
+                self.assertEqual(
+                    manager._pinned_checkpoint_ids,
+                    {"checkpoint-a", "checkpoint-c"},
+                )
+                self.assertIn("checkpoint-a", manager.checkpoints)
+                self.assertIn("checkpoint-c", manager.checkpoints)
+                self.assertNotIn("checkpoint-b", manager.checkpoints)
+            finally:
+                manager.shutdown()
+
     def test_shutdown_closes_owned_multiprocessing_queues(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             manager = LaneManager(Path(directory))
