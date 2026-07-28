@@ -50,21 +50,15 @@ Completed profiled batches expose `timing.mutation_profile` with scalar
 not candidate-level telemetry. `score_backend.mutation_witness_cache_enabled`
 reports the effective cache path.
 
-## Score-kernel rollout controls
+## Score kernel
 
-The following process environment variables are execution controls, not
-Director-selectable scientific parameters:
-
-```text
-SGLAB_SCORE_BACKEND=python|shadow|cpp
-SGLAB_SCORE_EARLY_EXIT=0|1
-SGLAB_FAST_DUPLICATE_KEY=0|1
-```
-
-The default is Python with early exit and the fast key disabled. Requested
-values, worker binary path/SHA-256 and protocol version are retained in
-attempt runtime provenance. Completed batch metrics report requested and
-effective backend, audits, restarts, fallbacks and parity mismatches.
+Heuristic scoring has no backend configuration. Every lane uses the optimized
+persistent C++ worker with conservative early exit and the
+`delta_local_v2` duplicate key for new work. Attempt provenance records this
+fixed implementation plus the worker path, SHA-256 and protocol version.
+Completed batch metrics report C++ requests and bounded worker restarts.
+If the worker cannot start or fails again after one restart, the lane fails
+closed.
 
 ## Scientific memory defaults
 

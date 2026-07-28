@@ -24,11 +24,10 @@ Campaign plans may fingerprint:
 Resume may change allowed execution resources while preserving campaign
 scientific identity.
 
-When the persistent score backend is requested, each eligible lane reserves
-64 MiB for its `sglab-score-worker` child and gives the remainder of the lane
-limit to the Python parent. Lane limits below 128 MiB disable the child and
-use Python. Coordinator snapshots sum parent and descendant RSS so the helper
-does not disappear from memory accounting.
+Each lane reserves 64 MiB for its mandatory `sglab-score-worker` child and
+gives the remainder of the lane limit to the Python orchestration parent.
+Lane limits below 128 MiB are rejected. Coordinator snapshots sum parent and
+descendant RSS so the helper does not disappear from memory accounting.
 
 ## App Server resource categories
 

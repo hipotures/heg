@@ -1,6 +1,6 @@
 # ADR 0009: Persistent Audited Heuristic Score Worker
 
-- **Status:** Accepted
+- **Status:** Superseded by ADR 0013
 - **Date:** 2026-07-26
 
 ## Context

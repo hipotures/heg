@@ -14,7 +14,7 @@ from .model import BitGraph
 from .resources import set_address_space_limit
 
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 COMMAND_SCORE = 1
 COMMAND_QUIT = 2
 STATUS_OK = 0
@@ -24,7 +24,7 @@ DEFAULT_REQUEST_TIMEOUT_SECONDS = 2.0
 DEFAULT_WORKER_MEMORY_BYTES = 64 * 1024 * 1024
 
 _REQUEST_PREFIX = struct.Struct("<4sHHI")
-_REQUEST_BODY = struct.Struct("<QHHIIIIIII")
+_REQUEST_BODY = struct.Struct("<QHHIIIIIIIHH")
 _RESPONSE_HEADER = struct.Struct("<4sHHQHHI")
 _COUNT_RESULT = struct.Struct("<HBBIQQ")
 
@@ -103,6 +103,7 @@ class PersistentScoreWorker:
         self,
         graph: BitGraph,
         *,
+        lengths: tuple[int, ...],
         limit: int,
         node_budget: int,
         cutoff: tuple[int, int, int] | None = None,
@@ -110,6 +111,21 @@ class PersistentScoreWorker:
     ) -> ScoreWorkerResponse:
         if limit < 1 or node_budget < 1:
             raise ValueError("score-worker bounds must be positive")
+        if (
+            len(lengths) > 64
+            or any(
+                isinstance(length, bool)
+                or not isinstance(length, int)
+                or length < 3
+                or length > graph.n
+                for length in lengths
+            )
+            or tuple(sorted(set(lengths))) != lengths
+        ):
+            raise ValueError(
+                "score-worker lengths must be unique, increasing and "
+                "between 3 and the graph order"
+            )
         if self.process is None:
             self.start()
         elif self.process.poll() is not None:
@@ -118,8 +134,13 @@ class PersistentScoreWorker:
         self.request_id += 1
         request_id = self.request_id
         word_count = (graph.n + 63) // 64
-        payload = bytearray(graph.n * word_count * 8)
-        offset = 0
+        length_bytes = len(lengths) * 2
+        payload = bytearray(
+            length_bytes + graph.n * word_count * 8
+        )
+        for index, length in enumerate(lengths):
+            struct.pack_into("<H", payload, index * 2, length)
+        offset = length_bytes
         for row in graph.rows:
             struct.pack_into("<Q", payload, offset, row & ((1 << 64) - 1))
             offset += 8
@@ -144,6 +165,8 @@ class PersistentScoreWorker:
                 cutoff[1] if cutoff is not None else 0,
                 cutoff[2] if cutoff is not None else 0,
                 int(cutoff_inclusive),
+                len(lengths),
+                0,
             )
             + payload
         )
@@ -203,6 +226,16 @@ class PersistentScoreWorker:
                     nodes=nodes,
                     elapsed_ns=elapsed_ns,
                 )
+            )
+        if tuple(result.length for result in results) != lengths[
+            : len(results)
+        ]:
+            raise ScoreWorkerError(
+                "score worker returned unexpected cycle lengths"
+            )
+        if status == STATUS_OK and len(results) != len(lengths):
+            raise ScoreWorkerError(
+                "score worker returned incomplete cycle lengths"
             )
         return ScoreWorkerResponse(
             results=tuple(results),

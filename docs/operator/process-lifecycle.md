@@ -42,10 +42,8 @@ A zombie PID is not considered a live worker.
 8. reap owned child.
 
 A score-worker protocol error, timeout or crash gets one bounded restart. A
-second failure closes the child and continues that lane with the Python
-heuristic scorer. This local fallback is distinct from exact-verifier failure:
-the helper never certifies candidates and never converts failure into cycle
-absence.
+second failure closes the child and fails the lane. The helper never certifies
+candidates and never converts failure into cycle absence.
 
 ## Campaign attempt lifecycle
 

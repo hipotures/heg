@@ -2,6 +2,21 @@
 
 Last implementation audit: **2026-07-28**.
 
+## Mandatory optimized C++ heuristic scorer
+
+Heuristic search now has one production scoring implementation: the
+persistent optimized C++ worker. The Python count-only scorer, workspace,
+plugin API, shadow/audit mode, backend environment switches and automatic
+fallback have been removed. Campaign lanes and the legacy search runner both
+start the worker before evaluation, retry it once after a bounded failure and
+then fail closed.
+
+New work always uses conservative early exit and `delta_local_v2`. Runtime
+provenance and batch metrics describe the fixed implementation rather than a
+requested/effective backend pair. M4 exact verification and its independent
+reference implementation remain unchanged. See ADR 0013 and
+`docs/reports/M6_MANDATORY_CPP_SCORER.md`.
+
 ## Deterministic cycle-overlay readability
 
 The scientific observatory now assigns each displayed cycle length one stable

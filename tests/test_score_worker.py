@@ -3,14 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 from random import Random
 from unittest.mock import patch
-import os
 import unittest
 
 from sglab.locations import score_worker_path
-from sglab.model import (
-    CycleCountWorkspace,
-    count_cycles_of_length_bounded,
-)
+from sglab.model import BitGraph, find_cycles_of_length_bounded
 from sglab.research.lanes import (
     FAST_GRAPH_KEY_SCHEME,
     LEGACY_GRAPH_KEY_SCHEME,
@@ -20,7 +16,7 @@ from sglab.research.lanes import (
     _zobrist_graph_key,
     _zobrist_update_key,
 )
-from sglab.score_worker import PersistentScoreWorker
+from sglab.score_worker import PersistentScoreWorker, ScoreWorkerError
 from sglab.targets.erdos_gyarfas import PLUGIN, forbidden_lengths
 
 
@@ -84,7 +80,16 @@ def _logical_checkpoint(kernel: _LaneKernel) -> tuple[object, ...]:
     score_worker_path().is_file(), "C++ score worker has not been built"
 )
 class PersistentScoreWorkerTests(unittest.TestCase):
-    def test_cpp_counts_match_python_count_workspace(self) -> None:
+    def test_missing_worker_fails_before_scoring(self) -> None:
+        worker = PersistentScoreWorker(
+            binary=Path("/definitely/missing/sglab-score-worker")
+        )
+        with self.assertRaisesRegex(
+            ScoreWorkerError, "score worker is unavailable"
+        ):
+            worker.start()
+
+    def test_cpp_counts_match_independent_witness_enumerator(self) -> None:
         rng = Random(20260726)
         with PersistentScoreWorker() as worker:
             for order in (4, 8, 16, 32, 64, 96, 128):
@@ -94,24 +99,20 @@ class PersistentScoreWorkerTests(unittest.TestCase):
                 for limit, budget in ((2, 1), (17, 4096), (65, 50000)):
                     response = worker.score(
                         graph,
+                        lengths=forbidden_lengths(order),
                         limit=limit,
                         node_budget=budget,
                     )
                     self.assertFalse(response.dominated)
-                    workspace = CycleCountWorkspace.for_order(order)
                     expected = []
                     for length in forbidden_lengths(order):
-                        count, complete, nodes = (
-                            count_cycles_of_length_bounded(
-                                graph,
-                                length,
-                                limit,
-                                budget,
-                                workspace,
+                        witnesses, complete = (
+                            find_cycles_of_length_bounded(
+                                graph, length, limit, budget
                             )
                         )
                         expected.append(
-                            (length, count, complete, nodes)
+                            (length, len(witnesses), complete)
                         )
                     self.assertEqual(
                         [
@@ -119,12 +120,35 @@ class PersistentScoreWorkerTests(unittest.TestCase):
                                 result.length,
                                 result.count,
                                 result.complete,
-                                result.nodes,
                             )
                             for result in response.results
                         ],
                         expected,
                     )
+
+    def test_worker_counts_target_supplied_triangle_length(self) -> None:
+        graph = BitGraph.from_edges(
+            4,
+            (
+                (u, v)
+                for u in range(4)
+                for v in range(u + 1, 4)
+            ),
+        )
+        with PersistentScoreWorker() as worker:
+            response = worker.score(
+                graph,
+                lengths=(3,),
+                limit=17,
+                node_budget=4096,
+            )
+        self.assertEqual(
+            tuple(
+                (result.length, result.count, result.complete)
+                for result in response.results
+            ),
+            ((3, 4, True),),
+        )
 
     def test_worker_is_reused_and_closes(self) -> None:
         graph = PLUGIN.generate_seed(
@@ -134,104 +158,69 @@ class PersistentScoreWorkerTests(unittest.TestCase):
         worker.start()
         pid = worker.pid
         self.assertIsNotNone(pid)
-        worker.score(graph, limit=17, node_budget=4096)
-        worker.score(graph, limit=17, node_budget=4096)
+        worker.score(
+            graph,
+            lengths=forbidden_lengths(graph.n),
+            limit=17,
+            node_budget=4096,
+        )
+        worker.score(
+            graph,
+            lengths=forbidden_lengths(graph.n),
+            limit=17,
+            node_budget=4096,
+        )
         self.assertEqual(worker.pid, pid)
         worker.close()
         self.assertIsNone(worker.pid)
         self.assertFalse(Path(f"/proc/{pid}").exists())
 
-    def test_cpp_and_python_backends_keep_same_trajectory(self) -> None:
-        results = {}
-        for backend in ("python", "cpp"):
-            with patch.dict(
-                os.environ,
-                {
-                    "SGLAB_SCORE_BACKEND": backend,
-                    "SGLAB_SCORE_EARLY_EXIT": "0",
-                    "SGLAB_FAST_DUPLICATE_KEY": "0",
-                },
-            ):
-                kernel = _LaneKernel(_spec(), None, None)
-                try:
-                    metrics = kernel.run_batch(
-                        _NeverStop(), max_evaluations=200
-                    )
-                    results[backend] = (
-                        _logical_checkpoint(kernel),
-                        metrics["accepted"],
-                        metrics["improvements"],
-                    )
-                    if backend == "cpp":
-                        self.assertGreaterEqual(
-                            metrics["score_backend"]["python_audits"],
-                            metrics["improvements"],
-                        )
-                finally:
-                    kernel.close()
-        self.assertEqual(results["python"], results["cpp"])
-
-    def test_early_exit_preserves_trajectory(self) -> None:
-        results = {}
-        for enabled in ("0", "1"):
-            with patch.dict(
-                os.environ,
-                {
-                    "SGLAB_SCORE_BACKEND": "cpp",
-                    "SGLAB_SCORE_EARLY_EXIT": enabled,
-                    "SGLAB_FAST_DUPLICATE_KEY": "0",
-                },
-            ):
-                kernel = _LaneKernel(_spec(), None, None)
-                try:
-                    metrics = kernel.run_batch(
-                        _NeverStop(), max_evaluations=200
-                    )
-                    results[enabled] = (
-                        _logical_checkpoint(kernel),
-                        metrics["accepted"],
-                        metrics["improvements"],
-                        metrics["early_rejected"],
-                    )
-                finally:
-                    kernel.close()
-        self.assertEqual(results["0"][:3], results["1"][:3])
-        self.assertEqual(results["0"][3], 0)
-        self.assertGreater(results["1"][3], 0)
+    def test_lane_kernel_has_one_optimized_cpp_score_contract(self) -> None:
+        kernel = _LaneKernel(_spec(), None, None)
+        try:
+            metrics = kernel.run_batch(
+                _NeverStop(), max_evaluations=200
+            )
+            backend = metrics["score_backend"]
+            self.assertEqual(backend["implementation"], "cpp")
+            self.assertTrue(backend["early_exit_enabled"])
+            self.assertEqual(
+                backend["duplicate_key_scheme"],
+                FAST_GRAPH_KEY_SCHEME,
+            )
+            self.assertNotIn("requested", backend)
+            self.assertNotIn("effective", backend)
+            self.assertNotIn("python_audits", backend)
+            self.assertNotIn("fallbacks", backend)
+            self.assertNotIn("parity_mismatches", backend)
+        finally:
+            kernel.close()
 
     def test_mutation_witness_cache_preserves_trajectory(self) -> None:
         results = {}
         profiles = {}
         for enabled in (False, True):
-            with patch.dict(
-                os.environ,
-                {
-                    "SGLAB_SCORE_BACKEND": "cpp",
-                    "SGLAB_SCORE_EARLY_EXIT": "0",
-                    "SGLAB_FAST_DUPLICATE_KEY": "1",
-                },
-            ):
-                kernel = _LaneKernel(
-                    _targeted_spec(),
-                    None,
-                    None,
-                    mutation_witness_cache=enabled,
+            kernel = _LaneKernel(
+                _targeted_spec(),
+                None,
+                None,
+                mutation_witness_cache=enabled,
+            )
+            try:
+                metrics = kernel.run_batch(
+                    _NeverStop(), max_evaluations=300
                 )
-                try:
-                    metrics = kernel.run_batch(
-                        _NeverStop(), max_evaluations=300
-                    )
-                    results[enabled] = (
-                        _logical_checkpoint(kernel),
-                        metrics["accepted"],
-                        metrics["improvements"],
-                        metrics["operator_statistics"],
-                    )
-                    profiles[enabled] = metrics["timing"][
-                        "mutation_profile"
-                    ]
-                finally:
-                    kernel.close()
+                results[enabled] = (
+                    _logical_checkpoint(kernel),
+                    metrics["accepted"],
+                    metrics["improvements"],
+                    metrics["operator_statistics"],
+                )
+                profiles[enabled] = metrics["timing"][
+                    "mutation_profile"
+                ]
+            finally:
+                kernel.close()
 
         self.assertEqual(results[False], results[True])
         self.assertEqual(profiles[False]["witness_cache_hits"], 0)
@@ -252,55 +241,57 @@ class PersistentScoreWorkerTests(unittest.TestCase):
         )
 
     def test_mutation_profile_can_be_disabled(self) -> None:
-        with patch.dict(
-            os.environ,
-            {
-                "SGLAB_SCORE_BACKEND": "cpp",
-                "SGLAB_SCORE_EARLY_EXIT": "0",
-                "SGLAB_FAST_DUPLICATE_KEY": "1",
-            },
-        ):
-            kernel = _LaneKernel(
-                _targeted_spec(evaluations=10),
-                None,
-                None,
-                instrumentation_enabled=True,
-                score_profiling_enabled=False,
+        kernel = _LaneKernel(
+            _targeted_spec(evaluations=10),
+            None,
+            None,
+            instrumentation_enabled=True,
+            score_profiling_enabled=False,
+        )
+        try:
+            metrics = kernel.run_batch(
+                _NeverStop(), max_evaluations=10
             )
-            try:
-                metrics = kernel.run_batch(
-                    _NeverStop(), max_evaluations=10
-                )
-            finally:
-                kernel.close()
+        finally:
+            kernel.close()
         self.assertNotIn("mutation_profile", metrics["timing"])
         self.assertTrue(
             metrics["score_backend"]["mutation_witness_cache_enabled"]
         )
 
-    def test_worker_crash_is_restarted_before_fallback(self) -> None:
-        with patch.dict(
-            os.environ,
-            {
-                "SGLAB_SCORE_BACKEND": "cpp",
-                "SGLAB_SCORE_EARLY_EXIT": "0",
-            },
-        ):
-            kernel = _LaneKernel(_spec(evaluations=10), None, None)
-            try:
-                assert kernel.score_worker is not None
-                assert kernel.score_worker.process is not None
-                kernel.score_worker.process.kill()
-                kernel.score_worker.process.wait(timeout=1)
-                metrics = kernel.run_batch(
-                    _NeverStop(), max_evaluations=10
-                )
-                backend = metrics["score_backend"]
-                self.assertEqual(backend["effective"], "cpp")
-                self.assertEqual(backend["worker_restarts"], 1)
-                self.assertEqual(backend["fallbacks"], 0)
-            finally:
-                kernel.close()
+    def test_worker_crash_is_restarted_without_fallback(self) -> None:
+        kernel = _LaneKernel(_spec(evaluations=10), None, None)
+        try:
+            assert kernel.score_worker.process is not None
+            kernel.score_worker.process.kill()
+            kernel.score_worker.process.wait(timeout=1)
+            metrics = kernel.run_batch(
+                _NeverStop(), max_evaluations=10
+            )
+            backend = metrics["score_backend"]
+            self.assertEqual(backend["implementation"], "cpp")
+            self.assertEqual(backend["worker_restarts"], 1)
+            self.assertNotIn("fallbacks", backend)
+        finally:
+            kernel.close()
+
+    def test_repeated_worker_failure_is_fail_closed(self) -> None:
+        kernel = _LaneKernel(_spec(evaluations=10), None, None)
+        try:
+            with patch.object(
+                kernel.score_worker,
+                "score",
+                side_effect=ScoreWorkerError("synthetic failure"),
+            ):
+                with self.assertRaisesRegex(
+                    ScoreWorkerError,
+                    "mandatory C\\+\\+ score worker failed",
+                ):
+                    kernel.run_batch(
+                        _NeverStop(), max_evaluations=10
+                    )
+        finally:
+            kernel.close()
 
 
 class FastDuplicateKeyTests(unittest.TestCase):
@@ -330,18 +321,18 @@ class FastDuplicateKeyTests(unittest.TestCase):
             self.assertEqual(key, _zobrist_graph_key(graph))
 
     def test_legacy_checkpoint_keeps_legacy_tabu_scheme(self) -> None:
-        with patch.dict(
-            os.environ,
-            {
-                "SGLAB_SCORE_BACKEND": "python",
-                "SGLAB_FAST_DUPLICATE_KEY": "0",
-            },
-        ):
-            original = _LaneKernel(_spec(evaluations=10), None, None)
-            try:
-                checkpoint = original.checkpoint(0)
-            finally:
-                original.close()
+        original = _LaneKernel(_spec(evaluations=10), None, None)
+        try:
+            checkpoint = original.checkpoint(0)
+        finally:
+            original.close()
+        graph = PLUGIN.generate_seed(
+            Random(987654),
+            {"order": 32, "mode": "unrestricted_min_degree_3"},
+        )
+        checkpoint["duplicate_key_scheme"] = LEGACY_GRAPH_KEY_SCHEME
+        checkpoint["tabu_key_scheme"] = "sha256_graph6_v1"
+        checkpoint["tabu"] = [graph.stable_hash()]
         self.assertEqual(
             checkpoint["duplicate_key_scheme"],
             LEGACY_GRAPH_KEY_SCHEME,
@@ -350,66 +341,47 @@ class FastDuplicateKeyTests(unittest.TestCase):
             checkpoint["tabu_key_scheme"], "sha256_graph6_v1"
         )
         checkpoint.pop("duplicate_key_scheme")
-        with patch.dict(
-            os.environ,
-            {
-                "SGLAB_SCORE_BACKEND": "python",
-                "SGLAB_FAST_DUPLICATE_KEY": "1",
-            },
-        ):
-            restored = _LaneKernel(_spec(evaluations=10), checkpoint, None)
-            try:
-                self.assertEqual(
-                    restored.tabu_key_scheme,
-                    LEGACY_GRAPH_KEY_SCHEME,
-                )
-                restored.restart(123)
-                self.assertEqual(
-                    restored.tabu_key_scheme,
-                    FAST_GRAPH_KEY_SCHEME,
-                )
-            finally:
-                restored.close()
+        restored = _LaneKernel(_spec(evaluations=10), checkpoint, None)
+        try:
+            self.assertEqual(
+                restored.tabu_key_scheme,
+                LEGACY_GRAPH_KEY_SCHEME,
+            )
+            restored.restart(123)
+            self.assertEqual(
+                restored.tabu_key_scheme,
+                FAST_GRAPH_KEY_SCHEME,
+            )
+        finally:
+            restored.close()
 
     def test_fork_inherits_parent_scheme_and_explicit_restart_upgrades(
         self,
     ) -> None:
-        with patch.dict(
-            os.environ,
-            {
-                "SGLAB_SCORE_BACKEND": "python",
-                "SGLAB_FAST_DUPLICATE_KEY": "0",
-            },
-        ):
-            original = _LaneKernel(_spec(evaluations=10), None, None)
-            try:
-                checkpoint = original.checkpoint(0)
-            finally:
-                original.close()
-        with patch.dict(
-            os.environ,
-            {
-                "SGLAB_SCORE_BACKEND": "python",
-                "SGLAB_FAST_DUPLICATE_KEY": "1",
-            },
-        ):
-            forked = _LaneKernel(
-                _spec(evaluations=10),
-                checkpoint,
-                fork_seed=909,
+        original = _LaneKernel(_spec(evaluations=10), None, None)
+        try:
+            checkpoint = original.checkpoint(0)
+        finally:
+            original.close()
+        checkpoint["duplicate_key_scheme"] = LEGACY_GRAPH_KEY_SCHEME
+        checkpoint["tabu_key_scheme"] = "sha256_graph6_v1"
+        forked = _LaneKernel(
+            _spec(evaluations=10),
+            checkpoint,
+            fork_seed=909,
+        )
+        try:
+            self.assertEqual(
+                forked.tabu_key_scheme,
+                LEGACY_GRAPH_KEY_SCHEME,
             )
-            try:
-                self.assertEqual(
-                    forked.tabu_key_scheme,
-                    LEGACY_GRAPH_KEY_SCHEME,
-                )
-                forked.restart_from_checkpoint(checkpoint, seed=910)
-                self.assertEqual(
-                    forked.tabu_key_scheme,
-                    FAST_GRAPH_KEY_SCHEME,
-                )
-            finally:
-                forked.close()
+            forked.restart_from_checkpoint(checkpoint, seed=910)
+            self.assertEqual(
+                forked.tabu_key_scheme,
+                FAST_GRAPH_KEY_SCHEME,
+            )
+        finally:
+            forked.close()
 
 
 if __name__ == "__main__":

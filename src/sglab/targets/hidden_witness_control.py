@@ -3,7 +3,7 @@ from __future__ import annotations
 from time import perf_counter
 
 from ..model import BitGraph, find_cycle_of_length
-from .base import ScoreResult, ValidationResult, VerifyResult, Witness
+from .base import ValidationResult, VerifyResult, Witness
 from .erdos_gyarfas import ErdosGyarfasPlugin
 
 
@@ -29,20 +29,6 @@ class HiddenWitnessControlPlugin(ErdosGyarfasPlugin):
         if any(graph.degree(vertex) != 3 for vertex in range(graph.n)):
             return ValidationResult(False, "control graph must be cubic")
         return ValidationResult(True, "valid hidden-witness control candidate")
-
-    def cheap_score(self, graph: BitGraph, cap: int) -> ScoreResult:
-        validation = self.validate_graph(graph)
-        if not validation.valid:
-            return ScoreResult(False, (), 10**9, True, simplicity=graph.size())
-        triangle = find_cycle_of_length(graph, 3)
-        count = int(triangle is not None)
-        return ScoreResult(
-            True,
-            ((3, count),),
-            count,
-            True,
-            simplicity=graph.size(),
-        )
 
     def exact_verify(self, graph: BitGraph) -> VerifyResult:
         started = perf_counter()

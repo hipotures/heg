@@ -74,18 +74,15 @@ and produces the same ordered choices as the uncached operator, so RNG
 consumption and deterministic continuation are unchanged. The cache is never
 serialized, checkpointed or shared between lane processes.
 
-The Erdős–Gyárfás lane may use one persistent `sglab-score-worker` C++17
-process. Requests contain bounded adjacency bitsets; responses contain only
-counts, completeness flags, DFS nodes and elapsed nanoseconds. The process
-starts once per lane, has a separate memory limit and a bounded protocol,
-and is included in lane process-tree RSS. A protocol error, timeout or crash
-is never interpreted as a zero count: the lane retries once and then switches
-to the Python scorer.
-
-`python`, `shadow` and `cpp` scorer modes are rollout controls. Shadow mode
-compares every graph with Python. C++ mode audits every 4096th evaluation and
-every proposed global record with a full Python recount. A mismatch disables
-the worker and makes Python authoritative.
+Every heuristic lane owns one persistent optimized `sglab-score-worker`
+C++17 process. Requests contain the target's reviewed cycle lengths and
+bounded adjacency bitsets; responses contain only counts, completeness flags,
+DFS nodes and elapsed nanoseconds. The
+process starts once per lane, has a separate memory limit and a bounded
+protocol, and is included in lane process-tree RSS. A protocol error, timeout,
+malformed response or crash is never interpreted as a zero count: the lane
+restarts the worker once and then fails closed. There is no alternate
+heuristic scorer, shadow mode or runtime backend selection.
 
 For non-perturbation ILS/tabu moves, an optional monotone cutoff may stop after
 the partial lexicographic penalty already proves that the move cannot be
@@ -93,8 +90,8 @@ accepted or become a global record. Random restart, simulated annealing and
 perturbation moves always receive a full score. The cutoff changes neither RNG
 consumption nor accepted/search-record trajectories.
 
-Checkpoint field `duplicate_key_scheme` explicitly selects
-`legacy_sha_graph6_v1` or `delta_local_v2`. Historical
+New lanes and explicit algorithmic restarts always use
+`duplicate_key_scheme=delta_local_v2`. Historical
 `tabu_key_scheme=sha256_graph6_v1|zobrist256_v1` values remain readable.
 Resume and trajectory-preserving forks inherit the checkpoint scheme without
 rewriting the visited/tabu membership. Only a new lane or explicit

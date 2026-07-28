@@ -30,7 +30,7 @@ This is the authoritative engineering-invariant matrix.
 | SQLite migration preserves history | migration harness | Online Backup + canonical hashes | migration rejected |
 | Missing usage remains null | turn lifecycle | timeout/missing usage tests | no fabricated zero |
 | Timeout is unknown, not proof | verifier/SAT/runtime | timeout tests | unknown/fault |
-| Heuristic score-worker failure is not cycle absence | lane scorer fallback and Python record audits | score-worker parity/crash tests | retry once, then Python |
+| Heuristic score-worker failure is not cycle absence | mandatory C++ lane scorer | score-worker contract/crash tests | restart once, then fail closed |
 | Resume never silently migrates duplicate membership | versioned lane checkpoint key scheme | legacy alias, fork and explicit-restart tests | inherit checkpoint scheme; require explicit restart |
 | Browser cannot supply executable/auth path | HTTP validation | security tests | request rejected |
 

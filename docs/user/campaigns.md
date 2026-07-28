@@ -94,7 +94,7 @@ Operator diagnostics may include one aggregated score profile per completed
 lane batch. These timing, DFS-node, completeness and early-cutoff counters
 explain throughput; they are not candidate evidence and do not affect
 heuristic scores or M4 verification. Batch diagnostics also identify the
-requested/effective score backend and any Python audits or fallbacks.
+fixed C++ scorer implementation, worker binary, request count and restarts.
 When profiling is enabled, the same completed-batch diagnostic separates
 uniform and forbidden-cycle-targeted mutation time and reports reuse of the
 current graph's witness choices. It does not create a candidate history or

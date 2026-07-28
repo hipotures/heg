@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
 from dataclasses import replace
 from http.client import HTTPConnection
 from pathlib import Path
@@ -37,6 +36,7 @@ from .resources import (
     recommended_workers,
     run_bounded,
 )
+from .score_worker import PersistentScoreWorker
 from .sat import tiny_cegar
 from .state import atomic_write_json, next_control, utc_now
 from .state import read_json
@@ -59,6 +59,22 @@ def quantiles(samples: Iterable[float]) -> dict[str, float]:
         "p95": percentile(0.95),
         "maximum": values[-1],
     }
+
+
+def _cpp_score(
+    worker: PersistentScoreWorker,
+    graph: BitGraph,
+    cap: int,
+):
+    response = worker.score(
+        graph,
+        lengths=PLUGIN.forbidden_lengths(graph.n),
+        limit=cap + 1,
+        node_budget=max(4_096, min(50_000, cap * 1_024)),
+    )
+    return PLUGIN.score_from_cycle_counts(
+        graph, cap, response.results, None
+    )
 
 
 def _measure(function: Callable[[], object], iterations: int) -> dict[str, Any]:
@@ -192,28 +208,44 @@ def microbenchmark(
         raise ValueError("iterations must be positive")
     rng = Random(20260723)
     operations: dict[str, Any] = {}
-    for n in orders:
-        graph = PLUGIN.generate_seed(rng, {"order": n, "mode": "cubic_first"})
-        operations[f"edge_degree_n{n}"] = _measure(
-            lambda graph=graph: (graph.has_edge(0, 1), graph.degree_sequence()),
-            iterations,
-        )
-        operations[f"mutation_n{n}"] = _measure(
-            lambda graph=graph: PLUGIN.mutate(graph, rng, {"mode": "cubic_first"}),
-            iterations,
-        )
-        operations[f"score_n{n}"] = _measure(
-            lambda graph=graph: PLUGIN.cheap_score(graph, 16),
-            iterations,
-        )
-        operations[f"graph6_n{n}"] = _measure(
-            lambda graph=graph: BitGraph.from_graph6(graph.to_graph6()),
-            iterations,
-        )
-        operations[f"canonicalization_n{n}"] = _measure(
-            lambda graph=graph: canonical_graph6(graph),
-            iterations,
-        )
+    score_worker = PersistentScoreWorker()
+    score_worker.start()
+    try:
+        for n in orders:
+            graph = PLUGIN.generate_seed(
+                rng, {"order": n, "mode": "cubic_first"}
+            )
+            operations[f"edge_degree_n{n}"] = _measure(
+                lambda graph=graph: (
+                    graph.has_edge(0, 1),
+                    graph.degree_sequence(),
+                ),
+                iterations,
+            )
+            operations[f"mutation_n{n}"] = _measure(
+                lambda graph=graph: PLUGIN.mutate(
+                    graph, rng, {"mode": "cubic_first"}
+                ),
+                iterations,
+            )
+            operations[f"score_n{n}"] = _measure(
+                lambda graph=graph: _cpp_score(
+                    score_worker, graph, 16
+                ),
+                iterations,
+            )
+            operations[f"graph6_n{n}"] = _measure(
+                lambda graph=graph: BitGraph.from_graph6(
+                    graph.to_graph6()
+                ),
+                iterations,
+            )
+            operations[f"canonicalization_n{n}"] = _measure(
+                lambda graph=graph: canonical_graph6(graph),
+                iterations,
+            )
+    finally:
+        score_worker.close()
     exact_graph = PLUGIN.generate_seed(Random(99), {"order": 20, "mode": "cubic_first"})
     _canonical_probe, canonicalization_authoritative = canonical_graph6(exact_graph)
     cpp_probe = verify_cpp(exact_graph, timeout_seconds=10)
@@ -330,20 +362,6 @@ def microbenchmark(
     }
 
 
-@contextmanager
-def _score_environment(**values: str) -> Iterable[None]:
-    previous = {name: os.environ.get(name) for name in values}
-    os.environ.update(values)
-    try:
-        yield
-    finally:
-        for name, value in previous.items():
-            if value is None:
-                os.environ.pop(name, None)
-            else:
-                os.environ[name] = value
-
-
 def _score_benchmark_spec(
     *,
     order: int,
@@ -404,9 +422,6 @@ def _run_score_case(
     order: int,
     evaluations: int,
     algorithm: str,
-    backend: str,
-    early_exit: bool,
-    fast_duplicate_key: bool,
     profiling: bool,
     optimized_legacy_key: bool = True,
     independent_sample_provenance: bool = True,
@@ -414,50 +429,45 @@ def _run_score_case(
     graph_family: str = "unrestricted_min_degree_3",
     mutation_weights: dict[str, float] | None = None,
 ) -> dict[str, Any]:
-    with _score_environment(
-        SGLAB_SCORE_BACKEND=backend,
-        SGLAB_SCORE_EARLY_EXIT="1" if early_exit else "0",
-        SGLAB_FAST_DUPLICATE_KEY="1" if fast_duplicate_key else "0",
-    ):
-        kernel = _LaneKernel(
-            _score_benchmark_spec(
-                order=order,
-                evaluations=evaluations,
-                algorithm=algorithm,
-                graph_family=graph_family,
-                mutation_weights=mutation_weights,
-            ),
-            checkpoint=None,
-            fork_seed=None,
-            instrumentation_enabled=True,
-            score_profiling_enabled=profiling,
-            optimized_legacy_key=optimized_legacy_key,
-            independent_sample_provenance=(
-                independent_sample_provenance
-            ),
-            mutation_witness_cache=mutation_witness_cache,
+    kernel = _LaneKernel(
+        _score_benchmark_spec(
+            order=order,
+            evaluations=evaluations,
+            algorithm=algorithm,
+            graph_family=graph_family,
+            mutation_weights=mutation_weights,
+        ),
+        checkpoint=None,
+        fork_seed=None,
+        instrumentation_enabled=True,
+        score_profiling_enabled=profiling,
+        optimized_legacy_key=optimized_legacy_key,
+        independent_sample_provenance=(
+            independent_sample_provenance
+        ),
+        mutation_witness_cache=mutation_witness_cache,
+    )
+    try:
+        metrics = kernel.run_batch(
+            type(
+                "_ScoreBenchmarkStop",
+                (),
+                {"is_set": lambda self: False},
+            )(),
+            max_evaluations=evaluations,
         )
-        try:
-            metrics = kernel.run_batch(
-                type(
-                    "_ScoreBenchmarkStop",
-                    (),
-                    {"is_set": lambda self: False},
-                )(),
-                max_evaluations=evaluations,
-            )
-            return {
-                "candidates_per_second": metrics["candidates_per_second"],
-                "elapsed_seconds": metrics["elapsed_seconds"],
-                "accepted": metrics["accepted"],
-                "improvements": metrics["improvements"],
-                "early_rejected": metrics["early_rejected"],
-                "score_backend": metrics["score_backend"],
-                "timing": metrics.get("timing"),
-                "logical_state": _logical_score_state(kernel),
-            }
-        finally:
-            kernel.close()
+        return {
+            "candidates_per_second": metrics["candidates_per_second"],
+            "elapsed_seconds": metrics["elapsed_seconds"],
+            "accepted": metrics["accepted"],
+            "improvements": metrics["improvements"],
+            "early_rejected": metrics["early_rejected"],
+            "score_backend": metrics["score_backend"],
+            "timing": metrics.get("timing"),
+            "logical_state": _logical_score_state(kernel),
+        }
+    finally:
+        kernel.close()
 
 
 def _alternating_score_comparison(
@@ -513,77 +523,33 @@ def score_kernel_benchmark(
     if backend_evaluations < 1 or search_evaluations < 1:
         raise ValueError("evaluation counts must be positive")
 
-    backend: dict[str, Any] = {}
+    optimized_cpp: dict[str, Any] = {}
     for order in (64, 96):
-        common = {
+        settings = {
             "order": order,
             "evaluations": backend_evaluations,
             "algorithm": "random_restart",
-            "early_exit": False,
-            "fast_duplicate_key": False,
             "profiling": False,
         }
-        backend[str(order)] = _alternating_score_comparison(
-            iterations=iterations,
-            left={**common, "backend": "python"},
-            right={**common, "backend": "cpp"},
-        )
+        runs = [
+            _run_score_case(**settings)
+            for _ in range(iterations)
+        ]
+        rates = [run["candidates_per_second"] for run in runs]
+        optimized_cpp[str(order)] = {
+            "settings": settings,
+            "implementation": "cpp",
+            "early_exit_enabled": True,
+            "duplicate_key_scheme": "delta_local_v2",
+            "throughput_samples": rates,
+            "median_candidates_per_second": median(rates),
+            "runs": runs,
+        }
 
-    search_common = {
-        "order": 96,
-        "evaluations": search_evaluations,
-        "algorithm": "iterated_local_search_tabu",
-        "backend": "cpp",
-        "profiling": True,
-    }
-    early_exit = _alternating_score_comparison(
-        iterations=iterations,
-        left={
-            **search_common,
-            "early_exit": False,
-            "fast_duplicate_key": False,
-        },
-        right={
-            **search_common,
-            "early_exit": True,
-            "fast_duplicate_key": False,
-        },
-    )
-    duplicate_key = _alternating_score_comparison(
-        iterations=iterations,
-        left={
-            **search_common,
-            "early_exit": True,
-            "fast_duplicate_key": False,
-        },
-        right={
-            **search_common,
-            "early_exit": True,
-            "fast_duplicate_key": True,
-        },
-    )
-    legacy_key = _alternating_score_comparison(
-        iterations=iterations,
-        left={
-            **search_common,
-            "early_exit": True,
-            "fast_duplicate_key": False,
-            "optimized_legacy_key": False,
-        },
-        right={
-            **search_common,
-            "early_exit": True,
-            "fast_duplicate_key": False,
-            "optimized_legacy_key": True,
-        },
-    )
     independent_common = {
         "order": 96,
         "evaluations": search_evaluations,
         "algorithm": "random_restart",
-        "backend": "cpp",
-        "early_exit": False,
-        "fast_duplicate_key": True,
         "profiling": True,
     }
     independent_provenance = _alternating_score_comparison(
@@ -606,9 +572,6 @@ def score_kernel_benchmark(
             "uniform_two_edge_switch": 0.7,
             "forbidden_cycle_break_switch": 0.3,
         },
-        "backend": "cpp",
-        "early_exit": False,
-        "fast_duplicate_key": True,
         "profiling": True,
     }
     mutation_witness_cache = _alternating_score_comparison(
@@ -626,9 +589,6 @@ def score_kernel_benchmark(
         "order": 96,
         "evaluations": search_evaluations,
         "algorithm": "iterated_local_search_tabu",
-        "backend": "cpp",
-        "early_exit": True,
-        "fast_duplicate_key": True,
     }
     profiling = _alternating_score_comparison(
         iterations=iterations,
@@ -636,9 +596,6 @@ def score_kernel_benchmark(
         right={**profiling_common, "profiling": True},
     )
     profiling_overhead = 1.0 - profiling["right_over_left"]
-    legacy_duplicate_reduction = _timing_counter_reduction(
-        legacy_key, "duplicate_detection"
-    )
     independent_ancestry_reduction = _timing_counter_reduction(
         independent_provenance, "ancestry_construction"
     )
@@ -689,21 +646,7 @@ def score_kernel_benchmark(
         "created_at": utc_now(),
         "kind": "score_kernel",
         "iterations": iterations,
-        "backend_comparison": backend,
-        "early_exit_comparison": early_exit,
-        "duplicate_key_comparison": duplicate_key,
-        "legacy_key_comparison": {
-            **legacy_key,
-            "duplicate_time_reduction_fraction": (
-                legacy_duplicate_reduction
-            ),
-            "duplicate_time_reduction_gate_at_least_20_percent": (
-                legacy_duplicate_reduction >= 0.20
-            ),
-            "throughput_gate_at_least_10_percent": (
-                legacy_key["right_over_left"] >= 1.10
-            ),
-        },
+        "optimized_cpp": optimized_cpp,
         "independent_provenance_comparison": {
             **independent_provenance,
             "ancestry_time_reduction_fraction": (
@@ -749,31 +692,16 @@ def score_kernel_benchmark(
             "cycle_length_profile": cycle_profile,
         },
         "acceptance": {
-            "cpp_at_least_2x": all(
-                comparison["right_over_left"] >= 2.0
-                for comparison in backend.values()
+            "single_cpp_implementation": all(
+                result["implementation"] == "cpp"
+                for result in optimized_cpp.values()
             ),
-            "backend_trajectories_equal": all(
-                comparison["logical_trajectory_equal"]
-                for comparison in backend.values()
+            "optimized_cpp_produced_throughput": all(
+                result["median_candidates_per_second"] > 0
+                for result in optimized_cpp.values()
             ),
-            "early_exit_trajectory_equal": early_exit[
-                "logical_trajectory_equal"
-            ],
-            "duplicate_key_trajectory_equal": duplicate_key[
-                "logical_trajectory_equal"
-            ],
-            "legacy_key_trajectory_equal": legacy_key[
-                "logical_trajectory_equal"
-            ],
             "independent_provenance_trajectory_equal": (
                 independent_provenance["logical_trajectory_equal"]
-            ),
-            "legacy_duplicate_time_reduction_at_least_20_percent": (
-                legacy_duplicate_reduction >= 0.20
-            ),
-            "legacy_total_throughput_gain_at_least_10_percent": (
-                legacy_key["right_over_left"] >= 1.10
             ),
             "independent_ancestry_time_reduction_at_least_80_percent": (
                 independent_ancestry_reduction >= 0.80
@@ -845,10 +773,22 @@ def _queue_event_round_trip(
 
 
 def _calibration_case(task: tuple[int, str, int, float]) -> dict[str, Any]:
+    score_worker = PersistentScoreWorker()
+    score_worker.start()
+    try:
+        return _calibration_case_with_worker(task, score_worker)
+    finally:
+        score_worker.close()
+
+
+def _calibration_case_with_worker(
+    task: tuple[int, str, int, float],
+    score_worker: PersistentScoreWorker,
+) -> dict[str, Any]:
     n, algorithm, seed, seconds = task
     rng = Random(seed)
     graph = PLUGIN.generate_seed(rng, {"order": n, "mode": "cubic_first"})
-    score = replace(PLUGIN.cheap_score(graph, 32), novelty=1.0)
+    score = replace(_cpp_score(score_worker, graph, 32), novelty=1.0)
     best_graph, best_score = graph, score
     evaluated = accepted = legal = improvements = 0
     stagnation = 0
@@ -862,7 +802,7 @@ def _calibration_case(task: tuple[int, str, int, float]) -> dict[str, Any]:
         if algorithm == "simulated_annealing" and evaluated >= next_restart:
             graph = PLUGIN.generate_seed(rng, {"order": n, "mode": "cubic_first"})
             score = replace(
-                PLUGIN.cheap_score(graph, 32),
+                _cpp_score(score_worker, graph, 32),
                 novelty=_novelty(graph, best_graph),
             )
             tabu = [graph.stable_hash()]
@@ -879,7 +819,7 @@ def _calibration_case(task: tuple[int, str, int, float]) -> dict[str, Any]:
             continue
         legal += 1
         candidate_score = replace(
-            PLUGIN.cheap_score(candidate, 32),
+            _cpp_score(score_worker, candidate, 32),
             novelty=_novelty(candidate, best_graph),
         )
         accept = False

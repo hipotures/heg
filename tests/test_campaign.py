@@ -15,6 +15,7 @@ from sglab.research.campaign import (
     PRODUCTION_DIRECTOR_MODEL,
     PRODUCTION_MAXIMUM_DIRECTOR_TURNS,
     ResearchCampaignRunner,
+    _score_runtime_provenance,
     campaign_attempt_application_data,
     campaign_status,
     load_prepared_campaign_plan,
@@ -27,6 +28,25 @@ from sglab.resource_accounting import EXPECTED_APP_SERVER_WRAPPERS
 
 
 class CampaignOperatorContractTests(unittest.TestCase):
+    def test_score_runtime_provenance_has_one_fixed_implementation(
+        self,
+    ) -> None:
+        provenance = _score_runtime_provenance()
+        self.assertEqual(
+            set(provenance),
+            {
+                "implementation",
+                "early_exit_enabled",
+                "duplicate_key_scheme",
+                "score_worker",
+            },
+        )
+        self.assertEqual(provenance["implementation"], "cpp")
+        self.assertTrue(provenance["early_exit_enabled"])
+        self.assertEqual(
+            provenance["duplicate_key_scheme"], "delta_local_v2"
+        )
+
     def test_prepare_persists_exact_non_auth_campaign_contract(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             workspace = Path(directory)

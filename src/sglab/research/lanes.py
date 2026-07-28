@@ -13,7 +13,6 @@ import dataclasses
 import hashlib
 import json
 import math
-import os
 import resource
 import time
 
@@ -22,6 +21,7 @@ from ..resources import set_address_space_limit
 from ..score_worker import (
     DEFAULT_WORKER_MEMORY_BYTES,
     PersistentScoreWorker,
+    PROTOCOL_VERSION,
     ScoreWorkerError,
 )
 from ..state import atomic_write_json, utc_now
@@ -54,7 +54,6 @@ TIMING_COUNTER_NAMES = (
 )
 LIVE_FRONTIER_INTERVAL_SECONDS = 1.0
 LIVE_FRONTIER_PAYLOAD_LIMIT_BYTES = 64 * 1024
-SCORE_BACKENDS = frozenset({"python", "shadow", "cpp"})
 LEGACY_GRAPH_KEY_SCHEME = "legacy_sha_graph6_v1"
 FAST_GRAPH_KEY_SCHEME = "delta_local_v2"
 _LEGACY_GRAPH_KEY_ALIAS = "sha256_graph6_v1"
@@ -282,7 +281,6 @@ class _LaneKernel:
         instrumentation_enabled: bool = True,
         score_profiling_enabled: bool = True,
         score_worker_memory_bytes: int = DEFAULT_WORKER_MEMORY_BYTES,
-        score_worker_enabled: bool = True,
         optimized_legacy_key: bool = True,
         independent_sample_provenance: bool = True,
         mutation_witness_cache: bool = True,
@@ -318,14 +316,6 @@ class _LaneKernel:
             if instrumentation_enabled
             else None
         )
-        workspace_factory = getattr(
-            self.plugin, "new_score_workspace", None
-        )
-        self.score_workspace = (
-            workspace_factory(int(self.parameters["order"]))
-            if workspace_factory is not None
-            else None
-        )
         profile_factory = getattr(self.plugin, "new_score_profile", None)
         self.score_profile = (
             profile_factory()
@@ -333,72 +323,30 @@ class _LaneKernel:
             and profile_factory is not None
             else None
         )
-        self._workspace_score = getattr(
-            self.plugin, "cheap_score_with_workspace", None
-        )
-        self._profiled_score = getattr(
-            self.plugin, "cheap_score_profiled", None
-        )
         self._count_result_score = getattr(
             self.plugin, "score_from_cycle_counts", None
-        )
-        self._cutoff_score = getattr(
-            self.plugin, "cheap_score_with_cutoff", None
         )
         self._record_count_profile = getattr(
             self.plugin, "record_cycle_count_profile", None
         )
-        requested_backend = os.environ.get(
-            "SGLAB_SCORE_BACKEND", "python"
-        ).strip()
-        if requested_backend not in SCORE_BACKENDS:
-            raise ValueError(
-                "SGLAB_SCORE_BACKEND must be python, shadow or cpp"
+        if self._count_result_score is None:
+            raise RuntimeError(
+                "target does not support mandatory C++ heuristic scoring"
             )
-        self.score_backend_requested = requested_backend
-        self.score_backend_effective = "python"
-        early_exit_value = os.environ.get(
-            "SGLAB_SCORE_EARLY_EXIT", "0"
-        ).strip()
-        if early_exit_value not in {"0", "1"}:
-            raise ValueError(
-                "SGLAB_SCORE_EARLY_EXIT must be 0 or 1"
-            )
-        self.score_early_exit_enabled = early_exit_value == "1"
-        fast_key_value = os.environ.get(
-            "SGLAB_FAST_DUPLICATE_KEY", "0"
-        ).strip()
-        if fast_key_value not in {"0", "1"}:
-            raise ValueError(
-                "SGLAB_FAST_DUPLICATE_KEY must be 0 or 1"
-            )
-        self.fast_duplicate_key_enabled = fast_key_value == "1"
-        self.score_worker: PersistentScoreWorker | None = None
+        self.score_early_exit_enabled = True
+        self.fast_duplicate_key_enabled = True
         self.score_backend_batch = {
             "cpp_requests": 0,
-            "python_audits": 0,
             "worker_restarts": 0,
-            "fallbacks": 0,
-            "parity_mismatches": 0,
         }
-        self.score_evaluations = 0
-        if (
-            requested_backend != "python"
-            and score_worker_enabled
-            and self.spec.target == "erdos_gyarfas"
-            and self._count_result_score is not None
-        ):
-            worker = PersistentScoreWorker(
-                memory_limit_bytes=score_worker_memory_bytes
-            )
-            try:
-                worker.start()
-            except ScoreWorkerError:
-                self.score_backend_batch["fallbacks"] += 1
-                worker.close()
-            else:
-                self.score_worker = worker
-                self.score_backend_effective = requested_backend
+        self.score_worker = PersistentScoreWorker(
+            memory_limit_bytes=score_worker_memory_bytes
+        )
+        try:
+            self.score_worker.start()
+        except ScoreWorkerError:
+            self.score_worker.close()
+            raise
         self.accepted_ancestry: deque[dict[str, Any]] = deque(
             maxlen=ANCESTRY_LIMIT
         )
@@ -818,18 +766,6 @@ class _LaneKernel:
                 candidate_score.ordering_key
                 < self.best_score.ordering_key
             )
-            if (
-                global_record
-                and self.score_backend_effective == "cpp"
-            ):
-                candidate_score = self._audit_cpp_global_record(
-                    candidate,
-                    candidate_score,
-                )
-                global_record = (
-                    candidate_score.ordering_key
-                    < self.best_score.ordering_key
-                )
             tabu_started = (
                 time.perf_counter_ns()
                 if self.timing_ns is not None
@@ -1085,19 +1021,14 @@ class _LaneKernel:
             "termination_reason": termination_reason,
             "end_high_water": self.high_water,
             "score_backend": {
-                "requested": self.score_backend_requested,
-                "effective": self.score_backend_effective,
+                "implementation": "cpp",
                 "early_exit_enabled": self.score_early_exit_enabled,
                 "duplicate_key_scheme": self.tabu_key_scheme,
-                "score_worker_protocol_version": 1,
+                "score_worker_protocol_version": PROTOCOL_VERSION,
                 "mutation_witness_cache_enabled": (
                     self.mutation_witness_cache_enabled
                 ),
-                "score_worker_sha256": (
-                    self.score_worker.binary_sha256
-                    if self.score_worker is not None
-                    else None
-                ),
+                "score_worker_sha256": self.score_worker.binary_sha256,
                 **self.score_backend_batch,
             },
         }
@@ -1321,61 +1252,9 @@ class _LaneKernel:
             tuple[tuple[int, int, int, int, int], bool] | None
         ) = None,
     ) -> ScoreResult | None:
-        self.score_evaluations += 1
-        if (
-            self.score_backend_effective in {"cpp", "shadow"}
-            and self.score_worker is not None
-        ):
-            cpp_score = self._cpp_score_with_fallback(graph, cutoff)
-            if self.score_backend_effective == "python":
-                return cpp_score
-            if self.score_backend_effective == "shadow":
-                python_score = self._python_score(graph, cutoff=cutoff)
-                self.score_backend_batch["python_audits"] += 1
-                if cpp_score != python_score:
-                    self.score_backend_batch["parity_mismatches"] += 1
-                    raise RuntimeError(
-                        "persistent C++ score differs from Python oracle"
-                    )
-                return python_score
-            if self.score_backend_effective == "cpp":
-                if self.score_evaluations % 4096 == 0:
-                    python_score = self._python_score(
-                        graph,
-                        record_profile=False,
-                        cutoff=cutoff,
-                    )
-                    self.score_backend_batch["python_audits"] += 1
-                    if cpp_score != python_score:
-                        self.score_backend_batch[
-                            "parity_mismatches"
-                        ] += 1
-                        self._disable_score_worker()
-                        return python_score
-                return cpp_score
-            return self._python_score(graph, cutoff=cutoff)
-        return self._python_score(graph, cutoff=cutoff)
+        return self._cpp_score(graph, cutoff)
 
-    def _audit_cpp_global_record(
-        self,
-        graph: BitGraph,
-        cpp_score: ScoreResult,
-    ) -> ScoreResult:
-        python_score = self._python_score(
-            graph,
-            record_profile=False,
-            cutoff=None,
-        )
-        if python_score is None:
-            raise RuntimeError("full Python score unexpectedly returned no result")
-        self.score_backend_batch["python_audits"] += 1
-        if cpp_score != python_score:
-            self.score_backend_batch["parity_mismatches"] += 1
-            self._disable_score_worker()
-            return python_score
-        return cpp_score
-
-    def _cpp_score_with_fallback(
+    def _cpp_score(
         self,
         graph: BitGraph,
         cutoff: (
@@ -1383,14 +1262,14 @@ class _LaneKernel:
         ),
     ) -> ScoreResult | None:
         worker = self.score_worker
-        if worker is None or self._count_result_score is None:
-            return self._python_score(graph, cutoff=cutoff)
         cap = int(self.parameters["witness_cap"])
         node_budget = max(4_096, min(50_000, cap * 1_024))
+        last_error: BaseException | None = None
         for attempt in range(2):
             try:
                 response = worker.score(
                     graph,
+                    lengths=self.plugin.forbidden_lengths(graph.n),
                     limit=cap + 1,
                     node_budget=node_budget,
                     cutoff=(
@@ -1410,7 +1289,6 @@ class _LaneKernel:
                 if response.dominated:
                     if (
                         self.score_profile is not None
-                        and self.score_backend_effective == "cpp"
                         and self._record_count_profile is not None
                     ):
                         self._record_count_profile(
@@ -1423,78 +1301,24 @@ class _LaneKernel:
                     graph,
                     cap,
                     response.results,
-                    (
-                        self.score_profile
-                        if self.score_backend_effective == "cpp"
-                        else None
-                    ),
+                    self.score_profile,
                 )
-            except (OSError, ScoreWorkerError, ValueError):
+            except (OSError, ScoreWorkerError, ValueError) as error:
+                last_error = error
                 if attempt == 0:
                     self.score_backend_batch["worker_restarts"] += 1
                     try:
                         worker.restart()
-                    except ScoreWorkerError:
+                    except ScoreWorkerError as restart_error:
+                        last_error = restart_error
                         break
-        self.score_backend_batch["fallbacks"] += 1
-        self._disable_score_worker()
-        return self._python_score(graph, cutoff=cutoff)
-
-    def _disable_score_worker(self) -> None:
-        if self.score_worker is not None:
-            self.score_worker.close()
-            self.score_worker = None
-        self.score_backend_effective = "python"
-
-    def _python_score(
-        self,
-        graph: BitGraph,
-        *,
-        record_profile: bool = True,
-        cutoff: (
-            tuple[tuple[int, int, int, int, int], bool] | None
-        ) = None,
-    ) -> ScoreResult | None:
-        cap = int(self.parameters["witness_cap"])
-        if (
-            cutoff is not None
-            and self._cutoff_score is not None
-            and self.score_workspace is not None
-        ):
-            return self._cutoff_score(
-                graph,
-                cap,
-                self.score_workspace,
-                self.score_profile if record_profile else None,
-                cutoff[0],
-                inclusive=cutoff[1],
-            )
-        if (
-            record_profile
-            and self.score_profile is not None
-            and self._profiled_score is not None
-            and self.score_workspace is not None
-        ):
-            return self._profiled_score(
-                graph, cap, self.score_workspace, self.score_profile
-            )
-        if self._workspace_score is not None and self.score_workspace is not None:
-            return self._workspace_score(
-                graph, cap, self.score_workspace, None
-            )
-        if self.timing_ns is not None and self.score_profiling_enabled:
-            started = time.perf_counter_ns()
-            score = self.plugin.cheap_score(graph, cap)
-            self.timing_ns["score_calculation"] += (
-                time.perf_counter_ns() - started
-            )
-            return score
-        return self.plugin.cheap_score(graph, cap)
+        worker.close()
+        raise ScoreWorkerError(
+            "mandatory C++ score worker failed after one restart"
+        ) from last_error
 
     def close(self) -> None:
-        if self.score_worker is not None:
-            self.score_worker.close()
-            self.score_worker = None
+        self.score_worker.close()
 
     def checkpoint(self, lane_version: int) -> dict[str, Any]:
         current_candidate_id = self.current_candidate_id
@@ -1651,18 +1475,16 @@ def _lane_worker(
     preview_thread: Thread | None = None
     kernel: _LaneKernel | None = None
     try:
-        requested_backend = os.environ.get(
-            "SGLAB_SCORE_BACKEND", "python"
-        ).strip()
-        worker_enabled = (
-            requested_backend in {"shadow", "cpp"}
-            and (
-                memory_limit_bytes is None
-                or memory_limit_bytes >= 128 * 1024 * 1024
+        if (
+            memory_limit_bytes is not None
+            and memory_limit_bytes < 128 * 1024 * 1024
+        ):
+            raise RuntimeError(
+                "lane memory limit must be at least 128 MiB for the "
+                "mandatory C++ score worker"
             )
-        )
         parent_memory_limit = memory_limit_bytes
-        if worker_enabled and memory_limit_bytes is not None:
+        if memory_limit_bytes is not None:
             parent_memory_limit = (
                 memory_limit_bytes - DEFAULT_WORKER_MEMORY_BYTES
             )
@@ -1673,7 +1495,6 @@ def _lane_worker(
             fork_seed,
             score_profiling_enabled=score_profiling_enabled,
             score_worker_memory_bytes=DEFAULT_WORKER_MEMORY_BYTES,
-            score_worker_enabled=worker_enabled,
         )
         lane_version = spec.lane_version
         resource_share = spec.resource_share

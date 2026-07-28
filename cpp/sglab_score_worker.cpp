@@ -11,7 +11,7 @@ namespace {
 
 __extension__ using Bits = unsigned __int128;
 
-constexpr std::uint16_t kProtocolVersion = 1;
+constexpr std::uint16_t kProtocolVersion = 2;
 constexpr std::uint16_t kCommandScore = 1;
 constexpr std::uint16_t kCommandQuit = 2;
 constexpr std::uint16_t kStatusOk = 0;
@@ -30,6 +30,7 @@ struct Request {
     std::uint32_t cutoff_weighted = 0;
     std::uint32_t cutoff_simplicity = 0;
     bool cutoff_inclusive = false;
+    std::vector<std::uint16_t> lengths;
     std::vector<Bits> rows;
 };
 
@@ -207,6 +208,8 @@ Request read_request(
     request.cutoff_weighted = read_u32();
     request.cutoff_simplicity = read_u32();
     request.cutoff_inclusive = read_u32() != 0;
+    const std::uint16_t length_count = read_u16();
+    const std::uint16_t reserved = read_u16();
     if (command != kCommandScore) {
         throw std::runtime_error("unsupported command");
     }
@@ -220,15 +223,30 @@ Request read_request(
     }
     if (request.limit < 2
         || request.node_budget == 0
-        || (request.flags & ~1U) != 0) {
+        || (request.flags & ~1U) != 0
+        || length_count > 64
+        || reserved != 0) {
         throw std::runtime_error("invalid score request");
     }
     const std::uint32_t expected_payload =
+        static_cast<std::uint32_t>(length_count) * sizeof(std::uint16_t)
+        +
         static_cast<std::uint32_t>(request.order)
         * request.word_count * sizeof(std::uint64_t);
     if (payload_bytes != expected_payload
         || payload_bytes > kMaximumPayloadBytes) {
         throw std::runtime_error("invalid adjacency payload size");
+    }
+    request.lengths.reserve(length_count);
+    for (std::uint16_t index = 0; index < length_count; ++index) {
+        const std::uint16_t length = read_u16();
+        if (length < 3
+            || length > request.order
+            || (!request.lengths.empty()
+                && length <= request.lengths.back())) {
+            throw std::runtime_error("invalid cycle lengths");
+        }
+        request.lengths.push_back(length);
     }
     request.rows.assign(request.order, 0);
     for (std::uint16_t row = 0; row < request.order; ++row) {
@@ -324,9 +342,7 @@ int serve() {
             }
             simplicity /= 2U;
             std::uint16_t response_status = kStatusOk;
-            for (std::uint16_t length = 4;
-                 length <= request.order;
-                 length = static_cast<std::uint16_t>(length * 2U)) {
+            for (const std::uint16_t length : request.lengths) {
                 if (cutoff_reached(
                         request,
                         partial_total,
@@ -384,7 +400,7 @@ int serve() {
 
 int main(int argc, char** argv) {
     if (argc == 2 && std::string(argv[1]) == "--version") {
-        std::cout << "sglab-score-worker 1\n";
+        std::cout << "sglab-score-worker 2\n";
         return 0;
     }
     if (argc == 2 && std::string(argv[1]) == "--serve") {

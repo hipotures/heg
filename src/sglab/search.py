@@ -26,6 +26,11 @@ from .model import BitGraph
 from .resources import current_rss_bytes, disk_free_bytes, recommended_workers
 from .resources import run_bounded, set_address_space_limit
 from .resources import sqlite_size_bytes
+from .score_worker import (
+    DEFAULT_WORKER_MEMORY_BYTES,
+    PersistentScoreWorker,
+    ScoreWorkerError,
+)
 from .state import append_event, atomic_write_json, read_json, utc_now
 from .targets import TARGETS
 from .targets.base import ScoreResult
@@ -240,10 +245,43 @@ def _worker(
     stop: Event,
     pause: Event,
     resume_checkpoint: dict[str, Any] | None = None,
+    *,
+    score_worker: PersistentScoreWorker,
 ) -> None:
-    set_address_space_limit(config.memory_limit_bytes or None)
     plugin = TARGETS[config.target]
     rng = Random(config.seed + worker_id * 1_000_003)
+
+    def score_graph(candidate: BitGraph) -> ScoreResult:
+        node_budget = max(
+            4_096, min(50_000, config.witness_cap * 1_024)
+        )
+        last_error: BaseException | None = None
+        for attempt in range(2):
+            try:
+                response = score_worker.score(
+                    candidate,
+                    lengths=plugin.forbidden_lengths(candidate.n),
+                    limit=config.witness_cap + 1,
+                    node_budget=node_budget,
+                )
+                return plugin.score_from_cycle_counts(
+                    candidate,
+                    config.witness_cap,
+                    response.results,
+                    None,
+                )
+            except (OSError, ScoreWorkerError, ValueError) as error:
+                last_error = error
+                if attempt == 0:
+                    try:
+                        score_worker.restart()
+                    except ScoreWorkerError as restart_error:
+                        last_error = restart_error
+                        break
+        raise ScoreWorkerError(
+            "mandatory C++ score worker failed after one restart"
+        ) from last_error
+
     if resume_checkpoint:
         graph = BitGraph.from_graph6(str(resume_checkpoint["graph6"]))
         rng.setstate(ast.literal_eval(str(resume_checkpoint["rng_state"])))
@@ -263,7 +301,7 @@ def _worker(
     else:
         graph = plugin.generate_seed(rng, {"order": config.order, "mode": config.mode})
         score = replace(
-            plugin.cheap_score(graph, config.witness_cap),
+            score_graph(graph),
             novelty=1.0,
         )
         best_graph, best_score = graph, score
@@ -330,7 +368,7 @@ def _worker(
                 rng, {"order": config.order, "mode": config.mode}
             )
             score = replace(
-                plugin.cheap_score(graph, config.witness_cap),
+                score_graph(graph),
                 novelty=_novelty(graph, best_graph),
             )
             tabu = [graph.stable_hash()]
@@ -343,7 +381,7 @@ def _worker(
             continue
         legal += 1
         candidate_score = replace(
-            plugin.cheap_score(candidate, config.witness_cap),
+            score_graph(candidate),
             novelty=_novelty(candidate, best_graph),
         )
         accept = False
@@ -442,7 +480,26 @@ def _worker_entry(
     pause: Event,
     resume_checkpoint: dict[str, Any] | None = None,
 ) -> None:
+    score_worker: PersistentScoreWorker | None = None
     try:
+        if (
+            config.memory_limit_bytes
+            and config.memory_limit_bytes < 128 * 1024 * 1024
+        ):
+            raise ScoreWorkerError(
+                "worker memory limit must be at least 128 MiB for the "
+                "mandatory C++ scorer"
+            )
+        parent_memory_limit = (
+            config.memory_limit_bytes - DEFAULT_WORKER_MEMORY_BYTES
+            if config.memory_limit_bytes
+            else None
+        )
+        set_address_space_limit(parent_memory_limit)
+        score_worker = PersistentScoreWorker(
+            memory_limit_bytes=DEFAULT_WORKER_MEMORY_BYTES
+        )
+        score_worker.start()
         _worker(
             worker_id,
             config,
@@ -450,7 +507,20 @@ def _worker_entry(
             stop,
             pause,
             resume_checkpoint,
+            score_worker=score_worker,
         )
+    except ScoreWorkerError as error:
+        _put(
+            queue,
+            {
+                "kind": "exit",
+                "worker": worker_id,
+                "reason": "score_worker",
+                "error": f"{type(error).__name__}: {error}",
+            },
+            important=True,
+        )
+        raise SystemExit(78) from error
     except MemoryError as error:
         _put(
             queue,
@@ -474,6 +544,9 @@ def _worker_entry(
             important=True,
         )
         raise
+    finally:
+        if score_worker is not None:
+            score_worker.close()
 
 
 def _environment() -> dict[str, Any]:
@@ -926,6 +999,8 @@ def _run_search_locked(config: SearchConfig, resume_run: Path | None = None) -> 
                     and process.exitcode is not None
                 ):
                     reason = worker_exit_reasons.get(worker_id)
+                    if process.exitcode == 78:
+                        reason = "score_worker"
                     checkpoint_data = worker_checkpoints.get(worker_id, {})
                     last_rss_bytes = worker_last_rss[worker_id]
                     if process.exitcode == 0 and reason is None:
@@ -951,6 +1026,21 @@ def _run_search_locked(config: SearchConfig, resume_run: Path | None = None) -> 
                         continue
                     if reason != "recycle":
                         worker_failure_restarts[worker_id] += 1
+                    if reason == "score_worker":
+                        unrecoverable_worker_failure = True
+                        log_event(
+                            "worker_abandoned",
+                            worker=worker_id,
+                            reason=reason,
+                            prior_exitcode=process.exitcode,
+                            last_candidate_id=_checkpoint_candidate_id(
+                                checkpoint_data
+                            ),
+                            last_rss_bytes=last_rss_bytes,
+                            retry=False,
+                        )
+                        stop.set()
+                        continue
                     if worker_failure_restarts[worker_id] > 3:
                         if reason == "memory":
                             worker_memory_failure = True

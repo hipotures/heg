@@ -29,6 +29,7 @@ from ..resource_accounting import (
     discover_trusted_codex_roots,
 )
 from ..state import atomic_write_json, read_json, utc_now
+from ..score_worker import PROTOCOL_VERSION
 from ..targets import TARGETS
 from .actions import LaneActionDispatcher
 from .app_server_client import AppServerClient, AppServerConfig
@@ -95,23 +96,17 @@ CONTROLLER_MODES = {
 }
 
 
-def _score_backend_runtime_provenance() -> dict[str, Any]:
+def _score_runtime_provenance() -> dict[str, Any]:
     binary = score_worker_path().resolve()
     return {
-        "score_backend_requested": os.environ.get(
-            "SGLAB_SCORE_BACKEND", "python"
-        ),
-        "score_early_exit_requested": (
-            os.environ.get("SGLAB_SCORE_EARLY_EXIT", "0") == "1"
-        ),
-        "fast_duplicate_key_requested": (
-            os.environ.get("SGLAB_FAST_DUPLICATE_KEY", "0") == "1"
-        ),
+        "implementation": "cpp",
+        "early_exit_enabled": True,
+        "duplicate_key_scheme": "delta_local_v2",
         "score_worker": {
             "path": str(binary),
             "available": binary.is_file(),
             "sha256": hash_file(binary) if binary.is_file() else None,
-            "protocol_version": 1,
+            "protocol_version": PROTOCOL_VERSION,
         },
     }
 
@@ -1370,7 +1365,7 @@ class ResearchCampaignRunner:
                 runtime_provenance={
                     "fresh_process": True,
                     "historical_stale_actions_terminalized": stale_actions,
-                    **_score_backend_runtime_provenance(),
+                    **_score_runtime_provenance(),
                 },
                 process_id=os.getpid(),
             )
@@ -1399,7 +1394,7 @@ class ResearchCampaignRunner:
                 starting_memory_snapshot_id=None,
                 starting_memory_sha256=None,
                 starting_checkpoint_refs=[],
-                runtime_provenance=_score_backend_runtime_provenance(),
+                runtime_provenance=_score_runtime_provenance(),
                 process_id=os.getpid(),
             )
         application_data = campaign_attempt_application_data(

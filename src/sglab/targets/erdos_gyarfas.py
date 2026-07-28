@@ -8,8 +8,6 @@ import math
 
 from ..model import (
     BitGraph,
-    CycleCountWorkspace,
-    count_cycles_of_length_bounded_into,
     find_cycle_of_length,
     find_cycles_of_length_bounded,
 )
@@ -33,7 +31,7 @@ def forbidden_lengths(n: int) -> tuple[int, ...]:
     return tuple(values)
 
 
-PROFILED_CYCLE_LENGTHS = (4, 8, 16, 32, 64, 128)
+PROFILED_CYCLE_LENGTHS = (3, 4, 8, 16, 32, 64, 128)
 
 
 @dataclass(slots=True)
@@ -154,10 +152,6 @@ class ErdosGyarfasPlugin:
         if graph.minimum_degree() < 3:
             return ValidationResult(False, "minimum degree is below 3")
         return ValidationResult(True, "valid structural candidate")
-
-    @staticmethod
-    def new_score_workspace(order: int) -> CycleCountWorkspace:
-        return CycleCountWorkspace.for_order(order)
 
     @staticmethod
     def new_score_profile() -> ScoreProfileAccumulator:
@@ -398,188 +392,6 @@ class ErdosGyarfasPlugin:
                     added_edges=additions,
                 )
         return None
-
-    def cheap_score(self, graph: BitGraph, cap: int) -> ScoreResult:
-        return self.cheap_score_with_workspace(
-            graph,
-            cap,
-            CycleCountWorkspace.for_order(graph.n),
-            None,
-        )
-
-    def cheap_score_profiled(
-        self,
-        graph: BitGraph,
-        cap: int,
-        workspace: CycleCountWorkspace,
-        profile: ScoreProfileAccumulator,
-    ) -> ScoreResult:
-        """Accumulate one score into batch-local integer counters."""
-
-        return self.cheap_score_with_workspace(graph, cap, workspace, profile)
-
-    def cheap_score_with_workspace(
-        self,
-        graph: BitGraph,
-        cap: int,
-        workspace: CycleCountWorkspace,
-        profile: ScoreProfileAccumulator | None,
-    ) -> ScoreResult:
-        if profile is None:
-            validation = self.validate_graph(graph)
-        else:
-            started = perf_counter_ns()
-            validation = self.validate_graph(graph)
-            profile.graph_validation_ns += perf_counter_ns() - started
-        if not validation.valid:
-            score_started = perf_counter_ns() if profile is not None else 0
-            score = ScoreResult(
-                False, (), 10**9, True, simplicity=graph.size()
-            )
-            if profile is not None:
-                profile.score_calculation_ns += (
-                    perf_counter_ns() - score_started
-                )
-            return score
-
-        counts: list[tuple[int, int]] = []
-        weighted = 0
-        complete = True
-        node_budget = max(4_096, min(50_000, cap * 1_024))
-        for index, length in enumerate(self.forbidden_lengths(graph.n)):
-            if profile is None:
-                count_cycles_of_length_bounded_into(
-                    graph, length, cap + 1, node_budget, workspace
-                )
-            else:
-                witness_started = perf_counter_ns()
-                count_cycles_of_length_bounded_into(
-                    graph, length, cap + 1, node_budget, workspace
-                )
-                elapsed = perf_counter_ns() - witness_started
-                profile.witness_counting_ns += elapsed
-                profile.cycle_ns[index] += elapsed
-                profile.cycle_nodes[index] += workspace.visited_nodes
-                profile.cycle_evaluations[index] += 1
-                profile.cycle_complete[index] += int(
-                    workspace.complete and workspace.count <= cap
-                )
-
-            score_started = perf_counter_ns() if profile is not None else 0
-            count = min(workspace.count, cap)
-            counts.append((length, count))
-            weighted += count * max(1, 64 // length)
-            if workspace.count > cap or not workspace.complete:
-                complete = False
-            if profile is not None:
-                profile.score_calculation_ns += (
-                    perf_counter_ns() - score_started
-                )
-
-        score_started = perf_counter_ns() if profile is not None else 0
-        score = ScoreResult(
-            True,
-            tuple(counts),
-            weighted,
-            complete,
-            simplicity=graph.size(),
-        )
-        if profile is not None:
-            profile.score_calculation_ns += (
-                perf_counter_ns() - score_started
-            )
-        return score
-
-    def cheap_score_with_cutoff(
-        self,
-        graph: BitGraph,
-        cap: int,
-        workspace: CycleCountWorkspace,
-        profile: ScoreProfileAccumulator | None,
-        cutoff_key: tuple[int, int, int, int, int],
-        *,
-        inclusive: bool,
-    ) -> ScoreResult | None:
-        """Return None once a monotone partial score is dominated."""
-
-        if profile is None:
-            validation = self.validate_graph(graph)
-        else:
-            started = perf_counter_ns()
-            validation = self.validate_graph(graph)
-            profile.graph_validation_ns += perf_counter_ns() - started
-        if not validation.valid:
-            return ScoreResult(
-                False, (), 10**9, True, simplicity=graph.size()
-            )
-        counts: list[tuple[int, int]] = []
-        weighted = 0
-        total = 0
-        complete = True
-        simplicity = graph.size()
-        node_budget = max(4_096, min(50_000, cap * 1_024))
-        for index, length in enumerate(self.forbidden_lengths(graph.n)):
-            lower_bound = (0, total, weighted, 0, simplicity)
-            if lower_bound > cutoff_key or (
-                inclusive and lower_bound == cutoff_key
-            ):
-                return None
-            weight = max(1, 64 // length)
-            stop_at_count = None
-            for possible_count in range(1, cap + 2):
-                bounded = min(possible_count, cap)
-                possible_key = (
-                    0,
-                    total + bounded,
-                    weighted + bounded * weight,
-                    0,
-                    simplicity,
-                )
-                if possible_key > cutoff_key or (
-                    inclusive and possible_key == cutoff_key
-                ):
-                    stop_at_count = possible_count
-                    break
-            witness_started = (
-                perf_counter_ns() if profile is not None else 0
-            )
-            count_cycles_of_length_bounded_into(
-                graph,
-                length,
-                cap + 1,
-                node_budget,
-                workspace,
-                stop_at_count,
-            )
-            if profile is not None:
-                elapsed = perf_counter_ns() - witness_started
-                profile.witness_counting_ns += elapsed
-                profile.cycle_ns[index] += elapsed
-                profile.cycle_nodes[index] += workspace.visited_nodes
-                profile.cycle_evaluations[index] += 1
-                profile.cycle_cutoff[index] += int(
-                    workspace.cutoff_reached
-                )
-                profile.cycle_complete[index] += int(
-                    not workspace.cutoff_reached
-                    and workspace.complete
-                    and workspace.count <= cap
-                )
-            if workspace.cutoff_reached:
-                return None
-            count = min(workspace.count, cap)
-            counts.append((length, count))
-            total += count
-            weighted += count * weight
-            if workspace.count > cap or not workspace.complete:
-                complete = False
-        return ScoreResult(
-            True,
-            tuple(counts),
-            weighted,
-            complete,
-            simplicity=simplicity,
-        )
 
     def score_from_cycle_counts(
         self,

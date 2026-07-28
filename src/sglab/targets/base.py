@@ -5,6 +5,7 @@ from random import Random
 from typing import Any, Literal, Protocol
 
 from ..model import BitGraph
+from ..score_worker import CycleCountResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,7 +70,13 @@ class TargetPlugin(Protocol):
     def mutate(
         self, graph: BitGraph, rng: Random, config: dict[str, Any]
     ) -> BitGraph: ...
-    def cheap_score(self, graph: BitGraph, cap: int) -> ScoreResult: ...
+    def score_from_cycle_counts(
+        self,
+        graph: BitGraph,
+        cap: int,
+        results: tuple[CycleCountResult, ...],
+        profile: object | None,
+    ) -> ScoreResult: ...
     def exact_verify(self, graph: BitGraph) -> VerifyResult: ...
     def canonical_key(self, graph: BitGraph) -> bytes: ...
     def explain(self, graph: BitGraph, result: VerifyResult) -> dict[str, Any]: ...
