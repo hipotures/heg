@@ -18,6 +18,9 @@ constexpr std::uint16_t kStatusOk = 0;
 constexpr std::uint16_t kStatusError = 1;
 constexpr std::uint16_t kStatusDominated = 2;
 constexpr std::uint32_t kMaximumPayloadBytes = 64U * 1024U;
+constexpr std::uint32_t kCutoffFlag = 1U;
+constexpr std::uint32_t kCompactDominatedFlag = 4U;
+constexpr std::uint32_t kKnownRequestFlags = 7U;
 
 struct Request {
     std::uint64_t request_id = 0;
@@ -223,7 +226,10 @@ Request read_request(
     }
     if (request.limit < 2
         || request.node_budget == 0
-        || (request.flags & ~3U) != 0
+        || (request.flags & ~kKnownRequestFlags) != 0
+        || (
+            (request.flags & kCompactDominatedFlag) != 0
+            && (request.flags & kCutoffFlag) == 0)
         || length_count > 64
         || reserved != 0) {
         throw std::runtime_error("invalid score request");
@@ -401,12 +407,18 @@ int serve() {
                     break;
                 }
             }
-            std::sort(
-                results.begin(),
-                results.end(),
-                [](const CountResult& left, const CountResult& right) {
-                    return left.length < right.length;
-                });
+            if (
+                response_status == kStatusDominated
+                && (request.flags & kCompactDominatedFlag) != 0) {
+                results.clear();
+            } else {
+                std::sort(
+                    results.begin(),
+                    results.end(),
+                    [](const CountResult& left, const CountResult& right) {
+                        return left.length < right.length;
+                    });
+            }
             write_response(request.request_id, response_status, results);
         } catch (const std::exception&) {
             write_response(request.request_id, kStatusError, {});

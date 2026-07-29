@@ -387,6 +387,15 @@ class PersistentScoreWorkerTests(unittest.TestCase):
                 cutoff=cutoff,
                 cutoff_inclusive=False,
             )
+            compact_exclusive = worker.score(
+                graph,
+                lengths=lengths,
+                limit=65,
+                node_budget=50_000,
+                cutoff=cutoff,
+                cutoff_inclusive=False,
+                compact_dominated=True,
+            )
 
         self.assertTrue(inclusive.dominated)
         self.assertFalse(exclusive.dominated)
@@ -398,6 +407,17 @@ class PersistentScoreWorkerTests(unittest.TestCase):
             tuple(
                 (result.length, result.count, result.complete, result.nodes)
                 for result in full.results
+            ),
+        )
+        self.assertFalse(compact_exclusive.dominated)
+        self.assertEqual(
+            tuple(
+                (result.length, result.count, result.complete, result.nodes)
+                for result in compact_exclusive.results
+            ),
+            tuple(
+                (result.length, result.count, result.complete, result.nodes)
+                for result in exclusive.results
             ),
         )
         self.assertIsNotNone(full.timing)
@@ -438,6 +458,15 @@ class PersistentScoreWorkerTests(unittest.TestCase):
                 cutoff=(64, 256, graph.size()),
                 cutoff_inclusive=True,
             )
+            compact = worker.score(
+                graph,
+                lengths=forbidden_lengths(graph.n),
+                limit=65,
+                node_budget=50_000,
+                cutoff=(64, 256, graph.size()),
+                cutoff_inclusive=True,
+                compact_dominated=True,
+            )
             ascending = ascending_worker.score(
                 graph,
                 lengths=forbidden_lengths(graph.n),
@@ -461,11 +490,30 @@ class PersistentScoreWorkerTests(unittest.TestCase):
             tuple(result.length for result in dominated.results),
             (16,),
         )
+        self.assertTrue(compact.dominated)
+        self.assertEqual(compact.results, ())
         self.assertTrue(ascending.dominated)
         self.assertEqual(
             tuple(result.length for result in ascending.results),
             (4, 8, 16),
         )
+
+    def test_worker_rejects_compact_response_without_cutoff(self) -> None:
+        graph = PLUGIN.generate_seed(
+            Random(101), {"order": 30, "mode": "cubic_first"}
+        )
+        with PersistentScoreWorker() as worker:
+            with self.assertRaisesRegex(
+                ValueError,
+                "compact dominated responses require a cutoff",
+            ):
+                worker.score(
+                    graph,
+                    lengths=forbidden_lengths(graph.n),
+                    limit=65,
+                    node_budget=50_000,
+                    compact_dominated=True,
+                )
 
     def test_worker_counts_target_supplied_triangle_length(self) -> None:
         graph = BitGraph.from_edges(

@@ -27,6 +27,7 @@ _REQUEST_PREFIX = struct.Struct("<4sHHI")
 _REQUEST_BODY = struct.Struct("<QHHIIIIIIIHH")
 _RESPONSE_HEADER = struct.Struct("<4sHHQHHI")
 _COUNT_RESULT = struct.Struct("<HBBIQQ")
+_COMPACT_DOMINATED_FLAG = 4
 
 
 class ScoreWorkerError(RuntimeError):
@@ -120,6 +121,7 @@ class PersistentScoreWorker:
         node_budget: int,
         cutoff: tuple[int, int, int] | None = None,
         cutoff_inclusive: bool = False,
+        compact_dominated: bool = False,
         profile_timing: bool = False,
     ) -> ScoreWorkerResponse:
         if limit < 1 or node_budget < 1:
@@ -138,6 +140,10 @@ class PersistentScoreWorker:
             raise ValueError(
                 "score-worker lengths must be unique, increasing and "
                 "between 3 and the graph order"
+            )
+        if compact_dominated and cutoff is None:
+            raise ValueError(
+                "compact dominated responses require a cutoff"
             )
         if self.process is None:
             self.start()
@@ -178,6 +184,11 @@ class PersistentScoreWorker:
                 (
                     1
                     | (2 if self.cutoff_longest_first else 0)
+                    | (
+                        _COMPACT_DOMINATED_FLAG
+                        if compact_dominated
+                        else 0
+                    )
                     if cutoff is not None
                     else 0
                 ),
