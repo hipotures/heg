@@ -223,7 +223,7 @@ Request read_request(
     }
     if (request.limit < 2
         || request.node_budget == 0
-        || (request.flags & ~1U) != 0
+        || (request.flags & ~3U) != 0
         || length_count > 64
         || reserved != 0) {
         throw std::runtime_error("invalid score request");
@@ -350,7 +350,7 @@ int serve() {
                 ++evaluation_index
             ) {
                 const std::size_t length_index =
-                    (request.flags & 1U) != 0
+                    (request.flags & 2U) != 0
                     ? request.lengths.size() - 1U - evaluation_index
                     : evaluation_index;
                 const std::uint16_t length =

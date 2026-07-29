@@ -418,7 +418,12 @@ class PersistentScoreWorkerTests(unittest.TestCase):
         graph = PLUGIN.generate_seed(
             Random(101), {"order": 30, "mode": "cubic_first"}
         )
-        with PersistentScoreWorker() as worker:
+        with (
+            PersistentScoreWorker() as worker,
+            PersistentScoreWorker(
+                cutoff_longest_first=False
+            ) as ascending_worker,
+        ):
             full = worker.score(
                 graph,
                 lengths=forbidden_lengths(graph.n),
@@ -426,6 +431,14 @@ class PersistentScoreWorkerTests(unittest.TestCase):
                 node_budget=50_000,
             )
             dominated = worker.score(
+                graph,
+                lengths=forbidden_lengths(graph.n),
+                limit=65,
+                node_budget=50_000,
+                cutoff=(64, 256, graph.size()),
+                cutoff_inclusive=True,
+            )
+            ascending = ascending_worker.score(
                 graph,
                 lengths=forbidden_lengths(graph.n),
                 limit=65,
@@ -447,6 +460,11 @@ class PersistentScoreWorkerTests(unittest.TestCase):
         self.assertEqual(
             tuple(result.length for result in dominated.results),
             (16,),
+        )
+        self.assertTrue(ascending.dominated)
+        self.assertEqual(
+            tuple(result.length for result in ascending.results),
+            (4, 8, 16),
         )
 
     def test_worker_counts_target_supplied_triangle_length(self) -> None:

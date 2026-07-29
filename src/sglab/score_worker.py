@@ -67,6 +67,7 @@ class PersistentScoreWorker:
         *,
         timeout_seconds: float = DEFAULT_REQUEST_TIMEOUT_SECONDS,
         memory_limit_bytes: int = DEFAULT_WORKER_MEMORY_BYTES,
+        cutoff_longest_first: bool = True,
     ):
         if timeout_seconds <= 0:
             raise ValueError("score-worker timeout must be positive")
@@ -75,6 +76,7 @@ class PersistentScoreWorker:
         self.binary = (binary or score_worker_path()).resolve()
         self.timeout_seconds = timeout_seconds
         self.memory_limit_bytes = memory_limit_bytes
+        self.cutoff_longest_first = cutoff_longest_first
         self.process: Popen[bytes] | None = None
         self.request_id = 0
         self.binary_sha256 = (
@@ -173,7 +175,12 @@ class PersistentScoreWorker:
                 word_count,
                 limit,
                 node_budget,
-                1 if cutoff is not None else 0,
+                (
+                    1
+                    | (2 if self.cutoff_longest_first else 0)
+                    if cutoff is not None
+                    else 0
+                ),
                 cutoff[0] if cutoff is not None else 0,
                 cutoff[1] if cutoff is not None else 0,
                 cutoff[2] if cutoff is not None else 0,
