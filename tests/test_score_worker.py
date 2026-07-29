@@ -76,6 +76,183 @@ def _logical_checkpoint(kernel: _LaneKernel) -> tuple[object, ...]:
     )
 
 
+def _legacy_forbidden_witness_edge_choices(
+    graph: BitGraph,
+) -> tuple[tuple[tuple[int, int], ...], ...]:
+    witnesses = []
+    for length in forbidden_lengths(graph.n):
+        found, _complete = find_cycles_of_length_bounded(
+            graph, length, 2, 4_096
+        )
+        witnesses.extend(found[:1])
+    return tuple(
+        tuple(
+            tuple(
+                sorted(
+                    (
+                        witness[index],
+                        witness[(index + 1) % len(witness)],
+                    )
+                )
+            )
+            for index in range(len(witness))
+        )
+        for witness in witnesses
+    )
+
+
+class DirectMutationWitnessContextTests(unittest.TestCase):
+    def test_direct_context_reuses_and_replaces_one_graph_entry(self) -> None:
+        graph = PLUGIN.generate_seed(
+            Random(14), {"order": 30, "mode": "cubic_first"}
+        )
+        replacement = PLUGIN.generate_seed(
+            Random(15), {"order": 30, "mode": "cubic_first"}
+        )
+        profile = PLUGIN.new_mutation_profile()
+        context = PLUGIN.new_mutation_context()
+        config = {
+            "mode": "cubic_first",
+            "mutation_operator": "forbidden_cycle_break_switch",
+            "forbidden_witness_context": context,
+            "mutation_profile": profile,
+        }
+
+        PLUGIN.mutate_with_delta(graph, Random(1), config)
+        PLUGIN.mutate_with_delta(graph, Random(2), config)
+        self.assertEqual(profile.witness_searches, 1)
+        self.assertEqual(profile.witness_cache_lookups, 2)
+        self.assertEqual(profile.witness_cache_hits, 1)
+        self.assertEqual(profile.witness_cache_misses, 1)
+
+        PLUGIN.mutate_with_delta(replacement, Random(3), config)
+        PLUGIN.mutate_with_delta(replacement, Random(4), config)
+        self.assertEqual(profile.witness_searches, 2)
+        self.assertEqual(profile.witness_cache_lookups, 4)
+        self.assertEqual(profile.witness_cache_hits, 2)
+        self.assertEqual(profile.witness_cache_misses, 2)
+        self.assertIs(context._graph, replacement)
+
+        context.invalidate()
+        self.assertIsNone(context._graph)
+        self.assertEqual(context._choices, ())
+        PLUGIN.mutate_with_delta(replacement, Random(5), config)
+        self.assertEqual(profile.witness_searches, 3)
+        self.assertEqual(profile.witness_cache_misses, 3)
+
+    def test_direct_context_preserves_candidates_and_rng(self) -> None:
+        initial = PLUGIN.generate_seed(
+            Random(140), {"order": 30, "mode": "cubic_first"}
+        )
+        uncached_graph = initial
+        cached_graph = initial
+        uncached_rng = Random(141)
+        cached_rng = Random(141)
+        context = PLUGIN.new_mutation_context()
+        uncached_candidates = []
+        cached_candidates = []
+
+        for evaluation in range(100):
+            uncached = PLUGIN.mutate_with_delta(
+                uncached_graph,
+                uncached_rng,
+                {
+                    "mode": "cubic_first",
+                    "mutation_operator": "forbidden_cycle_break_switch",
+                },
+            )
+            cached = PLUGIN.mutate_with_delta(
+                cached_graph,
+                cached_rng,
+                {
+                    "mode": "cubic_first",
+                    "mutation_operator": "forbidden_cycle_break_switch",
+                    "forbidden_witness_context": context,
+                },
+            )
+            uncached_candidates.append(uncached)
+            cached_candidates.append(cached)
+            self.assertEqual(uncached_rng.getstate(), cached_rng.getstate())
+            if evaluation % 3 == 0:
+                uncached_graph = uncached.graph
+                cached_graph = cached.graph
+
+        self.assertEqual(uncached_candidates, cached_candidates)
+        self.assertEqual(uncached_graph, cached_graph)
+
+    def test_limit_one_preserves_legacy_first_witness_choices(self) -> None:
+        for order, seed in ((8, 81), (16, 161), (30, 301)):
+            graph = PLUGIN.generate_seed(
+                Random(seed),
+                {"order": order, "mode": "cubic_first"},
+            )
+            self.assertEqual(
+                PLUGIN.forbidden_witness_edge_choices(graph),
+                _legacy_forbidden_witness_edge_choices(graph),
+            )
+
+    def test_empty_choices_are_cached_and_preserve_noop_rng(self) -> None:
+        graph = BitGraph.from_edges(
+            5, ((0, 1), (1, 2), (2, 3), (3, 4), (0, 4))
+        )
+        profile = PLUGIN.new_mutation_profile()
+        context = PLUGIN.new_mutation_context()
+        rng = Random(51)
+        initial_rng_state = rng.getstate()
+        config = {
+            "mode": "cubic_first",
+            "mutation_operator": "forbidden_cycle_break_switch",
+            "forbidden_witness_context": context,
+            "mutation_profile": profile,
+        }
+
+        first = PLUGIN.mutate_with_delta(graph, rng, config)
+        second = PLUGIN.mutate_with_delta(graph, rng, config)
+
+        self.assertIs(first.graph, graph)
+        self.assertIs(second.graph, graph)
+        self.assertEqual(rng.getstate(), initial_rng_state)
+        self.assertEqual(profile.witness_searches, 1)
+        self.assertEqual(profile.witness_cache_hits, 1)
+
+    def test_subphase_profile_is_fixed_size_and_accounted(self) -> None:
+        graph = PLUGIN.generate_seed(
+            Random(61), {"order": 30, "mode": "cubic_first"}
+        )
+        profile = PLUGIN.new_mutation_profile()
+        context = PLUGIN.new_mutation_context()
+        config = {
+            "mode": "cubic_first",
+            "mutation_operator": "forbidden_cycle_break_switch",
+            "forbidden_witness_context": context,
+            "mutation_profile": profile,
+        }
+
+        PLUGIN.mutate_with_delta(graph, Random(62), config)
+        PLUGIN.mutate_with_delta(graph, Random(63), config)
+        payload = profile.payload(cache_enabled=True)
+
+        self.assertEqual(payload["witness_cache_lookups"], 2)
+        self.assertEqual(payload["witness_cache_hits"], 1)
+        self.assertEqual(payload["witness_cache_misses"], 1)
+        self.assertEqual(payload["witness_searches"], 1)
+        self.assertEqual(payload["witness_search_cycle_4_calls"], 1)
+        self.assertEqual(payload["witness_search_cycle_8_calls"], 1)
+        self.assertEqual(payload["witness_search_cycle_16_calls"], 1)
+        self.assertEqual(payload["witness_search_cycle_32_calls"], 0)
+        self.assertGreater(payload["witness_search_cycle_4_nodes"], 0)
+        self.assertGreater(payload["switch_attempts"], 0)
+        self.assertGreaterEqual(payload["partner_edge_sampling_ns"], 0)
+        self.assertGreaterEqual(payload["candidate_construction_ns"], 0)
+        self.assertGreaterEqual(payload["connectivity_validation_ns"], 0)
+        self.assertTrue(
+            all(
+                not isinstance(value, (dict, list))
+                for value in payload.values()
+            )
+        )
+
+
 @unittest.skipUnless(
     score_worker_path().is_file(), "C++ score worker has not been built"
 )
@@ -229,6 +406,11 @@ class PersistentScoreWorkerTests(unittest.TestCase):
             profiles[False]["targeted_evaluations"],
         )
         self.assertGreater(profiles[True]["witness_cache_hits"], 0)
+        self.assertEqual(
+            profiles[True]["witness_cache_lookups"],
+            profiles[True]["witness_cache_hits"]
+            + profiles[True]["witness_cache_misses"],
+        )
         self.assertLess(
             profiles[True]["witness_searches"],
             profiles[False]["witness_searches"],

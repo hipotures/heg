@@ -81,17 +81,27 @@ with the completed batch.
 
 Mutation profiling follows the same batch-only contract. Fixed in-memory
 integer accumulators separate uniform, forbidden-cycle-targeted and
-random-restart mutation time, plus targeted witness-search nanoseconds and
-cache hit/miss counts. The aggregated `timing.mutation_profile` is materialized
-only at batch completion and is absent when score profiling is disabled.
+random-restart mutation time. Targeted subphases separately account for cache
+lookups/hits/misses, whole-search calls/time, per-forbidden-length DFS
+calls/nodes/time, witness-edge materialization, partner-edge sampling/switch
+attempts, candidate construction, connectivity checks and graph-family
+validation. The aggregated `timing.mutation_profile` is materialized only at
+batch completion and is absent when score profiling is disabled.
 
-The forbidden-cycle-break operator retains one ephemeral witness-choice cache
-for the lane's current immutable graph. A rejected candidate keeps the cache;
-an accepted move, seed restart or checkpoint restart invalidates it
-immediately. Cache population uses the same bounded Python witness traversal
-and produces the same ordered choices as the uncached operator, so RNG
-consumption and deterministic continuation are unchanged. The cache is never
-serialized, checkpointed or shared between lane processes.
+The target plugin exposes a caller-owned `ForbiddenWitnessContext` used by
+both `_LaneKernel` and supported direct mutation callers. It retains one
+ephemeral witness-choice tuple for the caller's current immutable graph. A
+rejected candidate keeps the entry; a different graph identity replaces it,
+and accepted moves, seed restarts or checkpoint restarts explicitly invalidate
+the lane-owned instance. Cache population keeps the same first discovered
+cycle per forbidden length and produces the same ordered choices as the
+uncached operator, so `rng.choice()` placement, RNG consumption and
+deterministic continuation are unchanged. The context is never serialized,
+checkpointed or shared between processes.
+
+The bounded traversal requests one witness per forbidden length. Regression
+coverage compares its ordered edge choices against the earlier
+`limit=2`/`found[:1]` behavior before relying on this smaller limit.
 
 Every heuristic lane owns one persistent optimized `sglab-score-worker`
 C++17 process. Requests contain the target's reviewed cycle lengths and

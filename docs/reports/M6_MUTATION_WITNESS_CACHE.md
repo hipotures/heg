@@ -2,6 +2,51 @@
 
 Date: **2026-07-26**
 
+## Issue #14 direct-caller extension — 2026-07-29
+
+The lane-private cache has been replaced by the target plugin's public,
+caller-owned `ForbiddenWitnessContext`. `_LaneKernel` and direct
+`mutate_with_delta()` consumers now share one one-current-graph implementation
+and invalidation contract. The explicit
+`forbidden_witness_edge_choices` path remains supported, as does the bounded
+uncached fallback.
+
+Profiling now separates cache activity, whole and per-length witness DFS
+calls/nodes/time, witness-edge materialization, partner sampling/switch
+attempts, candidate construction, connectivity and graph-family validation.
+All fields remain fixed-size batch aggregates. Controlled order-8, order-16
+and order-30 graphs prove that `limit=1` returns the same ordered witness-edge
+choices as the former `limit=2`/`found[:1]` implementation.
+
+The new order-30 acceptance artifact is
+[`mutation-cache-20260729T010707Z.json`](mutation-cache-benchmarks/mutation-cache-20260729T010707Z.json).
+Each cache mode ran the same 16 paired episodes and 80,000 evaluations, split
+into 40,000 uniform and 40,000 targeted operator calls. Pair order alternated
+and every pair reused the same seed.
+
+| Gate | Result | Required |
+|---|---:|---:|
+| targeted operator-search wall reduction | **92.47%** | at least 60% |
+| whole-workload throughput increase | **224.45%** | at least 25% |
+| uniform operator regression | **−0.74%** | at most 2% |
+| paired logical trajectories | **equal** | equal |
+| witness searches / successive current states | **1,747 / 1,747** | searches no greater |
+
+The cache-off targeted profile assigned 43.540 s of 45.553 s to witness DFS,
+confirming it as the dominant subphase before relying on reuse. Witness-edge
+materialization used 0.226 s, candidate construction 0.671 s, connectivity
+validation 0.220 s and partner sampling 0.025 s across 46,022 switch attempts.
+
+The required order-96 regression artifact is
+[`score-kernel-20260729T010925Z.json`](score-kernel-benchmarks/score-kernel-20260729T010925Z.json).
+Its seven alternating cache pairs preserved logical trajectories, improved
+throughput by 94.21%, reduced mutation-generation time by 73.07% and reduced
+witness-search time by 78.72%. The profiling comparison also preserved its
+trajectory and measured 0.42% overhead, below the 2% gate. All ten existing
+score-kernel acceptance booleans passed.
+
+The C++ score worker and witness-selection policy remain unchanged.
+
 ## Outcome
 
 The one-entry current-graph witness cache for

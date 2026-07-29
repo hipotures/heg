@@ -254,14 +254,32 @@ def find_cycles_of_length_bounded(
     limit: int,
     node_budget: int | None,
 ) -> tuple[tuple[tuple[int, ...], ...], bool]:
+    found, complete, _visited_nodes = (
+        find_cycles_of_length_bounded_profiled(
+            graph,
+            length,
+            limit,
+            node_budget,
+        )
+    )
+    return found, complete
+
+
+def find_cycles_of_length_bounded_profiled(
+    graph: BitGraph,
+    length: int,
+    limit: int,
+    node_budget: int | None,
+) -> tuple[tuple[tuple[int, ...], ...], bool, int]:
     """Enumerate cycles under an optional DFS-node budget.
 
     The boolean is true only when enumeration was exhaustive before reaching
-    either the witness limit or the work budget.
+    either the witness limit or the work budget. The final integer is the
+    number of visited DFS nodes.
     """
 
     if limit <= 0 or length < 3 or length > graph.n:
-        return (), True
+        return (), True, 0
     if node_budget is not None and node_budget < 1:
         raise ValueError("node_budget must be positive")
     found: list[tuple[int, ...]] = []
@@ -297,4 +315,8 @@ def find_cycles_of_length_bounded(
             break
         if budget_exhausted:
             break
-    return tuple(found), not budget_exhausted and len(found) < limit
+    return (
+        tuple(found),
+        not budget_exhausted and len(found) < limit,
+        visited_nodes,
+    )

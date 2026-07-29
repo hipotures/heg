@@ -2,6 +2,31 @@
 
 Last implementation audit: **2026-07-29**.
 
+## Reusable direct-mutation witness context
+
+The forbidden-cycle-break optimization is no longer private to `_LaneKernel`.
+The target plugin now provides one reusable caller-owned context containing
+only the ordered witness-edge choices for one immutable current graph. The
+lane kernel uses that component, while direct `mutate_with_delta()` consumers
+can supply the same context or pass its choices through the existing explicit
+configuration field. Replacement/invalidation, empty-choice caching and the
+uncached fallback preserve the previous first-witness bias, no-op semantics,
+RNG draws and logical trajectories.
+
+Fixed batch-local profiling now separates cache activity, whole and
+per-length witness DFS calls/nodes/time, witness-edge materialization, partner
+sampling/switch attempts, candidate construction, connectivity and
+graph-family validation. The redundant bounded enumeration limit is one;
+controlled regression graphs prove the ordered choices match the former
+`limit=2`/`found[:1]` result.
+
+The paired order-30 issue-14 workload (16 episodes and 80,000 evaluations per
+cache mode, split evenly between operators) reduced targeted mutation time by
+92.47%, increased workload throughput by 224.45%, and showed no uniform
+regression. All paired logical trajectories matched, and witness searches
+equaled the number of successive targeted current-graph states. See
+`docs/reports/M6_MUTATION_WITNESS_CACHE.md`.
+
 ## Missing-checkpoint executability and terminal runner cleanup
 
 Resume and snapshot publication now distinguish immutable checkpoint history

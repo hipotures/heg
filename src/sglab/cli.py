@@ -16,6 +16,7 @@ from .benchmark import (
     calibrate,
     hardware_metadata,
     microbenchmark,
+    mutation_cache_benchmark,
     score_kernel_benchmark,
     soak,
     write_report,
@@ -418,6 +419,12 @@ def cmd_benchmark(args: Namespace) -> int:
             iterations=args.iterations,
             backend_evaluations=args.backend_evaluations,
             search_evaluations=args.search_evaluations,
+        )
+    elif args.benchmark_command == "mutation-cache":
+        report = mutation_cache_benchmark(
+            episodes=args.episodes,
+            evaluations=args.evaluations,
+            order=args.order,
         )
     elif args.benchmark_command == "soak":
         report = soak(
@@ -914,6 +921,12 @@ def build_parser() -> ArgumentParser:
     score_kernel.add_argument("--search-evaluations", type=int, default=1000)
     score_kernel.add_argument("--output", required=True)
     score_kernel.set_defaults(func=cmd_benchmark)
+    mutation_cache = benchmark_commands.add_parser("mutation-cache")
+    mutation_cache.add_argument("--episodes", type=int, default=16)
+    mutation_cache.add_argument("--evaluations", type=int, default=80_000)
+    mutation_cache.add_argument("--order", type=int, default=30)
+    mutation_cache.add_argument("--output", required=True)
+    mutation_cache.set_defaults(func=cmd_benchmark)
     soak_parser = benchmark_commands.add_parser("soak")
     soak_parser.add_argument("--hours", type=float, default=2)
     soak_parser.add_argument("--order", type=int, default=32)

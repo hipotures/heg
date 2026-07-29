@@ -3,13 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from random import Random
 from time import perf_counter, perf_counter_ns
-from typing import Any
+from typing import Any, Callable
 import math
 
 from ..model import (
     BitGraph,
     find_cycle_of_length,
-    find_cycles_of_length_bounded,
+    find_cycles_of_length_bounded_profiled,
 )
 from ..external import canonical_graph6
 from ..score_worker import CycleCountResult
@@ -33,6 +33,9 @@ def forbidden_lengths(n: int) -> tuple[int, ...]:
 
 
 PROFILED_CYCLE_LENGTHS = (3, 4, 8, 16, 32, 64, 128)
+PROFILED_FORBIDDEN_LENGTHS = (4, 8, 16, 32, 64, 128)
+WitnessEdges = tuple[tuple[int, int], ...]
+ForbiddenWitnessEdgeChoices = tuple[WitnessEdges, ...]
 
 
 @dataclass(slots=True)
@@ -82,6 +85,148 @@ class ScoreProfileAccumulator:
             )
             result[f"cycle_{length}_cutoff"] = self.cycle_cutoff[index]
         return result
+
+
+@dataclass(slots=True)
+class MutationProfileAccumulator:
+    """One batch's fixed-size in-memory mutation counters."""
+
+    uniform_evaluations: int = 0
+    uniform_ns: int = 0
+    targeted_evaluations: int = 0
+    targeted_ns: int = 0
+    random_restart_evaluations: int = 0
+    random_restart_ns: int = 0
+    witness_cache_lookups: int = 0
+    witness_cache_hits: int = 0
+    witness_cache_misses: int = 0
+    witness_searches: int = 0
+    witness_search_ns: int = 0
+    witness_search_length_ns: list[int] = field(
+        default_factory=lambda: [0] * len(PROFILED_FORBIDDEN_LENGTHS)
+    )
+    witness_search_length_nodes: list[int] = field(
+        default_factory=lambda: [0] * len(PROFILED_FORBIDDEN_LENGTHS)
+    )
+    witness_search_length_calls: list[int] = field(
+        default_factory=lambda: [0] * len(PROFILED_FORBIDDEN_LENGTHS)
+    )
+    witness_edge_materialization_ns: int = 0
+    switch_attempts: int = 0
+    partner_edge_sampling_ns: int = 0
+    candidate_construction_ns: int = 0
+    connectivity_validation_ns: int = 0
+    graph_family_validation_ns: int = 0
+
+    def reset(self) -> None:
+        self.uniform_evaluations = 0
+        self.uniform_ns = 0
+        self.targeted_evaluations = 0
+        self.targeted_ns = 0
+        self.random_restart_evaluations = 0
+        self.random_restart_ns = 0
+        self.witness_cache_lookups = 0
+        self.witness_cache_hits = 0
+        self.witness_cache_misses = 0
+        self.witness_searches = 0
+        self.witness_search_ns = 0
+        self.witness_edge_materialization_ns = 0
+        self.switch_attempts = 0
+        self.partner_edge_sampling_ns = 0
+        self.candidate_construction_ns = 0
+        self.connectivity_validation_ns = 0
+        self.graph_family_validation_ns = 0
+        for index in range(len(PROFILED_FORBIDDEN_LENGTHS)):
+            self.witness_search_length_ns[index] = 0
+            self.witness_search_length_nodes[index] = 0
+            self.witness_search_length_calls[index] = 0
+
+    def record_operator(self, operator: str, elapsed_ns: int) -> None:
+        if operator == "uniform_two_edge_switch":
+            self.uniform_evaluations += 1
+            self.uniform_ns += elapsed_ns
+        elif operator == "forbidden_cycle_break_switch":
+            self.targeted_evaluations += 1
+            self.targeted_ns += elapsed_ns
+        else:
+            self.random_restart_evaluations += 1
+            self.random_restart_ns += elapsed_ns
+
+    def payload(self, *, cache_enabled: bool) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "witness_cache_enabled": cache_enabled,
+            "uniform_evaluations": self.uniform_evaluations,
+            "uniform_ns": self.uniform_ns,
+            "targeted_evaluations": self.targeted_evaluations,
+            "targeted_ns": self.targeted_ns,
+            "random_restart_evaluations": self.random_restart_evaluations,
+            "random_restart_ns": self.random_restart_ns,
+            "witness_cache_lookups": self.witness_cache_lookups,
+            "witness_cache_hits": self.witness_cache_hits,
+            "witness_cache_misses": self.witness_cache_misses,
+            "witness_cache_hit_rate": (
+                self.witness_cache_hits / self.witness_cache_lookups
+                if self.witness_cache_lookups
+                else 0.0
+            ),
+            "witness_searches": self.witness_searches,
+            "witness_search_ns": self.witness_search_ns,
+            "witness_edge_materialization_ns": (
+                self.witness_edge_materialization_ns
+            ),
+            "switch_attempts": self.switch_attempts,
+            "partner_edge_sampling_ns": self.partner_edge_sampling_ns,
+            "candidate_construction_ns": self.candidate_construction_ns,
+            "connectivity_validation_ns": self.connectivity_validation_ns,
+            "graph_family_validation_ns": self.graph_family_validation_ns,
+        }
+        for index, length in enumerate(PROFILED_FORBIDDEN_LENGTHS):
+            result[f"witness_search_cycle_{length}_ns"] = (
+                self.witness_search_length_ns[index]
+            )
+            result[f"witness_search_cycle_{length}_nodes"] = (
+                self.witness_search_length_nodes[index]
+            )
+            result[f"witness_search_cycle_{length}_calls"] = (
+                self.witness_search_length_calls[index]
+            )
+        return result
+
+
+@dataclass(slots=True)
+class ForbiddenWitnessContext:
+    """Caller-owned cache for one current immutable graph."""
+
+    enabled: bool = True
+    _graph: BitGraph | None = None
+    _choices: ForbiddenWitnessEdgeChoices = ()
+
+    def choices_for(
+        self,
+        graph: BitGraph,
+        compute: Callable[
+            [BitGraph, MutationProfileAccumulator | None],
+            ForbiddenWitnessEdgeChoices,
+        ],
+        profile: MutationProfileAccumulator | None = None,
+    ) -> ForbiddenWitnessEdgeChoices:
+        if profile is not None:
+            profile.witness_cache_lookups += 1
+        if self.enabled and graph is self._graph:
+            if profile is not None:
+                profile.witness_cache_hits += 1
+            return self._choices
+        if profile is not None:
+            profile.witness_cache_misses += 1
+        choices = compute(graph, profile)
+        if self.enabled:
+            self._graph = graph
+            self._choices = choices
+        return choices
+
+    def invalidate(self) -> None:
+        self._graph = None
+        self._choices = ()
 
 
 def verify_reference(graph: BitGraph) -> VerifyResult:
@@ -157,6 +302,16 @@ class ErdosGyarfasPlugin:
     @staticmethod
     def new_score_profile() -> ScoreProfileAccumulator:
         return ScoreProfileAccumulator()
+
+    @staticmethod
+    def new_mutation_profile() -> MutationProfileAccumulator:
+        return MutationProfileAccumulator()
+
+    @staticmethod
+    def new_mutation_context(
+        *, cache_enabled: bool = True
+    ) -> ForbiddenWitnessContext:
+        return ForbiddenWitnessContext(enabled=cache_enabled)
 
     def generate_seed(
         self,
@@ -343,22 +498,53 @@ class ErdosGyarfasPlugin:
         if len(edges) < 2:
             return MutationResult(graph)
         if operator == "forbidden_cycle_break_switch":
+            profile = config.get("mutation_profile")
+            if profile is not None and not isinstance(
+                profile, MutationProfileAccumulator
+            ):
+                raise TypeError(
+                    "mutation_profile must be a MutationProfileAccumulator"
+                )
             witness_choices = config.get(
                 "forbidden_witness_edge_choices"
             )
             if witness_choices is None:
-                witness_edges = self._forbidden_witness_edges(graph, rng)
-            else:
-                witness_edges = (
-                    rng.choice(witness_choices) if witness_choices else ()
+                context = config.get("forbidden_witness_context")
+                if context is not None and not isinstance(
+                    context, ForbiddenWitnessContext
+                ):
+                    raise TypeError(
+                        "forbidden_witness_context must be a "
+                        "ForbiddenWitnessContext"
+                    )
+                witness_choices = (
+                    context.choices_for(
+                        graph,
+                        self._compute_forbidden_witness_edge_choices,
+                        profile,
+                    )
+                    if context is not None
+                    else self._compute_forbidden_witness_edge_choices(
+                        graph, profile
+                    )
                 )
+            witness_edges = (
+                rng.choice(witness_choices) if witness_choices else ()
+            )
             if not witness_edges:
                 return MutationResult(graph)
             for _ in range(64):
+                if profile is not None:
+                    profile.switch_attempts += 1
+                    sampling_started = perf_counter_ns()
                 first = rng.choice(witness_edges)
                 remote = rng.choice(edges)
+                if profile is not None:
+                    profile.partner_edge_sampling_ns += (
+                        perf_counter_ns() - sampling_started
+                    )
                 candidate = self._two_edge_switch(
-                    graph, first, remote, rng, mode
+                    graph, first, remote, rng, mode, profile
                 )
                 if candidate is not None:
                     return candidate
@@ -372,25 +558,53 @@ class ErdosGyarfasPlugin:
                 return candidate
         return MutationResult(graph)
 
-    def _forbidden_witness_edges(
-        self, graph: BitGraph, rng: Random
-    ) -> tuple[tuple[int, int], ...]:
-        choices = self.forbidden_witness_edge_choices(graph)
-        return rng.choice(choices) if choices else ()
-
     def forbidden_witness_edge_choices(
-        self, graph: BitGraph
-    ) -> tuple[tuple[tuple[int, int], ...], ...]:
+        self,
+        graph: BitGraph,
+        *,
+        context: ForbiddenWitnessContext | None = None,
+        profile: MutationProfileAccumulator | None = None,
+    ) -> ForbiddenWitnessEdgeChoices:
+        if context is not None:
+            return context.choices_for(
+                graph,
+                self._compute_forbidden_witness_edge_choices,
+                profile,
+            )
+        return self._compute_forbidden_witness_edge_choices(graph, profile)
+
+    def _compute_forbidden_witness_edge_choices(
+        self,
+        graph: BitGraph,
+        profile: MutationProfileAccumulator | None = None,
+    ) -> ForbiddenWitnessEdgeChoices:
+        search_started = perf_counter_ns() if profile is not None else 0
         witnesses: list[tuple[int, ...]] = []
         for length in self.forbidden_lengths(graph.n):
-            found, _complete = find_cycles_of_length_bounded(
-                graph, length, 2, 4_096
+            length_started = perf_counter_ns() if profile is not None else 0
+            found, _complete, visited_nodes = (
+                find_cycles_of_length_bounded_profiled(
+                    graph, length, 1, 4_096
+                )
             )
+            if profile is not None:
+                index = PROFILED_FORBIDDEN_LENGTHS.index(length)
+                profile.witness_search_length_ns[index] += (
+                    perf_counter_ns() - length_started
+                )
+                profile.witness_search_length_nodes[index] += visited_nodes
+                profile.witness_search_length_calls[index] += 1
             if found:
-                witnesses.extend(found[:1])
+                witnesses.extend(found)
+        if profile is not None:
+            profile.witness_searches += 1
+            profile.witness_search_ns += perf_counter_ns() - search_started
         if not witnesses:
             return ()
-        return tuple(
+        materialization_started = (
+            perf_counter_ns() if profile is not None else 0
+        )
+        choices = tuple(
             tuple(
                 tuple(
                     sorted(
@@ -404,6 +618,11 @@ class ErdosGyarfasPlugin:
             )
             for witness in witnesses
         )
+        if profile is not None:
+            profile.witness_edge_materialization_ns += (
+                perf_counter_ns() - materialization_started
+            )
+        return choices
 
     def _two_edge_switch(
         self,
@@ -412,6 +631,7 @@ class ErdosGyarfasPlugin:
         second: tuple[int, int],
         rng: Random,
         mode: str,
+        profile: MutationProfileAccumulator | None = None,
     ) -> MutationResult | None:
         (a, b), (c, d) = first, second
         if len({a, b, c, d}) != 4:
@@ -427,13 +647,33 @@ class ErdosGyarfasPlugin:
                 graph.has_edge(*edge) for edge in additions
             ):
                 continue
+            construction_started = (
+                perf_counter_ns() if profile is not None else 0
+            )
             candidate = graph.with_edges(
                 add=additions, remove=(first, second)
             )
-            if candidate.is_connected() and (
-                mode != "minimal_structure_mixed_degree"
-                or self._minimal_structure_valid(candidate)
-            ):
+            if profile is not None:
+                profile.candidate_construction_ns += (
+                    perf_counter_ns() - construction_started
+                )
+                connectivity_started = perf_counter_ns()
+            connected = candidate.is_connected()
+            if profile is not None:
+                profile.connectivity_validation_ns += (
+                    perf_counter_ns() - connectivity_started
+                )
+            family_valid = True
+            if connected and mode == "minimal_structure_mixed_degree":
+                family_started = (
+                    perf_counter_ns() if profile is not None else 0
+                )
+                family_valid = self._minimal_structure_valid(candidate)
+                if profile is not None:
+                    profile.graph_family_validation_ns += (
+                        perf_counter_ns() - family_started
+                    )
+            if connected and family_valid:
                 return MutationResult(
                     candidate,
                     removed_edges=(first, second),

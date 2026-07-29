@@ -114,8 +114,11 @@ heuristic scores or M4 verification. Batch diagnostics also identify the
 fixed C++ scorer implementation, worker binary, request count and restarts.
 When profiling is enabled, the same completed-batch diagnostic separates
 uniform and forbidden-cycle-targeted mutation time and reports reuse of the
-current graph's witness choices. It does not create a candidate history or
-change the selected mutation sequence.
+current graph's witness choices. For targeted mutations it also separates
+witness DFS (including nodes/time by forbidden length), witness-edge
+materialization, switch sampling/attempts, candidate construction,
+connectivity checks and graph-family validation. It does not create a
+candidate history or change the selected mutation sequence.
 
 Seed-generation telemetry separately shows how many internal construction
 attempts were needed, whether a retry budget was exhausted, and how much

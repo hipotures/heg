@@ -55,9 +55,25 @@ scientific contract.
 
 Completed profiled batches expose `timing.mutation_profile` with scalar
 `uniform_*`, `targeted_*`, `random_restart_*`, `witness_search_*` and
-`witness_cache_*` counters. They are one aggregate record per completed batch,
-not candidate-level telemetry. `score_backend.mutation_witness_cache_enabled`
-reports the effective cache path.
+`witness_cache_*` counters. Targeted-only scalar subphase fields cover
+`witness_edge_materialization_ns`, `switch_attempts`,
+`partner_edge_sampling_ns`, `candidate_construction_ns`,
+`connectivity_validation_ns` and `graph_family_validation_ns`.
+`witness_search_cycle_{4,8,16,32,64,128}_{calls,nodes,ns}` provides the
+fixed-size per-length split. These fields form one aggregate record per
+completed batch, not candidate-level telemetry.
+`score_backend.mutation_witness_cache_enabled` reports the effective lane
+cache path.
+
+Direct HEG mutation callers can create one stream-local context with
+`PLUGIN.new_mutation_context()` and pass it as
+`forbidden_witness_context` to repeated `mutate_with_delta()` calls. The same
+context may instead be supplied to
+`PLUGIN.forbidden_witness_edge_choices(graph, context=context)` when a caller
+uses the existing explicit `forbidden_witness_edge_choices` configuration
+path. Call `context.invalidate()` on a seed/restart/checkpoint boundary; a new
+immutable graph identity also replaces the sole entry automatically. Omitting
+the context retains the correct bounded uncached fallback.
 
 ## Score kernel
 
@@ -124,6 +140,16 @@ Use:
 sglab --help
 sglab <command> --help
 make doctor
+```
+
+The issue-14 paired workload is reproducible with:
+
+```bash
+sglab benchmark mutation-cache \
+  --episodes 16 \
+  --evaluations 80000 \
+  --order 30 \
+  --output docs/reports/mutation-cache-benchmarks
 ```
 
 Never assume a configuration field is active merely because it appears in an

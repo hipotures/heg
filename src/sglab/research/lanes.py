@@ -105,62 +105,6 @@ SEED_FAILURE_CATEGORIES = (
 )
 
 
-@dataclass(slots=True)
-class MutationProfileAccumulator:
-    uniform_evaluations: int = 0
-    uniform_ns: int = 0
-    targeted_evaluations: int = 0
-    targeted_ns: int = 0
-    random_restart_evaluations: int = 0
-    random_restart_ns: int = 0
-    witness_searches: int = 0
-    witness_search_ns: int = 0
-    witness_cache_hits: int = 0
-    witness_cache_misses: int = 0
-
-    def reset(self) -> None:
-        self.uniform_evaluations = 0
-        self.uniform_ns = 0
-        self.targeted_evaluations = 0
-        self.targeted_ns = 0
-        self.random_restart_evaluations = 0
-        self.random_restart_ns = 0
-        self.witness_searches = 0
-        self.witness_search_ns = 0
-        self.witness_cache_hits = 0
-        self.witness_cache_misses = 0
-
-    def record_operator(self, operator: str, elapsed_ns: int) -> None:
-        if operator == "uniform_two_edge_switch":
-            self.uniform_evaluations += 1
-            self.uniform_ns += elapsed_ns
-        elif operator == "forbidden_cycle_break_switch":
-            self.targeted_evaluations += 1
-            self.targeted_ns += elapsed_ns
-        else:
-            self.random_restart_evaluations += 1
-            self.random_restart_ns += elapsed_ns
-
-    def payload(self, *, cache_enabled: bool) -> dict[str, Any]:
-        lookups = self.witness_cache_hits + self.witness_cache_misses
-        return {
-            "witness_cache_enabled": cache_enabled,
-            "uniform_evaluations": self.uniform_evaluations,
-            "uniform_ns": self.uniform_ns,
-            "targeted_evaluations": self.targeted_evaluations,
-            "targeted_ns": self.targeted_ns,
-            "random_restart_evaluations": self.random_restart_evaluations,
-            "random_restart_ns": self.random_restart_ns,
-            "witness_searches": self.witness_searches,
-            "witness_search_ns": self.witness_search_ns,
-            "witness_cache_hits": self.witness_cache_hits,
-            "witness_cache_misses": self.witness_cache_misses,
-            "witness_cache_hit_rate": (
-                self.witness_cache_hits / lookups if lookups else 0.0
-            ),
-        }
-
-
 def _bounded_histogram_index(
     value: int, upper_bounds: tuple[int, ...]
 ) -> int:
@@ -636,17 +580,25 @@ class _LaneKernel:
         self._forbidden_witness_edge_choices = getattr(
             self.plugin, "forbidden_witness_edge_choices", None
         )
-        self._mutation_witness_cache_graph: BitGraph | None = None
-        self._mutation_witness_cache_choices: tuple[
-            tuple[tuple[int, int], ...], ...
-        ] = ()
+        mutation_context_factory = getattr(
+            self.plugin, "new_mutation_context", None
+        )
+        self.mutation_context = (
+            mutation_context_factory(cache_enabled=mutation_witness_cache)
+            if mutation_context_factory is not None
+            else None
+        )
         self.graph6_workspace = bytearray()
         self.score_profiling_enabled = (
             instrumentation_enabled and score_profiling_enabled
         )
+        mutation_profile_factory = getattr(
+            self.plugin, "new_mutation_profile", None
+        )
         self.mutation_profile = (
-            MutationProfileAccumulator()
+            mutation_profile_factory()
             if self.score_profiling_enabled
+            and mutation_profile_factory is not None
             else None
         )
         self.timing_ns = (
@@ -1120,6 +1072,10 @@ class _LaneKernel:
                     mutation_config[
                         "forbidden_witness_edge_choices"
                     ] = self._mutation_witness_choices_for(self.graph)
+                    if self.mutation_profile is not None:
+                        mutation_config["mutation_profile"] = (
+                            self.mutation_profile
+                        )
                 mutate_with_delta = getattr(
                     self.plugin, "mutate_with_delta", None
                 )
@@ -1511,29 +1467,19 @@ class _LaneKernel:
         self, graph: BitGraph
     ) -> tuple[tuple[tuple[int, int], ...], ...]:
         if (
-            self.mutation_witness_cache_enabled
-            and graph is self._mutation_witness_cache_graph
+            self.mutation_context is None
+            or self._forbidden_witness_edge_choices is None
         ):
-            if self.mutation_profile is not None:
-                self.mutation_profile.witness_cache_hits += 1
-            return self._mutation_witness_cache_choices
-
-        profile = self.mutation_profile
-        started = time.perf_counter_ns() if profile is not None else 0
-        assert self._forbidden_witness_edge_choices is not None
-        choices = self._forbidden_witness_edge_choices(graph)
-        if profile is not None:
-            profile.witness_searches += 1
-            profile.witness_search_ns += time.perf_counter_ns() - started
-            profile.witness_cache_misses += 1
-        if self.mutation_witness_cache_enabled:
-            self._mutation_witness_cache_graph = graph
-            self._mutation_witness_cache_choices = choices
-        return choices
+            return ()
+        return self._forbidden_witness_edge_choices(
+            graph,
+            context=self.mutation_context,
+            profile=self.mutation_profile,
+        )
 
     def _invalidate_mutation_witness_cache(self) -> None:
-        self._mutation_witness_cache_graph = None
-        self._mutation_witness_cache_choices = ()
+        if self.mutation_context is not None:
+            self.mutation_context.invalidate()
 
     def _choose_mutation_operator(self) -> str:
         weights = self.parameters.get(MUTATION_WEIGHTS_PARAMETER)

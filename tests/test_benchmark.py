@@ -5,6 +5,7 @@ from pathlib import Path
 from sglab.benchmark import (
     calibrate,
     microbenchmark,
+    mutation_cache_benchmark,
     quantiles,
     score_kernel_benchmark,
     seed_generation_benchmark,
@@ -88,6 +89,29 @@ class BenchmarkTests(unittest.TestCase):
             report["acceptance"][
                 "mutation_witness_cache_trajectory_equal"
             ]
+        )
+
+    def test_mutation_cache_benchmark_reports_issue_14_gates(self) -> None:
+        report = mutation_cache_benchmark(
+            episodes=2,
+            evaluations=4,
+            order=8,
+        )
+        self.assertEqual(report["kind"], "mutation_cache")
+        self.assertEqual(
+            set(report["acceptance"]),
+            {
+                "targeted_operator_time_reduction_at_least_60_percent",
+                "workload_throughput_increase_at_least_25_percent",
+                "uniform_operator_regression_at_most_2_percent",
+                "logical_trajectories_equal",
+                "witness_searches_bounded_by_current_graph_states",
+            },
+        )
+        self.assertTrue(report["logical_trajectories_equal"])
+        self.assertIn(
+            "candidate_construction_ns",
+            report["targeted_subphases"]["cache_on"],
         )
 
     def test_short_soak_exercises_controls_and_dashboard(self) -> None:

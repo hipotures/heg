@@ -466,6 +466,7 @@ def _score_benchmark_spec(
     order: int,
     evaluations: int,
     algorithm: str,
+    seed: int | None = None,
     graph_family: str = "unrestricted_min_degree_3",
     mutation_weights: dict[str, float] | None = None,
 ) -> LaneSpec:
@@ -497,7 +498,7 @@ def _score_benchmark_spec(
         target="erdos_gyarfas",
         algorithm=algorithm,
         graph_family=graph_family,
-        seed=20260726 + order,
+        seed=20260726 + order if seed is None else seed,
         parameters=parameters,
         resource_share=1.0,
     )
@@ -522,6 +523,7 @@ def _run_score_case(
     evaluations: int,
     algorithm: str,
     profiling: bool,
+    seed: int | None = None,
     optimized_legacy_key: bool = True,
     independent_sample_provenance: bool = True,
     mutation_witness_cache: bool = True,
@@ -533,6 +535,7 @@ def _run_score_case(
             order=order,
             evaluations=evaluations,
             algorithm=algorithm,
+            seed=seed,
             graph_family=graph_family,
             mutation_weights=mutation_weights,
         ),
@@ -563,7 +566,14 @@ def _run_score_case(
             "early_rejected": metrics["early_rejected"],
             "score_backend": metrics["score_backend"],
             "timing": metrics.get("timing"),
-            "logical_state": _logical_score_state(kernel),
+            "logical_state": (
+                _logical_score_state(kernel),
+                metrics["accepted"],
+                metrics["improvements"],
+                metrics["duplicates"],
+                metrics["operator_statistics"],
+                metrics["score_trajectory_summary"],
+            ),
         }
     finally:
         kernel.close()
@@ -825,6 +835,183 @@ def score_kernel_benchmark(
         "peak_rss_bytes": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
         * 1024,
         "peak_rss_source": "resource.getrusage",
+    }
+
+
+def mutation_cache_benchmark(
+    *,
+    episodes: int = 16,
+    evaluations: int = 80_000,
+    order: int = 30,
+) -> dict[str, Any]:
+    if episodes < 2 or episodes % 2:
+        raise ValueError("episodes must be a positive even number")
+    if evaluations < episodes or evaluations % episodes:
+        raise ValueError("evaluations must be divisible by episodes")
+    if order < 4 or order % 2:
+        raise ValueError("order must be even and at least four")
+
+    evaluations_per_episode = evaluations // episodes
+    runs: dict[bool, list[dict[str, Any]]] = {False: [], True: []}
+    for episode in range(episodes):
+        operator = (
+            "uniform_two_edge_switch"
+            if episode % 2 == 0
+            else "forbidden_cycle_break_switch"
+        )
+        settings = {
+            "order": order,
+            "evaluations": evaluations_per_episode,
+            "algorithm": "simulated_annealing",
+            "profiling": True,
+            "seed": 20260729 + episode,
+            "graph_family": "connected_cubic",
+            "mutation_weights": {
+                "uniform_two_edge_switch": float(
+                    operator == "uniform_two_edge_switch"
+                ),
+                "forbidden_cycle_break_switch": float(
+                    operator == "forbidden_cycle_break_switch"
+                ),
+            },
+        }
+        sequence = (False, True) if episode % 2 == 0 else (True, False)
+        pair: dict[bool, dict[str, Any]] = {}
+        for cache_enabled in sequence:
+            pair[cache_enabled] = _run_score_case(
+                **settings,
+                mutation_witness_cache=cache_enabled,
+            )
+        runs[False].append(
+            {
+                "episode": episode,
+                "operator": operator,
+                **pair[False],
+            }
+        )
+        runs[True].append(
+            {
+                "episode": episode,
+                "operator": operator,
+                **pair[True],
+            }
+        )
+
+    def operator_runs(
+        cache_enabled: bool, operator: str
+    ) -> list[dict[str, Any]]:
+        return [
+            run
+            for run in runs[cache_enabled]
+            if run["operator"] == operator
+        ]
+
+    def profile_total(
+        selected: list[dict[str, Any]], counter: str
+    ) -> int:
+        return sum(
+            int(run["timing"]["mutation_profile"][counter])
+            for run in selected
+        )
+
+    def workload_rate(cache_enabled: bool) -> float:
+        elapsed = sum(
+            float(run["elapsed_seconds"]) for run in runs[cache_enabled]
+        )
+        return evaluations / max(elapsed, 1e-12)
+
+    targeted_off = operator_runs(False, "forbidden_cycle_break_switch")
+    targeted_on = operator_runs(True, "forbidden_cycle_break_switch")
+    uniform_off = operator_runs(False, "uniform_two_edge_switch")
+    uniform_on = operator_runs(True, "uniform_two_edge_switch")
+    targeted_off_ns = profile_total(targeted_off, "targeted_ns")
+    targeted_on_ns = profile_total(targeted_on, "targeted_ns")
+    uniform_off_ns = profile_total(uniform_off, "uniform_ns")
+    uniform_on_ns = profile_total(uniform_on, "uniform_ns")
+    cache_off_rate = workload_rate(False)
+    cache_on_rate = workload_rate(True)
+    targeted_reduction = 1.0 - targeted_on_ns / max(targeted_off_ns, 1)
+    throughput_increase = cache_on_rate / max(cache_off_rate, 1e-12) - 1.0
+    uniform_regression = uniform_on_ns / max(uniform_off_ns, 1) - 1.0
+    targeted_searches = profile_total(targeted_on, "witness_searches")
+    current_graph_states = sum(
+        int(run["accepted"]) + 1 for run in targeted_on
+    )
+    trajectory_equal = all(
+        off["logical_state"] == on["logical_state"]
+        for off, on in zip(runs[False], runs[True], strict=True)
+    )
+    subphase_counters = (
+        "witness_search_ns",
+        "witness_edge_materialization_ns",
+        "switch_attempts",
+        "partner_edge_sampling_ns",
+        "candidate_construction_ns",
+        "connectivity_validation_ns",
+        "graph_family_validation_ns",
+    )
+    subphases = {
+        "cache_off": {
+            counter: profile_total(targeted_off, counter)
+            for counter in subphase_counters
+        },
+        "cache_on": {
+            counter: profile_total(targeted_on, counter)
+            for counter in subphase_counters
+        },
+    }
+
+    return {
+        "benchmark_id": (
+            f"mutation-cache-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}"
+        ),
+        "created_at": utc_now(),
+        "kind": "mutation_cache",
+        "order": order,
+        "episodes_per_mode": episodes,
+        "evaluations_per_mode": evaluations,
+        "evaluations_per_episode": evaluations_per_episode,
+        "operator_evaluations_per_mode": {
+            "uniform_two_edge_switch": evaluations // 2,
+            "forbidden_cycle_break_switch": evaluations // 2,
+        },
+        "cache_off": {
+            "candidates_per_second": cache_off_rate,
+            "targeted_ns": targeted_off_ns,
+            "uniform_ns": uniform_off_ns,
+            "runs": runs[False],
+        },
+        "cache_on": {
+            "candidates_per_second": cache_on_rate,
+            "targeted_ns": targeted_on_ns,
+            "uniform_ns": uniform_on_ns,
+            "witness_searches": targeted_searches,
+            "current_graph_states": current_graph_states,
+            "runs": runs[True],
+        },
+        "targeted_operator_time_reduction_fraction": targeted_reduction,
+        "workload_throughput_increase_fraction": throughput_increase,
+        "uniform_operator_regression_fraction": uniform_regression,
+        "logical_trajectories_equal": trajectory_equal,
+        "targeted_subphases": subphases,
+        "acceptance": {
+            "targeted_operator_time_reduction_at_least_60_percent": (
+                targeted_reduction >= 0.60
+            ),
+            "workload_throughput_increase_at_least_25_percent": (
+                throughput_increase >= 0.25
+            ),
+            "uniform_operator_regression_at_most_2_percent": (
+                uniform_regression <= 0.02
+            ),
+            "logical_trajectories_equal": trajectory_equal,
+            "witness_searches_bounded_by_current_graph_states": (
+                targeted_searches <= current_graph_states
+            ),
+        },
+        "peak_rss_bytes": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        * 1024,
+        "peak_rss_source": "resource.getrusage fallback before CLI hardware audit",
     }
 
 
@@ -1105,6 +1292,37 @@ def write_report(report: dict[str, Any], output_dir: Path) -> tuple[Path, Path]:
                 f"- Overall soak pass: {report['soak_pass']}",
                 "",
                 f"This report is the {duration_label}.",
+            ]
+        )
+    elif report["kind"] == "mutation_cache":
+        acceptance = report["acceptance"]
+        lines.extend(
+            [
+                "## Issue #14 mutation-cache gates",
+                "",
+                (
+                    "- Targeted operator time reduction: "
+                    f"{report['targeted_operator_time_reduction_fraction']:.2%}"
+                ),
+                (
+                    "- Workload throughput increase: "
+                    f"{report['workload_throughput_increase_fraction']:.2%}"
+                ),
+                (
+                    "- Uniform operator regression: "
+                    f"{report['uniform_operator_regression_fraction']:.2%}"
+                ),
+                (
+                    "- Logical trajectories equal: "
+                    f"{report['logical_trajectories_equal']}"
+                ),
+                (
+                    "- All acceptance gates pass: "
+                    f"{all(acceptance.values())}"
+                ),
+                "",
+                "Raw paired runs and fixed-size subphase aggregates are "
+                "preserved in the JSON report.",
             ]
         )
     else:
