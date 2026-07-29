@@ -59,6 +59,16 @@ class ScoreWorkerResponse:
     timing: ScoreWorkerTiming | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class _PreparedRequestPlan:
+    key: tuple[object, ...]
+    word_count: int
+    length_bytes: int
+    payload_bytes: int
+    packed_lengths: bytes
+    prefix: bytes
+
+
 class PersistentScoreWorker:
     """One bounded binary-protocol C++ scorer process."""
 
@@ -69,6 +79,7 @@ class PersistentScoreWorker:
         timeout_seconds: float = DEFAULT_REQUEST_TIMEOUT_SECONDS,
         memory_limit_bytes: int = DEFAULT_WORKER_MEMORY_BYTES,
         cutoff_longest_first: bool = True,
+        prepared_request_cache_enabled: bool = True,
     ):
         if timeout_seconds <= 0:
             raise ValueError("score-worker timeout must be positive")
@@ -78,6 +89,10 @@ class PersistentScoreWorker:
         self.timeout_seconds = timeout_seconds
         self.memory_limit_bytes = memory_limit_bytes
         self.cutoff_longest_first = cutoff_longest_first
+        self.prepared_request_cache_enabled = (
+            prepared_request_cache_enabled
+        )
+        self._prepared_request_plan: _PreparedRequestPlan | None = None
         self.process: Popen[bytes] | None = None
         self.request_id = 0
         self.binary_sha256 = (
@@ -124,27 +139,15 @@ class PersistentScoreWorker:
         compact_dominated: bool = False,
         profile_timing: bool = False,
     ) -> ScoreWorkerResponse:
-        if limit < 1 or node_budget < 1:
-            raise ValueError("score-worker bounds must be positive")
-        if (
-            len(lengths) > 64
-            or any(
-                isinstance(length, bool)
-                or not isinstance(length, int)
-                or length < 3
-                or length > graph.n
-                for length in lengths
-            )
-            or tuple(sorted(set(lengths))) != lengths
-        ):
-            raise ValueError(
-                "score-worker lengths must be unique, increasing and "
-                "between 3 and the graph order"
-            )
-        if compact_dominated and cutoff is None:
-            raise ValueError(
-                "compact dominated responses require a cutoff"
-            )
+        plan = self._prepare_request_plan(
+            graph,
+            lengths=lengths,
+            limit=limit,
+            node_budget=node_budget,
+            cutoff_enabled=cutoff is not None,
+            cutoff_inclusive=cutoff_inclusive,
+            compact_dominated=compact_dominated,
+        )
         if self.process is None:
             self.start()
         elif self.process.poll() is not None:
@@ -154,31 +157,21 @@ class PersistentScoreWorker:
         phase_started_ns = time.perf_counter_ns() if profile_timing else 0
         self.request_id += 1
         request_id = self.request_id
-        word_count = (graph.n + 63) // 64
-        length_bytes = len(lengths) * 2
-        payload = bytearray(
-            length_bytes + graph.n * word_count * 8
-        )
-        for index, length in enumerate(lengths):
-            struct.pack_into("<H", payload, index * 2, length)
-        offset = length_bytes
+        payload = bytearray(plan.payload_bytes)
+        payload[: plan.length_bytes] = plan.packed_lengths
+        offset = plan.length_bytes
         for row in graph.rows:
             struct.pack_into("<Q", payload, offset, row & ((1 << 64) - 1))
             offset += 8
-            if word_count == 2:
+            if plan.word_count == 2:
                 struct.pack_into("<Q", payload, offset, row >> 64)
                 offset += 8
         request = (
-            _REQUEST_PREFIX.pack(
-                b"SGSC",
-                PROTOCOL_VERSION,
-                COMMAND_SCORE,
-                len(payload),
-            )
+            plan.prefix
             + _REQUEST_BODY.pack(
                 request_id,
                 graph.n,
-                word_count,
+                plan.word_count,
                 limit,
                 node_budget,
                 (
@@ -310,6 +303,80 @@ class PersistentScoreWorker:
                 else None
             ),
         )
+
+    def _prepare_request_plan(
+        self,
+        graph: BitGraph,
+        *,
+        lengths: tuple[int, ...],
+        limit: int,
+        node_budget: int,
+        cutoff_enabled: bool,
+        cutoff_inclusive: bool,
+        compact_dominated: bool,
+    ) -> _PreparedRequestPlan:
+        key = (
+            graph.n,
+            lengths,
+            limit,
+            node_budget,
+            cutoff_enabled,
+            cutoff_inclusive,
+            compact_dominated,
+            self.cutoff_longest_first,
+        )
+        cached = self._prepared_request_plan
+        if (
+            self.prepared_request_cache_enabled
+            and cached is not None
+            and cached.key == key
+        ):
+            return cached
+        if limit < 1 or node_budget < 1:
+            raise ValueError("score-worker bounds must be positive")
+        if (
+            len(lengths) > 64
+            or any(
+                isinstance(length, bool)
+                or not isinstance(length, int)
+                or length < 3
+                or length > graph.n
+                for length in lengths
+            )
+            or tuple(sorted(set(lengths))) != lengths
+        ):
+            raise ValueError(
+                "score-worker lengths must be unique, increasing and "
+                "between 3 and the graph order"
+            )
+        if compact_dominated and not cutoff_enabled:
+            raise ValueError(
+                "compact dominated responses require a cutoff"
+            )
+        word_count = (graph.n + 63) // 64
+        length_bytes = len(lengths) * 2
+        payload_bytes = length_bytes + graph.n * word_count * 8
+        packed_lengths = (
+            struct.pack(f"<{len(lengths)}H", *lengths)
+            if lengths
+            else b""
+        )
+        plan = _PreparedRequestPlan(
+            key=key,
+            word_count=word_count,
+            length_bytes=length_bytes,
+            payload_bytes=payload_bytes,
+            packed_lengths=packed_lengths,
+            prefix=_REQUEST_PREFIX.pack(
+                b"SGSC",
+                PROTOCOL_VERSION,
+                COMMAND_SCORE,
+                payload_bytes,
+            ),
+        )
+        if self.prepared_request_cache_enabled:
+            self._prepared_request_plan = plan
+        return plan
 
     def close(self) -> None:
         process = self.process

@@ -515,6 +515,48 @@ class PersistentScoreWorkerTests(unittest.TestCase):
                     compact_dominated=True,
                 )
 
+    def test_worker_request_plan_cache_is_one_entry_and_optional(self) -> None:
+        graph = PLUGIN.generate_seed(
+            Random(101), {"order": 30, "mode": "cubic_first"}
+        )
+        lengths = forbidden_lengths(graph.n)
+        with (
+            PersistentScoreWorker() as cached,
+            PersistentScoreWorker(
+                prepared_request_cache_enabled=False
+            ) as uncached,
+        ):
+            cached.score(
+                graph,
+                lengths=lengths,
+                limit=65,
+                node_budget=50_000,
+            )
+            first_plan = cached._prepared_request_plan
+            assert first_plan is not None
+            cached.score(
+                graph,
+                lengths=lengths,
+                limit=65,
+                node_budget=50_000,
+            )
+            self.assertIs(cached._prepared_request_plan, first_plan)
+            cached.score(
+                graph,
+                lengths=lengths,
+                limit=65,
+                node_budget=49_999,
+            )
+            self.assertIsNot(cached._prepared_request_plan, first_plan)
+
+            uncached.score(
+                graph,
+                lengths=lengths,
+                limit=65,
+                node_budget=50_000,
+            )
+            self.assertIsNone(uncached._prepared_request_plan)
+
     def test_worker_counts_target_supplied_triangle_length(self) -> None:
         graph = BitGraph.from_edges(
             4,
