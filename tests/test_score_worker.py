@@ -16,7 +16,12 @@ from sglab.research.lanes import (
     _zobrist_graph_key,
     _zobrist_update_key,
 )
-from sglab.score_worker import PersistentScoreWorker, ScoreWorkerError
+from sglab.score_worker import (
+    CycleCountResult,
+    PersistentScoreWorker,
+    ScoreWorkerError,
+)
+from sglab.targets.base import GraphValidationContext
 from sglab.targets.erdos_gyarfas import PLUGIN, forbidden_lengths
 
 
@@ -253,6 +258,48 @@ class DirectMutationWitnessContextTests(unittest.TestCase):
         )
 
 
+class ValidatedScoreAssemblyTests(unittest.TestCase):
+    def test_bound_validation_context_preserves_score_and_rejects_other_graph(
+        self,
+    ) -> None:
+        graph = PLUGIN.generate_seed(
+            Random(71), {"order": 30, "mode": "cubic_first"}
+        )
+        other = PLUGIN.generate_seed(
+            Random(72), {"order": 30, "mode": "cubic_first"}
+        )
+        results = tuple(
+            CycleCountResult(
+                length=length,
+                count=0,
+                complete=True,
+                nodes=0,
+                elapsed_ns=0,
+            )
+            for length in forbidden_lengths(graph.n)
+        )
+        context = GraphValidationContext(graph, PLUGIN.validate_graph(graph))
+
+        ordinary = PLUGIN.score_from_cycle_counts(graph, 64, results, None)
+        prepared = PLUGIN.score_from_cycle_counts(
+            graph,
+            64,
+            results,
+            None,
+            validation_context=context,
+        )
+
+        self.assertEqual(prepared, ordinary)
+        with self.assertRaisesRegex(ValueError, "different graph"):
+            PLUGIN.score_from_cycle_counts(
+                other,
+                64,
+                results,
+                None,
+                validation_context=context,
+            )
+
+
 @unittest.skipUnless(
     score_worker_path().is_file(), "C++ score worker has not been built"
 )
@@ -302,6 +349,70 @@ class PersistentScoreWorkerTests(unittest.TestCase):
                         ],
                         expected,
                     )
+
+    def test_worker_cutoff_boundaries_and_python_timings(self) -> None:
+        graph = PLUGIN.generate_seed(
+            Random(73), {"order": 30, "mode": "cubic_first"}
+        )
+        lengths = forbidden_lengths(graph.n)
+        with PersistentScoreWorker() as worker:
+            full = worker.score(
+                graph,
+                lengths=lengths,
+                limit=65,
+                node_budget=50_000,
+                profile_timing=True,
+            )
+            score = PLUGIN.score_from_cycle_counts(
+                graph, 64, full.results, None
+            )
+            cutoff = (
+                sum(count for _, count in score.witness_counts),
+                score.weighted_penalty,
+                score.simplicity,
+            )
+            inclusive = worker.score(
+                graph,
+                lengths=lengths,
+                limit=65,
+                node_budget=50_000,
+                cutoff=cutoff,
+                cutoff_inclusive=True,
+            )
+            exclusive = worker.score(
+                graph,
+                lengths=lengths,
+                limit=65,
+                node_budget=50_000,
+                cutoff=cutoff,
+                cutoff_inclusive=False,
+            )
+
+        self.assertTrue(inclusive.dominated)
+        self.assertFalse(exclusive.dominated)
+        self.assertEqual(
+            tuple(
+                (result.length, result.count, result.complete, result.nodes)
+                for result in exclusive.results
+            ),
+            tuple(
+                (result.length, result.count, result.complete, result.nodes)
+                for result in full.results
+            ),
+        )
+        self.assertIsNotNone(full.timing)
+        assert full.timing is not None
+        self.assertGreaterEqual(full.timing.request_packing_ns, 0)
+        self.assertGreaterEqual(full.timing.request_write_ns, 0)
+        self.assertGreaterEqual(full.timing.response_read_ns, 0)
+        self.assertGreaterEqual(full.timing.response_parsing_ns, 0)
+        self.assertGreaterEqual(
+            full.timing.worker_roundtrip_ns,
+            full.timing.request_packing_ns
+            + full.timing.request_write_ns
+            + full.timing.response_read_ns
+            + full.timing.response_parsing_ns,
+        )
 
     def test_worker_counts_target_supplied_triangle_length(self) -> None:
         graph = BitGraph.from_edges(

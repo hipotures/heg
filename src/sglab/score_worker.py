@@ -43,9 +43,19 @@ class CycleCountResult:
 
 
 @dataclass(frozen=True, slots=True)
+class ScoreWorkerTiming:
+    request_packing_ns: int
+    request_write_ns: int
+    response_read_ns: int
+    response_parsing_ns: int
+    worker_roundtrip_ns: int
+
+
+@dataclass(frozen=True, slots=True)
 class ScoreWorkerResponse:
     results: tuple[CycleCountResult, ...]
     dominated: bool
+    timing: ScoreWorkerTiming | None = None
 
 
 class PersistentScoreWorker:
@@ -108,6 +118,7 @@ class PersistentScoreWorker:
         node_budget: int,
         cutoff: tuple[int, int, int] | None = None,
         cutoff_inclusive: bool = False,
+        profile_timing: bool = False,
     ) -> ScoreWorkerResponse:
         if limit < 1 or node_budget < 1:
             raise ValueError("score-worker bounds must be positive")
@@ -131,6 +142,8 @@ class PersistentScoreWorker:
         elif self.process.poll() is not None:
             raise ScoreWorkerError("score worker exited before request")
         process = self._active_process()
+        roundtrip_started_ns = time.perf_counter_ns() if profile_timing else 0
+        phase_started_ns = time.perf_counter_ns() if profile_timing else 0
         self.request_id += 1
         request_id = self.request_id
         word_count = (graph.n + 63) // 64
@@ -172,13 +185,26 @@ class PersistentScoreWorker:
         )
         if len(request) > MAXIMUM_FRAME_BYTES:
             raise ScoreWorkerError("score-worker request is oversized")
+        request_packing_ns = (
+            time.perf_counter_ns() - phase_started_ns if profile_timing else 0
+        )
         started = time.monotonic()
+        phase_started_ns = time.perf_counter_ns() if profile_timing else 0
         self._write_all(process, request)
+        request_write_ns = (
+            time.perf_counter_ns() - phase_started_ns if profile_timing else 0
+        )
+        response_read_ns = 0
+        response_parsing_ns = 0
+        phase_started_ns = time.perf_counter_ns() if profile_timing else 0
         header = self._read_exact(
             process,
             _RESPONSE_HEADER.size,
             started=started,
         )
+        if profile_timing:
+            response_read_ns += time.perf_counter_ns() - phase_started_ns
+            phase_started_ns = time.perf_counter_ns()
         (
             magic,
             version,
@@ -197,11 +223,17 @@ class PersistentScoreWorker:
             or payload_bytes > MAXIMUM_FRAME_BYTES
         ):
             raise ScoreWorkerError("invalid score-worker response header")
+        if profile_timing:
+            response_parsing_ns += time.perf_counter_ns() - phase_started_ns
+            phase_started_ns = time.perf_counter_ns()
         response_payload = self._read_exact(
             process,
             payload_bytes,
             started=started,
         )
+        if profile_timing:
+            response_read_ns += time.perf_counter_ns() - phase_started_ns
+            phase_started_ns = time.perf_counter_ns()
         if status not in {STATUS_OK, STATUS_DOMINATED}:
             raise ScoreWorkerError("score worker rejected the request")
         results = []
@@ -237,9 +269,24 @@ class PersistentScoreWorker:
             raise ScoreWorkerError(
                 "score worker returned incomplete cycle lengths"
             )
+        if profile_timing:
+            response_parsing_ns += time.perf_counter_ns() - phase_started_ns
         return ScoreWorkerResponse(
             results=tuple(results),
             dominated=status == STATUS_DOMINATED,
+            timing=(
+                ScoreWorkerTiming(
+                    request_packing_ns=request_packing_ns,
+                    request_write_ns=request_write_ns,
+                    response_read_ns=response_read_ns,
+                    response_parsing_ns=response_parsing_ns,
+                    worker_roundtrip_ns=(
+                        time.perf_counter_ns() - roundtrip_started_ns
+                    ),
+                )
+                if profile_timing
+                else None
+            ),
         )
 
     def close(self) -> None:

@@ -14,6 +14,7 @@ from ..model import (
 from ..external import canonical_graph6
 from ..score_worker import CycleCountResult
 from .base import (
+    GraphValidationContext,
     MutationResult,
     ScoreResult,
     SeedGenerationTrace,
@@ -687,15 +688,23 @@ class ErdosGyarfasPlugin:
         cap: int,
         results: tuple[CycleCountResult, ...],
         profile: ScoreProfileAccumulator | None,
+        *,
+        validation_context: GraphValidationContext | None = None,
     ) -> ScoreResult:
         """Assemble the ordinary score from a parity-checked count backend."""
 
-        if profile is None:
-            validation = self.validate_graph(graph)
+        if (
+            validation_context is not None
+            and validation_context.graph != graph
+        ):
+            raise ValueError("validation context belongs to a different graph")
+        if validation_context is not None:
+            validation = validation_context.result
         else:
-            started = perf_counter_ns()
+            started = perf_counter_ns() if profile is not None else 0
             validation = self.validate_graph(graph)
-            profile.graph_validation_ns += perf_counter_ns() - started
+            if profile is not None:
+                profile.graph_validation_ns += perf_counter_ns() - started
         if not validation.valid:
             return ScoreResult(
                 False, (), 10**9, True, simplicity=graph.size()

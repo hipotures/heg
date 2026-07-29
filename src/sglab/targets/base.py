@@ -32,6 +32,12 @@ class ValidationResult:
 
 
 @dataclass(frozen=True, slots=True)
+class GraphValidationContext:
+    graph: BitGraph
+    result: ValidationResult
+
+
+@dataclass(frozen=True, slots=True)
 class MutationResult:
     graph: BitGraph
     removed_edges: tuple[tuple[int, int], ...] = ()
@@ -90,6 +96,8 @@ class TargetPlugin(Protocol):
         cap: int,
         results: tuple[CycleCountResult, ...],
         profile: object | None,
+        *,
+        validation_context: GraphValidationContext | None = None,
     ) -> ScoreResult: ...
     def exact_verify(self, graph: BitGraph) -> VerifyResult: ...
     def canonical_key(self, graph: BitGraph) -> bytes: ...
