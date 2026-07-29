@@ -342,7 +342,19 @@ int serve() {
             }
             simplicity /= 2U;
             std::uint16_t response_status = kStatusOk;
-            for (const std::uint16_t length : request.lengths) {
+            // Partial penalties only increase, so cutoff proofs are
+            // independent of evaluation order.
+            for (
+                std::size_t evaluation_index = 0;
+                evaluation_index < request.lengths.size();
+                ++evaluation_index
+            ) {
+                const std::size_t length_index =
+                    (request.flags & 1U) != 0
+                    ? request.lengths.size() - 1U - evaluation_index
+                    : evaluation_index;
+                const std::uint16_t length =
+                    request.lengths[length_index];
                 if (cutoff_reached(
                         request,
                         partial_total,
@@ -389,6 +401,12 @@ int serve() {
                     break;
                 }
             }
+            std::sort(
+                results.begin(),
+                results.end(),
+                [](const CountResult& left, const CountResult& right) {
+                    return left.length < right.length;
+                });
             write_response(request.request_id, response_status, results);
         } catch (const std::exception&) {
             write_response(request.request_id, kStatusError, {});

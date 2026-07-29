@@ -414,6 +414,41 @@ class PersistentScoreWorkerTests(unittest.TestCase):
             + full.timing.response_parsing_ns,
         )
 
+    def test_worker_can_prove_cutoff_from_longest_cycle_first(self) -> None:
+        graph = PLUGIN.generate_seed(
+            Random(101), {"order": 30, "mode": "cubic_first"}
+        )
+        with PersistentScoreWorker() as worker:
+            full = worker.score(
+                graph,
+                lengths=forbidden_lengths(graph.n),
+                limit=65,
+                node_budget=50_000,
+            )
+            dominated = worker.score(
+                graph,
+                lengths=forbidden_lengths(graph.n),
+                limit=65,
+                node_budget=50_000,
+                cutoff=(64, 256, graph.size()),
+                cutoff_inclusive=True,
+            )
+        full_score = PLUGIN.score_from_cycle_counts(
+            graph,
+            64,
+            full.results,
+            None,
+        )
+        self.assertGreaterEqual(
+            full_score.ordering_key,
+            (0, 64, 256, 0, graph.size()),
+        )
+        self.assertTrue(dominated.dominated)
+        self.assertEqual(
+            tuple(result.length for result in dominated.results),
+            (16,),
+        )
+
     def test_worker_counts_target_supplied_triangle_length(self) -> None:
         graph = BitGraph.from_edges(
             4,

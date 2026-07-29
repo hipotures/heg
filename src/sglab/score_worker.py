@@ -259,15 +259,19 @@ class PersistentScoreWorker:
                     elapsed_ns=elapsed_ns,
                 )
             )
-        if tuple(result.length for result in results) != lengths[
-            : len(results)
-        ]:
+        result_lengths = tuple(result.length for result in results)
+        if status == STATUS_OK:
+            if result_lengths != lengths:
+                raise ScoreWorkerError(
+                    "score worker returned unexpected cycle lengths"
+                )
+        elif (
+            result_lengths != tuple(sorted(result_lengths))
+            or len(set(result_lengths)) != len(result_lengths)
+            or any(length not in lengths for length in result_lengths)
+        ):
             raise ScoreWorkerError(
                 "score worker returned unexpected cycle lengths"
-            )
-        if status == STATUS_OK and len(results) != len(lengths):
-            raise ScoreWorkerError(
-                "score worker returned incomplete cycle lengths"
             )
         if profile_timing:
             response_parsing_ns += time.perf_counter_ns() - phase_started_ns
