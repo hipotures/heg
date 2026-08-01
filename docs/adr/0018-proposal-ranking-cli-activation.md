@@ -9,6 +9,14 @@ nullable selection is persisted in and fingerprinted by the immutable campaign
 plan. Every attempt, restart, fork, and checkpoint/resume inherits that value;
 Resume cannot toggle it.
 
+The supported operator shortcut is a persistent TOML identity containing
+`[experiment].id`, executed with `sglab experiment run --config`. It creates
+or validates an empty first-real-graph workspace marker, imports the explicitly
+authorized Codex home, revalidates the plan fingerprint, and starts or resumes
+the matching campaign. Generated campaign/attempt identifiers remain internal
+provenance. `prepare` and `init --kind first-real-graph-campaign` share the
+same fail-closed marker upgrade rules.
+
 Passive scheduling remains unchanged. Director context advertises the same
 capability, while semantic validation rejects disabled activation, omission on
 an enabled mutation start, random-restart ranking, and patch attempts. Status,

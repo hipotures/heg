@@ -26,6 +26,28 @@ sglab init --workspace ./workspace/my-first-campaign
 
 The workspace owns its database and scientific artifacts.
 
+For the shortest operator path, a persistent experiment configuration needs
+only an ID:
+
+```toml
+[experiment]
+id = "heg-ranked-001"
+```
+
+```bash
+sglab experiment run --config ./experiment.toml
+```
+
+This creates the non-synthetic marker internally, imports the authorized
+`~/.codex/auth.json`, verifies the immutable plan, and starts the campaign.
+Running the same ID again resumes the latest resumable attempt. The reviewed
+proposal ranker remains opt-in; add
+`proposal_ranking = "mutation_forge_stage4r_v1"` under `[search]` only when
+you explicitly want ranked mutation lanes. No ranker is selected by default.
+
+The lower-level prepare/auth/start workflow below remains available for
+auditing each boundary separately.
+
 ## 3. Prepare the campaign
 
 ```bash

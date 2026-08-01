@@ -11,6 +11,15 @@ Preparation creates a durable campaign row and exact plan before:
 
 The plan fingerprint binds the scientific and runtime contract.
 
+The operator shortcut `sglab experiment run --config experiment.toml` uses a
+single persistent `[experiment].id`. It atomically creates or validates the
+non-synthetic first-real-graph workspace marker, prepares the plan, imports
+only the explicitly authorized Codex `auth.json`, revalidates the fingerprint,
+and starts or resumes the matching campaign. A marker-less workspace is
+upgraded only when it is empty; populated or incompatible workspaces fail
+closed. The lower-level `init --kind first-real-graph-campaign` and
+`research-campaign prepare` paths use the same marker rules.
+
 The plan also binds `director_mode`. `llm` remains the default; `passive`
 selects the versioned `balanced_v1` host scheduler and its seed. Both reviewed
 contracts remain in the plan so a later execution attempt may explicitly

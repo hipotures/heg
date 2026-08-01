@@ -8,6 +8,31 @@ the installed parser/config code.
 
 ## Campaign scientific contract
 
+The compact operator contract is a persistent TOML identity:
+
+```toml
+[experiment]
+id = "heg-ranked-001"
+```
+
+```bash
+sglab experiment run --config experiment.toml
+```
+
+The command owns workspace-marker creation, immutable plan preparation,
+authorized `auth.json` import from `~/.codex`, fingerprint validation, and
+process start. The same ID automatically resumes the latest resumable
+attempt; a new ID receives a separate workspace. Internal campaign and
+attempt identifiers are retained as provenance and are not operator inputs.
+
+Ranking remains default-disabled. To opt into the reviewed LLM-only ranker,
+add this optional field:
+
+```toml
+[search]
+proposal_ranking = "mutation_forge_stage4r_v1"
+```
+
 Fingerprint-stable fields include:
 
 - target and target-definition hash;

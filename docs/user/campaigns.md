@@ -45,6 +45,23 @@ the Active Director campaign.
 The reviewed Mutation Forge Stage 4R proposal ranker is an explicit LLM
 Director campaign option, not a default. Authorize it before the first start:
 
+For the normal operator path, keep the public configuration to one persistent
+identity and run it directly:
+
+```toml
+[experiment]
+id = "heg-ranked-001"
+```
+
+```text
+sglab experiment run --config experiment.toml
+```
+
+The command creates the marker, prepares and fingerprints the plan, imports
+the authorized Codex home, and starts or resumes the matching experiment.
+The optional reviewed ranker field is described in the CLI reference; it is
+never selected implicitly.
+
 ```text
 sglab research-campaign prepare --workspace <workspace> --time-limit 1h \
   --director-mode llm --proposal-ranking mutation_forge_stage4r_v1

@@ -3,13 +3,16 @@ from __future__ import annotations
 from argparse import ArgumentParser, Namespace
 from pathlib import Path
 from shutil import which
+from subprocess import DEVNULL, Popen
 from threading import Thread
 from urllib.request import urlopen
 import asyncio
+import fcntl
 import hashlib
 import json
 import os
 import platform
+import sqlite3
 import sys
 import tempfile
 
@@ -42,6 +45,7 @@ from .research.auth import (
     import_authorized_auth,
 )
 from .research.campaign import (
+    CampaignPlanError,
     PREPARED_CAMPAIGN_POINTER,
     ResearchCampaignRunner,
     campaign_application_data,
@@ -66,6 +70,11 @@ from .research.experiment import (
     run_phase_a_audit,
 )
 from .research.inspection import inspect_persisted_sessions
+from .research.operator import (
+    ExperimentConfig,
+    ExperimentConfigError,
+    load_experiment_config,
+)
 from .research.store import ResearchStore
 from .research.proposal_ranking_replay import (
     build_replay_records,
@@ -84,6 +93,7 @@ from .sat import run_pysat_cegar
 from .state import (
     append_event,
     atomic_write_json,
+    read_json,
     next_control,
     utc_now,
 )
@@ -94,6 +104,142 @@ from .web import create_server, serve
 
 def _workspace(path: str) -> Path:
     return Path(path).expanduser().resolve()
+
+
+FIRST_REAL_GRAPH_WORKSPACE_MARKER = {
+    "workspace_kind": "first_real_graph_campaign",
+    "synthetic_data": False,
+    "marker_schema_version": 1,
+}
+
+
+def _workspace_has_campaign_data(workspace: Path) -> bool:
+    """Return whether a marker-less workspace contains scientific data.
+
+    A normal ``sglab init`` workspace has an empty SQLite schema and the
+    standard directories, so it is safe for the operator-facing campaign
+    commands to upgrade it with the explicit first-real-graph marker. Any
+    existing campaign, legacy run, prepared pointer, or active pointer makes
+    that upgrade unsafe and is rejected instead of being overwritten.
+    """
+
+    allowed_entries = {
+        "runs",
+        "best",
+        "logs",
+        "checkpoints",
+        "certificates",
+        "benchmarks",
+        "results.sqlite3",
+        "results.sqlite3-wal",
+        "results.sqlite3-shm",
+        "state.json",
+        "events.jsonl",
+        ".workspace-init.lock",
+    }
+    if any(child.name not in allowed_entries for child in workspace.iterdir()):
+        return True
+    database = workspace / "results.sqlite3"
+    if database.is_file():
+        with connect(database) as connection:
+            for table in (
+                "research_campaigns",
+                "runs",
+                "candidates",
+            ):
+                try:
+                    count = connection.execute(
+                        f"SELECT count(*) FROM {table}"
+                    ).fetchone()[0]
+                except sqlite3.OperationalError:
+                    count = 0
+                if int(count or 0) > 0:
+                    return True
+    return any(
+        (workspace / name).exists()
+        for name in (
+            PREPARED_CAMPAIGN_POINTER,
+            "active-research-campaign.json",
+        )
+    )
+
+
+def _ensure_first_real_graph_workspace(
+    workspace: Path,
+    *,
+    allow_upgrade: bool = True,
+) -> Path:
+    """Create or validate the non-synthetic campaign workspace marker.
+
+    The marker is written atomically while holding a workspace-local lock.
+    Existing explicit markers are never changed. A marker-less workspace is
+    upgraded only when it is demonstrably empty (including a fresh generic
+    ``sglab init`` workspace); populated or incompatible workspaces fail
+    closed.
+    """
+
+    root = workspace.expanduser().resolve()
+    if root in {Path("/"), Path.home().resolve()}:
+        raise ValueError("refusing a broad campaign workspace")
+    root.mkdir(parents=True, exist_ok=True)
+    lock_path = root / ".workspace-init.lock"
+    with lock_path.open("a", encoding="ascii") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        marker_path = root / "workspace.json"
+        marker = read_json(marker_path, default={})
+        if marker:
+            if (
+                marker.get("workspace_kind")
+                != FIRST_REAL_GRAPH_WORKSPACE_MARKER["workspace_kind"]
+                or marker.get("synthetic_data")
+                is not FIRST_REAL_GRAPH_WORKSPACE_MARKER["synthetic_data"]
+            ):
+                raise ValueError(
+                    "workspace marker is incompatible with a first-real-graph campaign"
+                )
+        elif not allow_upgrade:
+            raise ValueError(
+                "workspace requires an explicit first-real-graph campaign marker"
+            )
+        elif _workspace_has_campaign_data(root):
+            raise ValueError(
+                "refusing to upgrade a non-empty marker-less workspace"
+            )
+        else:
+            atomic_write_json(
+                marker_path,
+                {
+                    **FIRST_REAL_GRAPH_WORKSPACE_MARKER,
+                    "initialized_at": utc_now(),
+                    "initialized_by": "sglab",
+                },
+            )
+        for directory in (
+            "runs",
+            "best",
+            "logs",
+            "checkpoints",
+            "certificates",
+            "benchmarks",
+        ):
+            (root / directory).mkdir(exist_ok=True)
+        database = connect(root / "results.sqlite3")
+        database.close()
+        if not (root / "state.json").exists():
+            atomic_write_json(
+                root / "state.json",
+                {
+                    "status": "IDLE",
+                    "workspace": str(root),
+                    "updated_at": utc_now(),
+                    "status_checked_at": "2026-07-23",
+                },
+            )
+        if not (root / "events.jsonl").exists():
+            (root / "events.jsonl").write_text("", encoding="utf-8")
+        append_event(root / "events.jsonl", "workspace_initialized")
+        fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+    return root
 
 
 def _read_text_limited(
@@ -243,6 +389,9 @@ def cmd_proposal_ranking(args: Namespace) -> int:
 
 def cmd_init(args: Namespace) -> int:
     workspace = _workspace(args.workspace)
+    if args.kind == "first-real-graph-campaign":
+        print(_ensure_first_real_graph_workspace(workspace))
+        return 0
     workspace.mkdir(parents=True, exist_ok=True)
     for directory in (
         "runs",
@@ -676,10 +825,361 @@ def cmd_ai_experiment(args: Namespace) -> int:
     return 0 if report["ok"] else 1
 
 
+EXPERIMENT_STATE_FILE = Path(".sglab") / "experiment-state.json"
+
+
+def _experiment_state_path(workspace: Path) -> Path:
+    return workspace.resolve() / EXPERIMENT_STATE_FILE
+
+
+def _write_experiment_state(
+    workspace: Path,
+    *,
+    config: ExperimentConfig,
+    campaign_id: str,
+    plan_fingerprint: str,
+    proposal_ranking: str | None,
+    state: str,
+    director_mode: str,
+    pid: int | None = None,
+) -> None:
+    payload: dict[str, object] = {
+        "schema_version": 1,
+        "experiment_id": config.experiment_id,
+        "campaign_id": campaign_id,
+        "plan_fingerprint": plan_fingerprint,
+        "proposal_ranking": proposal_ranking,
+        "director_mode": director_mode,
+        "workspace": str(workspace.resolve()),
+        "state": state,
+        "updated_at": utc_now(),
+    }
+    if pid is not None:
+        payload["pid"] = pid
+    atomic_write_json(_experiment_state_path(workspace), payload)
+
+
+def _read_experiment_state(workspace: Path) -> dict[str, object]:
+    state = read_json(_experiment_state_path(workspace), default={})
+    if not state:
+        return {}
+    if state.get("schema_version") != 1:
+        raise ValueError("experiment state schema is unsupported")
+    if not isinstance(state.get("experiment_id"), str):
+        raise ValueError("experiment state has no experiment ID")
+    if not isinstance(state.get("campaign_id"), str):
+        raise ValueError("experiment state has no campaign ID")
+    return state
+
+
+def _process_is_live(pid_value: object) -> bool:
+    try:
+        pid = int(pid_value)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def _launch_experiment_campaign(
+    workspace: Path,
+    *,
+    campaign_id: str,
+    plan_fingerprint: str | None,
+    time_limit: str,
+    resume: bool,
+) -> int:
+    if resume:
+        command = [
+            sys.executable,
+            "-m",
+            "sglab",
+            "research-campaign",
+            "resume",
+            "--workspace",
+            str(workspace),
+            "--campaign-id",
+            campaign_id,
+            "--additional-time",
+            time_limit,
+        ]
+    else:
+        if not plan_fingerprint:
+            raise ValueError("prepared experiment is missing its fingerprint")
+        command = [
+            sys.executable,
+            "-m",
+            "sglab",
+            "research-campaign",
+            "start",
+            "--workspace",
+            str(workspace),
+            "--time-limit",
+            time_limit,
+            "--plan-fingerprint",
+            plan_fingerprint,
+        ]
+    logs = workspace / "logs"
+    logs.mkdir(parents=True, exist_ok=True)
+    log_path = logs / "experiment-runner.log"
+    if log_path.is_file() and log_path.stat().st_size >= 16 * 1024 * 1024:
+        os.replace(log_path, log_path.with_suffix(".log.1"))
+    with log_path.open("ab") as log:
+        process = Popen(
+            command,
+            stdin=DEVNULL,
+            stdout=log,
+            stderr=log,
+            start_new_session=True,
+            env=os.environ.copy(),
+        )
+    return int(process.pid)
+
+
+def _experiment_summary(
+    config: ExperimentConfig,
+    *,
+    state: str,
+    proposal_ranking: str | None,
+    resumed: bool,
+) -> dict[str, object]:
+    return {
+        "ok": True,
+        "experiment_id": config.experiment_id,
+        "workspace": str(config.workspace),
+        "state": state,
+        "resumed": resumed,
+        "director_mode": config.director_mode,
+        "proposal_ranking": proposal_ranking,
+        "proposal_ranking_enabled": proposal_ranking is not None,
+        "dashboard": "serve this workspace with sglab serve",
+    }
+
+
+def cmd_experiment(args: Namespace) -> int:
+    if args.experiment_command != "run":
+        raise SystemExit("unsupported experiment command")
+    try:
+        config = load_experiment_config(args.config)
+        duration = parse_duration(config.time_limit)
+        if duration != 3600:
+            raise ExperimentConfigError(
+                "the first real graph experiment contract is fixed at one hour"
+            )
+        workspace = _ensure_first_real_graph_workspace(config.workspace)
+        state = _read_experiment_state(workspace)
+        if state and state.get("experiment_id") != config.experiment_id:
+            raise ExperimentConfigError(
+                "workspace is already bound to a different experiment ID"
+            )
+        campaign_id = str(state.get("campaign_id")) if state else None
+        if campaign_id is None:
+            pointer = read_json(
+                workspace / PREPARED_CAMPAIGN_POINTER,
+                default={},
+            )
+            if pointer.get("campaign_id"):
+                campaign_id = str(pointer["campaign_id"])
+
+        if campaign_id is None:
+            plan = prepare_campaign_plan(
+                workspace,
+                duration_seconds=duration,
+                director_mode=config.director_mode,
+                proposal_ranking=config.proposal_ranking,
+            )
+            if config.director_mode == "llm":
+                import_authorized_auth(
+                    config.codex_home,
+                    campaign_application_data(
+                        workspace,
+                        str(plan["campaign_id"]),
+                    ),
+                )
+            # Re-read the immutable artifact after credential import so the
+            # process boundary receives the exact bytes that were prepared.
+            plan = load_prepared_campaign_plan(
+                workspace,
+                campaign_id=str(plan["campaign_id"]),
+                expected_fingerprint=str(plan["plan_fingerprint"]),
+            )
+            pid = _launch_experiment_campaign(
+                workspace,
+                campaign_id=str(plan["campaign_id"]),
+                plan_fingerprint=str(plan["plan_fingerprint"]),
+                time_limit=config.time_limit,
+                resume=False,
+            )
+            _write_experiment_state(
+                workspace,
+                config=config,
+                campaign_id=str(plan["campaign_id"]),
+                plan_fingerprint=str(plan["plan_fingerprint"]),
+                proposal_ranking=plan.get("proposal_ranking"),
+                state="starting",
+                director_mode=str(plan["director_mode"]),
+                pid=pid,
+            )
+            print(
+                json.dumps(
+                    _experiment_summary(
+                        config,
+                        state="starting",
+                        proposal_ranking=plan.get("proposal_ranking"),
+                        resumed=False,
+                    ),
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+            return 0
+
+        status = campaign_status(workspace, campaign_id)
+        if status.get("state") in {"IDLE", "NOT_FOUND", "SCHEMA_UNAVAILABLE"}:
+            raise ExperimentConfigError(
+                "experiment state references an unavailable campaign"
+            )
+        plan = None
+        stored_ranking = state.get("proposal_ranking")
+        projected_ranking = status.get("proposal_ranking")
+        if status.get("state") == "prepared":
+            plan = load_prepared_campaign_plan(
+                workspace,
+                campaign_id=campaign_id,
+                expected_fingerprint=(
+                    str(state["plan_fingerprint"])
+                    if state.get("plan_fingerprint")
+                    else None
+                ),
+            )
+            projected_ranking = plan.get("proposal_ranking")
+        elif status.get("resume_supported"):
+            # Resume must validate the durable plan before launching a new
+            # execution attempt; the runner repeats this check at the child
+            # process boundary.
+            plan = campaign_plan(workspace, campaign_id)
+            projected_ranking = plan.get("proposal_ranking")
+        if config.proposal_ranking_explicit and config.proposal_ranking != projected_ranking:
+            raise ExperimentConfigError(
+                "experiment ID is already bound to a different proposal-ranking contract"
+            )
+        effective_ranking = projected_ranking or stored_ranking
+        if effective_ranking is not None and config.director_mode == "passive":
+            raise ExperimentConfigError(
+                "proposal-ranking activation requires LLM Director mode"
+            )
+        effective_mode = str(
+            (plan or {}).get("director_mode")
+            or state.get("director_mode")
+            or status.get("director_mode")
+            or config.director_mode
+        )
+        if config.director_mode_explicit and effective_mode != config.director_mode:
+            raise ExperimentConfigError(
+                "experiment ID is already bound to a different Director mode"
+            )
+        config_for_summary = ExperimentConfig(
+            config_path=config.config_path,
+            experiment_id=config.experiment_id,
+            workspace=config.workspace,
+            time_limit=config.time_limit,
+            director_mode=effective_mode,
+            director_mode_explicit=config.director_mode_explicit,
+            proposal_ranking=effective_ranking,
+            proposal_ranking_explicit=config.proposal_ranking_explicit,
+            codex_home=config.codex_home,
+        )
+        if status.get("state") == "running":
+            process = status.get("process") or {}
+            if _process_is_live(process.get("pid")):
+                print(
+                    json.dumps(
+                        _experiment_summary(
+                            config_for_summary,
+                            state="running",
+                            proposal_ranking=effective_ranking,
+                            resumed=True,
+                        ),
+                        indent=2,
+                        sort_keys=True,
+                    )
+                )
+                return 0
+        resumable = bool(status.get("resume_supported"))
+        if status.get("state") == "prepared":
+            assert plan is not None
+            pid = _launch_experiment_campaign(
+                workspace,
+                campaign_id=campaign_id,
+                plan_fingerprint=str(plan["plan_fingerprint"]),
+                time_limit=config.time_limit,
+                resume=False,
+            )
+            _write_experiment_state(
+                workspace,
+                config=config_for_summary,
+                campaign_id=campaign_id,
+                plan_fingerprint=str(plan["plan_fingerprint"]),
+                proposal_ranking=effective_ranking,
+                state="starting",
+                director_mode=effective_mode,
+                pid=pid,
+            )
+            next_state = "starting"
+        elif resumable:
+            pid = _launch_experiment_campaign(
+                workspace,
+                campaign_id=campaign_id,
+                plan_fingerprint=None,
+                time_limit=config.time_limit,
+                resume=True,
+            )
+            _write_experiment_state(
+                workspace,
+                config=config_for_summary,
+                campaign_id=campaign_id,
+                plan_fingerprint=str(state.get("plan_fingerprint") or ""),
+                proposal_ranking=effective_ranking,
+                state="resuming",
+                director_mode=effective_mode,
+                pid=pid,
+            )
+            next_state = "resuming"
+        else:
+            raise ExperimentConfigError(
+                "the latest attempt is not resumable; choose a new experiment.id"
+            )
+        print(
+            json.dumps(
+                _experiment_summary(
+                    config_for_summary,
+                    state=next_state,
+                    proposal_ranking=effective_ranking,
+                    resumed=True,
+                ),
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0
+    except (ExperimentConfigError, CampaignPlanError, ValueError) as error:
+        raise SystemExit(str(error)) from error
+
+
 def cmd_research_campaign(args: Namespace) -> int:
     workspace = _workspace(args.workspace)
     command = args.research_campaign_command
     if command == "prepare":
+        # ``prepare`` is the supported operator entry point. Upgrade only a
+        # fresh generic ``sglab init`` workspace (or a new directory); the
+        # campaign planner itself still enforces the marker for library and
+        # recovery callers.
+        _ensure_first_real_graph_workspace(workspace)
         duration = parse_duration(args.time_limit)
         report = prepare_campaign_plan(
             workspace,
@@ -966,6 +1466,11 @@ def build_parser() -> ArgumentParser:
 
     init = subparsers.add_parser("init")
     init.add_argument("--workspace", required=True)
+    init.add_argument(
+        "--kind",
+        choices=["first-real-graph-campaign"],
+        help="create the explicit non-synthetic campaign workspace marker",
+    )
     init.set_defaults(func=cmd_init)
 
     web = subparsers.add_parser("serve")
@@ -1142,6 +1647,17 @@ def build_parser() -> ArgumentParser:
         default="stateless_turns",
     )
     experiment_run.set_defaults(func=cmd_ai_experiment)
+
+    experiment = subparsers.add_parser(
+        "experiment",
+        help="run a durable operator-configured research experiment",
+    )
+    experiment_commands = experiment.add_subparsers(
+        dest="experiment_command", required=True
+    )
+    experiment_run = experiment_commands.add_parser("run")
+    experiment_run.add_argument("--config", required=True)
+    experiment_run.set_defaults(func=cmd_experiment)
 
     research_campaign = subparsers.add_parser("research-campaign")
     campaign_commands = research_campaign.add_subparsers(

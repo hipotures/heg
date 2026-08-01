@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import redirect_stdout
 from io import StringIO
 import json
+import os
 import tempfile
 import time
 import unittest
@@ -355,6 +356,146 @@ class ProposalRankingActivationTests(unittest.TestCase):
                     director_mode="passive",
                     proposal_ranking=CATALOG_ID,
                 )
+
+    def test_cli_prepare_upgrades_a_fresh_workspace_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "workspace" / "ranked"
+            output = StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(
+                    main(
+                        [
+                            "research-campaign",
+                            "prepare",
+                            "--workspace",
+                            str(root),
+                            "--time-limit",
+                            "1h",
+                            "--director-mode",
+                            "llm",
+                            "--proposal-ranking",
+                            CATALOG_ID,
+                        ]
+                    ),
+                    0,
+                )
+            marker = json.loads((root / "workspace.json").read_text())
+            self.assertEqual(
+                marker["workspace_kind"], "first_real_graph_campaign"
+            )
+            self.assertFalse(marker["synthetic_data"])
+            plan = json.loads(output.getvalue())
+            self.assertEqual(plan["proposal_ranking"], CATALOG_ID)
+
+    def test_init_kind_writes_the_supported_first_real_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "workspace"
+            with redirect_stdout(StringIO()):
+                self.assertEqual(
+                    main(
+                        [
+                            "init",
+                            "--workspace",
+                            str(root),
+                            "--kind",
+                            "first-real-graph-campaign",
+                        ]
+                    ),
+                    0,
+                )
+            marker = json.loads((root / "workspace.json").read_text())
+            self.assertEqual(
+                marker["workspace_kind"], "first_real_graph_campaign"
+            )
+            self.assertFalse(marker["synthetic_data"])
+
+    def test_fresh_marker_upgrade_rejects_unrelated_existing_files(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "workspace"
+            root.mkdir()
+            (root / "operator-notes.txt").write_text("do not overwrite\n")
+            with self.assertRaises(ValueError):
+                main(
+                    [
+                        "init",
+                        "--workspace",
+                        str(root),
+                        "--kind",
+                        "first-real-graph-campaign",
+                    ]
+                )
+            self.assertFalse((root / "workspace.json").exists())
+
+    def test_experiment_run_one_key_creates_and_starts_default_unranked(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "home"
+            (home / ".codex").mkdir(parents=True)
+            (home / ".codex" / "auth.json").write_text("{}\n")
+            config = root / "experiment.toml"
+            config.write_text(
+                "[experiment]\n"
+                "id = \"heg-ranked-001\"\n",
+                encoding="utf-8",
+            )
+            output = StringIO()
+
+            class _FakeProcess:
+                pid = 987654
+
+            with patch.dict(os.environ, {"HOME": str(home)}), patch(
+                "sglab.cli.Popen", return_value=_FakeProcess()
+            ) as launch, redirect_stdout(output):
+                self.assertEqual(
+                    main(["experiment", "run", "--config", str(config)]),
+                    0,
+                )
+            report = json.loads(output.getvalue())
+            self.assertEqual(report["experiment_id"], "heg-ranked-001")
+            self.assertFalse(report["proposal_ranking_enabled"])
+            self.assertIn("research-campaign", launch.call_args.args[0])
+            workspace = root / "workspace" / "heg-ranked-001"
+            marker = json.loads((workspace / "workspace.json").read_text())
+            self.assertFalse(marker["synthetic_data"])
+            state = json.loads(
+                (workspace / ".sglab" / "experiment-state.json").read_text()
+            )
+            self.assertEqual(state["experiment_id"], "heg-ranked-001")
+            self.assertIsNone(state["proposal_ranking"])
+
+    def test_experiment_run_ranker_is_explicit_and_persistent(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            auth_home = root / "codex"
+            auth_home.mkdir()
+            (auth_home / "auth.json").write_text("{}\n")
+            config = root / "experiment.toml"
+            config.write_text(
+                "[experiment]\n"
+                "id = \"heg-ranked-001\"\n"
+                "[search]\n"
+                f"proposal_ranking = \"{CATALOG_ID}\"\n"
+                "[director]\n"
+                f"codex_home = \"{auth_home}\"\n",
+                encoding="utf-8",
+            )
+
+            class _FakeProcess:
+                pid = 987655
+
+            with patch("sglab.cli.Popen", return_value=_FakeProcess()):
+                output = StringIO()
+                with redirect_stdout(output):
+                    self.assertEqual(
+                        main(["experiment", "run", "--config", str(config)]),
+                        0,
+                    )
+            report = json.loads(output.getvalue())
+            self.assertEqual(report["proposal_ranking"], CATALOG_ID)
+            self.assertTrue(report["proposal_ranking_enabled"])
+            workspace = root / "workspace" / "heg-ranked-001"
+            plan = load_prepared_campaign_plan(workspace)
+            self.assertEqual(plan["proposal_ranking"], CATALOG_ID)
 
     def test_doctor_makes_one_bounded_call_and_reaps_worker(self) -> None:
         output = StringIO()

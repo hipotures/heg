@@ -14,6 +14,12 @@ semantic validation rejects omission, changes, random-restart use, and patch
 activation. Passive mode remains unchanged. `sglab proposal-ranking doctor`
 performs one bounded worker call and verifies clean shutdown without running a
 benchmark. Omission remains default-disabled.
+Fresh generic workspaces can be upgraded safely with
+`sglab init --kind first-real-graph-campaign`, and `prepare` performs the same
+atomic upgrade only when the workspace is empty. The persistent one-command
+operator path is `sglab experiment run --config experiment.toml` with a single
+required `[experiment].id`; it imports the authorized Codex home, revalidates
+the plan fingerprint, and starts or resumes the matching attempt.
 
 ## Issue #15 — reviewed Mutation Forge Stage 4R ranking seam
 

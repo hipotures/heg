@@ -8,6 +8,41 @@ sglab init --workspace <workspace>
 
 Creates the workspace structure and SQLite database.
 
+For a first-real-graph campaign, the operator-facing initializer can create
+the required non-synthetic marker atomically:
+
+```bash
+sglab init --workspace <workspace> --kind first-real-graph-campaign
+```
+
+`research-campaign prepare` performs the same upgrade only for a fresh,
+marker-less workspace. It rejects populated or incompatible workspaces.
+
+## One-command experiment run
+
+The compact operator contract is a persistent TOML identity:
+
+```toml
+[experiment]
+id = "heg-ranked-001"
+```
+
+Run it with:
+
+```bash
+sglab experiment run --config experiment.toml
+```
+
+The command creates or validates the private workspace marker, prepares the
+fixed one-hour Director contract, imports only the authorized `auth.json` from
+`~/.codex`, verifies the immutable plan fingerprint, and starts the campaign
+in its own session. Re-running the same `experiment.id` resumes the latest
+resumable attempt automatically; changing the ID creates a separate
+experiment workspace. Internal campaign IDs, attempt IDs, and fingerprints
+remain durable provenance rather than operator inputs. Proposal ranking stays
+disabled unless the reviewed ID is explicitly present in the optional
+`[search] proposal_ranking` field.
+
 ## Prepare
 
 ```bash
