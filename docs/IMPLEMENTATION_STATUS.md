@@ -1,6 +1,6 @@
 # Implementation Status
 
-Last implementation audit: **2026-07-29**.
+Last implementation audit: **2026-08-01**.
 
 ## Issue #15 — reviewed Mutation Forge Stage 4R ranking seam
 
@@ -12,7 +12,8 @@ replay/red-team helpers, and additive schema-018 identity ledger are now
 available. Existing lanes omit `proposal_ranking` and retain their prior
 trajectory; the Director cannot patch the parameter. See
 `docs/reports/MUTATION_FORGE_RANKING_SEAM_REPORT.md` for the preregistered
-gates and terminal result.
+gates and terminal result. The authoritative faithful HEG end-to-end gate is
+`NO_GO`; rollout remains disabled and no Stage 7R issue is created.
 
 ## Reusable direct-mutation witness context
 
