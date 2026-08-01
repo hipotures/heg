@@ -67,6 +67,9 @@ Resume may not silently change:
 - reasoning effort;
 - context mode;
 - scientific prompt contract.
+- proposal-ranking catalog identity or its worker/schema contract. A ranking
+  checkpoint resumes only with the exact frozen identity; a disabled lane
+  cannot consume a ranking checkpoint.
 
 A scientifically different contract requires a new campaign.
 Selecting the already fingerprinted passive or LLM orchestration contract is

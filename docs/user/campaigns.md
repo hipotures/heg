@@ -42,6 +42,13 @@ The Director works through a reviewed action catalog. It may:
 The operator does not normally choose algorithms or mutation parameters for
 the Active Director campaign.
 
+The reviewed Mutation Forge Stage 4R proposal ranker is an explicit research
+lane option, not a default. A lane may include
+`proposal_ranking=mutation_forge_stage4r_v1` only at creation; the parameter
+cannot be patched and an unknown catalog ID is rejected. The host still owns
+legal graph rewrites, HEG scoring, and exact verification, so enabling the
+ranker does not make a heuristic candidate a counterexample.
+
 ## No-LLM passive search
 
 Choose `director_mode=passive` when graph search should run without Codex

@@ -16,6 +16,7 @@ from .catalog import (
     MUTATION_WEIGHTS_PARAMETER,
     PARAMETER_DOMAINS,
     PATCHABLE_PARAMETERS,
+    REVIEWED_PROPOSAL_RANKING_CATALOG_ID,
     REVIEW_EVENTS,
     action_catalog,
 )
@@ -606,6 +607,13 @@ def _parameters(
             _mutation_weights(issues, value[name], f"{path}.{name}")
             continue
         domain = PARAMETER_DOMAINS[name]
+        if name == "proposal_ranking":
+            if value[name] != REVIEWED_PROPOSAL_RANKING_CATALOG_ID:
+                issues.add(
+                    f"{path}.{name}",
+                    "must name the reviewed proposal-ranking catalog entry",
+                )
+            continue
         if domain["type"] == "integer":
             _integer(
                 issues,

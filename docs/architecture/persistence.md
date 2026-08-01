@@ -16,7 +16,7 @@ keeps action/checkpoint ordering explicit.
 
 ## Current schema
 
-The documented baseline uses schema version 17.
+The documented baseline uses schema version 18.
 
 Major domains include:
 
@@ -34,8 +34,15 @@ Major domains include:
 - comparison suites/arms/turns/authorizations/worker lifecycle;
 - resource accounting;
 - ratings and cost profiles.
+- reviewed proposal-ranking identities for explicitly enabled lanes, including
+  frozen policy/source/schema hashes and worker contract.
 
 See [SQLite Schema](../reference/sqlite-schema.md).
+
+Migration 018 adds `research_lane_policy_identities` and its campaign index.
+The table is append-only evidence keyed by lane ID; default lanes have no row.
+It is applied after an SQLite Online Backup snapshot and does not rewrite
+historical lane/checkpoint records.
 
 ## Transaction boundaries
 

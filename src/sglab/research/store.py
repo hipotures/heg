@@ -1928,6 +1928,56 @@ class ResearchStore:
                     now,
                 ),
             )
+            # Policy identity is an additive evidence row.  The reviewed
+            # catalog is resolved by name only; arbitrary source/path values
+            # never reach persistence.  Historical/default lanes do not get a
+            # row, preserving their original schema and behavior.
+            ranking_catalog = parameters.get("proposal_ranking")
+            if ranking_catalog is not None:
+                if ranking_catalog != "mutation_forge_stage4r_v1":
+                    raise ValueError("unknown reviewed proposal-ranking catalog")
+                from .proposal_ranking import (
+                    CONTEXT_SCHEMA_VERSION,
+                    FAILURE_POLICY,
+                    FROZEN_IDENTITY,
+                    POOL_SCHEMA_VERSION,
+                    PROPOSAL_SCHEMA_VERSION,
+                    TIE_BREAKING_RULE,
+                    identity_hash,
+                )
+
+                identity = FROZEN_IDENTITY.as_dict()
+                database.execute(
+                    """
+                    INSERT INTO research_lane_policy_identities
+                    (lane_id, campaign_id, catalog_id, policy_id,
+                     source_sha256, normalized_ast_sha256,
+                     behavior_signature_sha256, validator_version,
+                     runtime_protocol_version, feature_contract_version,
+                     proposal_pool_contract_version, tie_breaking_rule,
+                     failure_policy, worker_identity, identity_sha256,
+                     created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        lane_id,
+                        campaign_id,
+                        identity["catalog_id"],
+                        identity["policy_id"],
+                        identity["source_sha256"],
+                        identity["normalized_ast_sha256"],
+                        identity["behavior_signature_sha256"],
+                        identity["validator_version"],
+                        identity["runtime_protocol_version"],
+                        CONTEXT_SCHEMA_VERSION + "+" + PROPOSAL_SCHEMA_VERSION,
+                        POOL_SCHEMA_VERSION,
+                        TIE_BREAKING_RULE,
+                        FAILURE_POLICY,
+                        identity.get("worker_identity"),
+                        identity_hash(identity),
+                        now,
+                    ),
+                )
 
     def mark_lane_running(self, lane_id: str) -> None:
         with self.transaction() as database:

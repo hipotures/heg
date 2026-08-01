@@ -19,6 +19,7 @@ ADRs explain durable architectural decisions and their consequences.
 | [0013](0013-mandatory-optimized-cpp-heuristic-scorer.md) | Heuristic scoring has one mandatory optimized C++ implementation and fails closed |
 | [0014](0014-no-llm-passive-scheduler.md) | Campaigns may use a deterministic no-LLM scheduler through the shared reviewed action pipeline |
 | [0015](0015-seed-generation-telemetry.md) | Seed telemetry is bounded and separately hashed from scientific checkpoint identity |
+| [0016](0016-reviewed-proposal-ranking-seam.md) | Frozen proposal ranking is an explicitly opt-in, host-owned seam |
 
 ADRs are not implementation reports. They describe why the current design was
 chosen.

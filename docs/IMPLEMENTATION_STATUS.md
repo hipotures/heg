@@ -2,6 +2,18 @@
 
 Last implementation audit: **2026-07-29**.
 
+## Issue #15 — reviewed Mutation Forge Stage 4R ranking seam
+
+Implemented on the opt-in branch `agent/mutation-forge-ranking-seam` from the
+required HEG pin. The packaged policy bytes, source/AST/behavior identities,
+Stage 2A worker protocol, Stage 2B context/proposal/pool schemas, deterministic
+host-owned k-switch pool, fail-closed process boundary, checkpoint identity,
+replay/red-team helpers, and additive schema-018 identity ledger are now
+available. Existing lanes omit `proposal_ranking` and retain their prior
+trajectory; the Director cannot patch the parameter. See
+`docs/reports/MUTATION_FORGE_RANKING_SEAM_REPORT.md` for the preregistered
+gates and terminal result.
+
 ## Reusable direct-mutation witness context
 
 The forbidden-cycle-break optimization is no longer private to `_LaneKernel`.

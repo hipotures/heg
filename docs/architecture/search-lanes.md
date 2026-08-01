@@ -187,6 +187,26 @@ overwrites one SHA-256-protected `live-frontier-*.json` file per lane, keeps no
 history, and creates no SQLite row. Durable post-batch checkpoints and their
 checkpoint-before-telemetry ordering remain unchanged.
 
+## Reviewed proposal ranking (opt-in)
+
+The `proposal_ranking` lane parameter is omitted by default. The only accepted
+value is `mutation_forge_stage4r_v1`; it is trajectory-breaking and cannot be
+patched onto an existing lane. A ranking lane uses the host-owned bounded
+`stage2b.pool.v1` of legal 2-, 3-, and 4-switch proposals and the frozen Stage
+2B context/proposal schemas. The worker receives no file path, shell, network,
+database, scorer, or M4 capability.
+
+The HEG C++ score already computed for the current graph supplies context
+witness counts and weighted penalty. Only the selected rewrite is handed back
+to the ordinary lane score path; the policy never scores the pool. M4 remains
+the only certification authority. Ranking telemetry is bounded to the
+micro-batch and records no per-proposal history.
+
+Ranking identity is stored in the checkpoint and an additive lane identity
+ledger. Resume requires an exact identity match and cannot silently activate or
+deactivate the capability. A ranking worker failure terminates the lane
+fail-closed; no random/operator fallback is attempted.
+
 ## Concurrency
 
 The coordinator remains the single SQLite writer. Workers communicate through

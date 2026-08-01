@@ -1,0 +1,76 @@
+{
+  "schema_version": "stage7.heg.integration.contract.v1",
+  "contract_sha256": "fb8e0d609a691655ba969a64b4affb7fd8781aa5dd485c42b9402829a9d4a439",
+  "catalog": {
+    "catalog_id": "mutation_forge_stage4r_v1",
+    "policy_id": "program-d5ad1c8203e0d9f25f03aabd",
+    "source_sha256": "e444562c1b308e3b23cb732be5f769ea1923ac1809501cea8571318c4aff0a7b",
+    "normalized_ast_sha256": "2243214df58c805e9a9343dc31ed082279e1c2ac31b21243bf889dbc9a19e165",
+    "behavior_signature_sha256": "8c2bdaa213f11b253d3ffcae1653bd01536879bb5c254a1586ded9ae522a868e",
+    "validator_version": "stage2a.validator.v2",
+    "runtime_protocol_version": "stage2a.worker.v1"
+  },
+  "entry": {
+    "heg_commit": "fd97451b0f3d87400d1d955a2c6b1b18303344ff"
+  },
+  "activation": {
+    "default_enabled": false,
+    "explicit_lane_parameter_required": true,
+    "reviewed_id_only": true,
+    "silent_resume_activation": false
+  },
+  "determinism": {
+    "feature_contract_version": "stage2b.context.v1+stage2b.proposal.v1",
+    "proposal_pool_contract_version": "stage2b.pool.v1",
+    "feature_limits": {
+      "forbidden_lengths": [4, 5, 6, 7, 8, 9],
+      "witness_sample_cap": 32,
+      "cycle_node_budget": 20000,
+      "distance_query_budget": 256,
+      "local_risk_budget": 2048
+    },
+    "tie_breaking_rule": "descending_priority_then_lexicographic_proposal_id",
+    "failure_policy": "fail_closed_no_silent_fallback",
+    "resume_requires_exact_identity": true
+  },
+  "authority": {
+    "host_owns_legal_pool": true,
+    "policy_calls_scorer": false,
+    "policy_calls_m4": false,
+    "selected_plan_only_scoring": true,
+    "m4_is_only_certification_authority": true,
+    "no_runtime_fallback": true
+  },
+  "security": {
+    "accepted_worker": "stage2a.worker.v1",
+    "filesystem": false,
+    "environment": false,
+    "subprocess": false,
+    "network": false,
+    "database": false,
+    "dynamic_code": false,
+    "inherited_stdin": false,
+    "source_path_from_director": false
+  },
+  "rollback": {
+    "migration": "additive_or_online_backup_restore; no_downgrade",
+    "checkpoint_readable": true,
+    "historical_evidence_rewritten": false,
+    "new_lanes_default_disabled": true
+  },
+  "telemetry": {
+    "scope": "bounded_micro_batch",
+    "per_proposal_history": false,
+    "fields": [
+      "policy_call_count",
+      "invalid_result_count",
+      "timeout_crash_protocol_count",
+      "selection_latency_ns_sum",
+      "selected_k_counts",
+      "selector_counts",
+      "tie_count",
+      "pool_generation_ns",
+      "feature_computation_ns"
+    ]
+  }
+}

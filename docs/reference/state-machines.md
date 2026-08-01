@@ -79,6 +79,11 @@ For a `random_restart` lane using `independent_sample`, legacy checkpoint
 mutation-ancestry fields are non-executable history. Resume restores generator
 and search state but initializes the live mutation-ancestry tracker empty.
 
+An explicitly ranked lane also carries an immutable
+`proposal_ranking_identity`. Recovery requires an exact match; missing or
+drifted policy identity fails the lane closed and never selects a legacy
+operator as a fallback.
+
 ## Candidate
 
 Representative states:

@@ -24,7 +24,7 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-"sglab.research" = ["assets/*.txt", "assets/*.json"]
+"sglab.research" = ["assets/*.txt", "assets/*.json", "assets/*.py"]
 
 [tool.setuptools.data-files]
 "share/structural-graph-lab/web" = ["web/index.html"]

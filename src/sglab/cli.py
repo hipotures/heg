@@ -66,6 +66,12 @@ from .research.experiment import (
 )
 from .research.inspection import inspect_persisted_sessions
 from .research.store import ResearchStore
+from .research.proposal_ranking_replay import (
+    build_replay_records,
+    run_faithful_heg_benchmark,
+    run_red_team,
+    run_replay,
+)
 from .search import ALGORITHMS, MODES, SearchConfig, config_from_run, run_search
 from .sat import run_pysat_cegar
 from .state import (
@@ -391,6 +397,40 @@ def cmd_sat(args: Namespace) -> int:
 
 
 def cmd_benchmark(args: Namespace) -> int:
+    if args.benchmark_command == "proposal-ranking":
+        output = _workspace(args.output)
+        output.mkdir(parents=True, exist_ok=True)
+        if args.corpus:
+            from .research.proposal_ranking_replay import load_replay
+
+            records = load_replay(args.corpus)["records"]
+        else:
+            records = build_replay_records()
+        replay = run_replay(records)
+        red_team = run_red_team()
+        benchmark = run_faithful_heg_benchmark(
+            records,
+            calls=100_000,
+            e2e_evaluations=args.e2e_evaluations,
+        )
+        report = {
+            "schema_version": "stage7.heg.acceptance.v1",
+            "kind": "proposal_ranking",
+            "replay": replay.as_dict(),
+            "red_team": red_team,
+            "benchmark": benchmark,
+            "status": (
+                "passed"
+                if replay.passed
+                and red_team["status"] == "passed"
+                and benchmark["status"] == "passed"
+                else "no_go"
+            ),
+        }
+        path = output / "stage7-heg-acceptance.json"
+        atomic_write_json(path, report)
+        print(json.dumps({"json": str(path), "status": report["status"]}, indent=2))
+        return 0 if report["status"] == "passed" else 2
     if args.benchmark_command == "active-director-controls":
         budget = (
             ControlStudyBudget(wall_seconds=10, seeds=(1701, 2903))
@@ -941,6 +981,11 @@ def build_parser() -> ArgumentParser:
     director_controls.add_argument("--output", required=True)
     director_controls.add_argument("--smoke", action="store_true")
     director_controls.set_defaults(func=cmd_benchmark)
+    proposal_ranking = benchmark_commands.add_parser("proposal-ranking")
+    proposal_ranking.add_argument("--output", required=True)
+    proposal_ranking.add_argument("--corpus")
+    proposal_ranking.add_argument("--e2e-evaluations", type=int, default=100)
+    proposal_ranking.set_defaults(func=cmd_benchmark)
 
     ai_director = subparsers.add_parser("ai-director")
     ai_director_commands = ai_director.add_subparsers(

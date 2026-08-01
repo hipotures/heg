@@ -1,0 +1,47 @@
+{
+  "schema_version": "stage7.heg.field-mapping.v1",
+  "source": "src/sglab/research/proposal_ranking.py",
+  "context": {
+    "schema_version": {"type": "string", "direction": "identity", "scope": "policy-call", "bounds": ["stage2b.context.v1"]},
+    "order": {"type": "integer", "direction": "input", "scope": "graph", "bounds": {"minimum": 4}},
+    "forbidden_lengths": {"type": "array[integer]", "direction": "identity", "scope": "context", "bounds": [4, 5, 6, 7, 8, 9]},
+    "capped_cycle_counts": {"type": "array[integer]", "direction": "input", "scope": "host-score", "bounds": {"minimum": 0, "cap": 32}},
+    "weighted_penalty": {"type": "integer", "direction": "input", "scope": "host-score", "bounds": {"minimum": 0}},
+    "step": {"type": "integer", "direction": "input", "scope": "lane", "bounds": {"minimum": 0}},
+    "remaining_steps": {"type": "integer", "direction": "input", "scope": "lane", "bounds": {"minimum": 0}},
+    "stagnation": {"type": "integer", "direction": "input", "scope": "lane", "bounds": {"minimum": 0}},
+    "recent_best_improvement": {"type": "number", "direction": "input", "scope": "lane", "bounds": {"finite": true}},
+    "recent_acceptance_rate": {"type": "number", "direction": "input", "scope": "lane", "bounds": [0, 1]},
+    "recent_duplicate_rate": {"type": "number", "direction": "input", "scope": "lane", "bounds": [0, 1]}
+  },
+  "proposal": {
+    "schema_version": {"type": "string", "direction": "identity", "scope": "policy-call", "bounds": ["stage2b.proposal.v1"]},
+    "proposal_id": {"type": "sha256", "direction": "identity", "scope": "pool", "bounds": {"length": 64}},
+    "k": {"type": "integer", "direction": "input", "scope": "legal-pool", "bounds": [2, 3, 4]},
+    "operator_family": {"type": "string", "direction": "identity", "scope": "legal-pool", "bounds": ["legal_2_switch", "legal_3_switch", "legal_4_switch"]},
+    "selector_tags": {"type": "array[string]", "direction": "input", "scope": "pool", "bounds": "reviewed selectors"},
+    "anchor_forbidden_length": {"type": "integer|null", "direction": "input", "scope": "pool", "bounds": [4, 5, 6, 7, 8, 9, null]},
+    "broken_sampled_witnesses_by_length": {"type": "array[integer]", "direction": "input", "scope": "bounded-feature", "bounds": {"length": 6, "minimum": 0}},
+    "removed_edge_load_sum_by_length": {"type": "array[integer]", "direction": "input", "scope": "bounded-feature", "bounds": {"length": 6, "minimum": 0}},
+    "removed_edge_load_max_by_length": {"type": "array[integer]", "direction": "input", "scope": "bounded-feature", "bounds": {"length": 6, "minimum": 0}},
+    "minimum_distance_between_removed_edges": {"type": "integer", "direction": "input", "scope": "bounded-feature", "bounds": {"minimum": 0}},
+    "mean_distance_between_removed_edges": {"type": "number", "direction": "input", "scope": "bounded-feature", "bounds": {"minimum": 0, "finite": true}},
+    "minimum_preexisting_distance_for_new_edges": {"type": "integer", "direction": "input", "scope": "bounded-feature", "bounds": {"minimum": 0}},
+    "mean_preexisting_distance_for_new_edges": {"type": "number", "direction": "input", "scope": "bounded-feature", "bounds": {"minimum": 0, "finite": true}},
+    "local_triangle_risk": {"type": "integer", "direction": "input", "scope": "bounded-feature", "bounds": {"minimum": 0}},
+    "local_c4_risk": {"type": "integer", "direction": "input", "scope": "bounded-feature", "bounds": {"minimum": 0}},
+    "reconnection_span": {"type": "number", "direction": "input", "scope": "bounded-feature", "bounds": {"minimum": 0, "finite": true}}
+  },
+  "pool": {
+    "schema_version": {"type": "string", "direction": "identity", "scope": "pool", "bounds": ["stage2b.pool.v1"]},
+    "pool_size": {"type": "integer", "direction": "control", "scope": "host", "bounds": {"minimum": 1, "maximum": 64}},
+    "k_values": {"type": "array[integer]", "direction": "control", "scope": "host", "bounds": [2, 3, 4]},
+    "selectors": {"type": "array[string]", "direction": "control", "scope": "host", "bounds": "reviewed selectors"},
+    "pool_hash": {"type": "sha256", "direction": "identity", "scope": "pool", "bounds": {"length": 64}}
+  },
+  "authority": {
+    "legal_rewrite": "HEG BitGraph.with_edges / target legality",
+    "host_score": "HEG C++ score worker; selected plan only",
+    "certification": "M4 verifier only; never called by policy worker"
+  }
+}

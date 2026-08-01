@@ -3,6 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 
+REVIEWED_PROPOSAL_RANKING_CATALOG_ID = "mutation_forge_stage4r_v1"
+
+
 EXPERIMENT_ALGORITHMS = (
     "random_restart",
     "simulated_annealing",
@@ -67,6 +70,10 @@ PARAMETER_DOMAINS: dict[str, dict[str, Any]] = {
         "minimum": 1,
         "maximum": 1_000_000,
     },
+    "proposal_ranking": {
+        "type": "string",
+        "enum": [REVIEWED_PROPOSAL_RANKING_CATALOG_ID],
+    },
 }
 
 MUTATION_OPERATORS = (
@@ -85,6 +92,7 @@ ALGORITHM_PARAMETERS = {
         "order",
         "batch_candidates",
         "witness_cap",
+        "proposal_ranking",
     },
     "simulated_annealing": {
         "order",
@@ -94,6 +102,7 @@ ALGORITHM_PARAMETERS = {
         "cooling",
         "restart_threshold",
         MUTATION_WEIGHTS_PARAMETER,
+        "proposal_ranking",
     },
     "iterated_local_search": {
         "order",
@@ -102,6 +111,7 @@ ALGORITHM_PARAMETERS = {
         "tabu_tenure",
         "perturbation_interval",
         MUTATION_WEIGHTS_PARAMETER,
+        "proposal_ranking",
     },
     "iterated_local_search_tabu": {
         "order",
@@ -110,11 +120,12 @@ ALGORITHM_PARAMETERS = {
         "tabu_tenure",
         "perturbation_interval",
         MUTATION_WEIGHTS_PARAMETER,
+        "proposal_ranking",
     },
 }
 
 PATCHABLE_PARAMETERS = {
-    algorithm: parameters - {"order"}
+    algorithm: parameters - {"order", "proposal_ranking"}
     for algorithm, parameters in ALGORITHM_PARAMETERS.items()
 }
 
@@ -138,9 +149,12 @@ def action_catalog() -> dict[str, Any]:
         MUTATION_WEIGHTS_PARAMETER: (
             "Normalized selection probabilities over reviewed safe mutations."
         ),
+        "proposal_ranking": (
+            "Explicit reviewed proposal-ranking catalog ID; omitted means disabled."
+        ),
     }
     return {
-        "catalog_version": "1.2",
+        "catalog_version": "1.3",
         "algorithms": list(ALGORITHMS),
         "graph_families": [
             {"id": family, "engine_mode": mode}

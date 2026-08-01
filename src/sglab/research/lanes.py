@@ -26,7 +26,7 @@ from ..score_worker import (
 )
 from ..state import atomic_write_json, utc_now
 from ..targets import TARGETS
-from ..targets.base import ScoreResult, SeedGenerationTrace
+from ..targets.base import MutationResult, ScoreResult, SeedGenerationTrace
 from .catalog import (
     ALGORITHMS,
     ALGORITHM_PARAMETERS,
@@ -34,6 +34,7 @@ from .catalog import (
     MUTATION_OPERATORS,
     MUTATION_WEIGHTS_PARAMETER,
     PARAMETER_DOMAINS,
+    REVIEWED_PROPOSAL_RANKING_CATALOG_ID,
 )
 from .protocol import canonical_json
 from .telemetry import TelemetrySeries
@@ -518,6 +519,12 @@ class LaneSpec:
                     raise ValueError("mutation weights must be normalized")
                 continue
             domain = PARAMETER_DOMAINS[name]
+            if name == "proposal_ranking":
+                if value != REVIEWED_PROPOSAL_RANKING_CATALOG_ID:
+                    raise ValueError(
+                        "proposal_ranking must use the reviewed catalog ID"
+                    )
+                continue
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 raise ValueError(f"lane parameter must be numeric: {name}")
             if domain["type"] == "integer" and not isinstance(value, int):
@@ -529,6 +536,8 @@ class LaneSpec:
             and int(self.parameters["order"]) % 2
         ):
             raise ValueError("connected_cubic requires even order")
+        if "proposal_ranking" in self.parameters and self.algorithm == "random_restart":
+            raise ValueError("reviewed proposal ranking requires a mutation lane")
 
 
 @dataclass(slots=True)
@@ -571,6 +580,23 @@ class _LaneKernel:
         self.plugin = TARGETS[spec.target]
         self.parameters = dict(spec.parameters)
         self.mode = GRAPH_FAMILIES[spec.graph_family]
+        self.proposal_ranking_catalog_id = self.parameters.get("proposal_ranking")
+        self.proposal_ranking = None
+        if self.proposal_ranking_catalog_id is not None:
+            from .proposal_ranking import (
+                HegPolicyBridge,
+                require_checkpoint_identity,
+            )
+
+            if checkpoint is not None:
+                require_checkpoint_identity(checkpoint, enabled=True)
+            self.proposal_ranking = HegPolicyBridge(
+                catalog_id=str(self.proposal_ranking_catalog_id)
+            )
+        elif checkpoint is not None:
+            from .proposal_ranking import require_checkpoint_identity
+
+            require_checkpoint_identity(checkpoint, enabled=False)
         self.instrumentation_enabled = instrumentation_enabled
         self.optimized_legacy_key = optimized_legacy_key
         self.independent_sample_provenance = (
@@ -1046,7 +1072,11 @@ class _LaneKernel:
             mutation_operator = (
                 "random_restart_seed"
                 if self.algorithm == "random_restart"
-                else self._choose_mutation_operator()
+                else (
+                    "reviewed_proposal_ranking"
+                    if self.proposal_ranking is not None
+                    else self._choose_mutation_operator()
+                )
             )
             operator_counts = ancestry_operator_statistics.setdefault(
                 mutation_operator,
@@ -1054,7 +1084,13 @@ class _LaneKernel:
             )
             operator_counts["uses"] += 1
             mutation_delta = None
-            if self.algorithm == "random_restart":
+            if self.proposal_ranking is not None:
+                mutation_delta = self._policy_mutation(
+                    self.graph,
+                    step=self.high_water + evaluated,
+                )
+                candidate = mutation_delta.graph
+            elif self.algorithm == "random_restart":
                 candidate = self._generate_seed(
                     source="random_restart_candidate",
                     in_search_loop=True,
@@ -1416,6 +1452,8 @@ class _LaneKernel:
                 **self.score_backend_batch,
             },
         }
+        if self.proposal_ranking is not None:
+            result["proposal_ranking"] = self.proposal_ranking.telemetry_payload()
         if self.timing_ns is not None:
             if self.score_profile is not None:
                 self.timing_ns["graph_validation"] = (
@@ -1462,6 +1500,54 @@ class _LaneKernel:
             }
             self.seed_generation_batch = SeedGenerationAccumulator()
         return result
+
+    def _policy_mutation(
+        self,
+        graph: BitGraph,
+        *,
+        step: int,
+    ) -> MutationResult:
+        """Generate/rank/apply one host-owned proposal without lane RNG draws."""
+
+        if self.proposal_ranking is None:
+            raise RuntimeError("proposal-ranking capability is disabled")
+        seed_material = canonical_json(
+            {
+                "lane_id": self.spec.lane_id,
+                "lane_version": self.spec.lane_version,
+                "step": step,
+                "catalog_id": self.proposal_ranking_catalog_id,
+            },
+            max_bytes=4096,
+        )
+        policy_seed = int.from_bytes(
+            hashlib.sha256(seed_material).digest()[:8], "big"
+        )
+        selection, selected_graph, pool = self.proposal_ranking.select_for_graph(
+            graph,
+            policy_seed=policy_seed,
+            step=step,
+            remaining_steps=max(
+                0,
+                int(self.parameters["batch_candidates"])
+                - int(self.algorithm_evaluated),
+            ),
+            apply_selected=True,
+            return_details=True,
+            score=self.score,
+        )
+        selected = next(
+            candidate
+            for candidate in pool.candidates
+            if candidate.proposal_id == selection.selected_proposal_id
+        )
+        if selected_graph == graph:
+            raise RuntimeError("reviewed policy selected a no-op proposal")
+        return MutationResult(
+            selected_graph,
+            removed_edges=selected.rewrite.removed_edges,
+            added_edges=selected.rewrite.added_edges,
+        )
 
     def _mutation_witness_choices_for(
         self, graph: BitGraph
@@ -1707,6 +1793,8 @@ class _LaneKernel:
         ) from last_error
 
     def close(self) -> None:
+        if self.proposal_ranking is not None:
+            self.proposal_ranking.close()
         self.score_worker.close()
 
     def checkpoint(self, lane_version: int) -> dict[str, Any]:
@@ -1798,6 +1886,10 @@ class _LaneKernel:
             payload["seed_generation_sha256"] = hashlib.sha256(
                 canonical_json(seed_generation, max_bytes=256 * 1024)
             ).hexdigest()
+        if self.proposal_ranking_catalog_id is not None:
+            from .proposal_ranking import checkpoint_policy_identity
+
+            payload["proposal_ranking_identity"] = checkpoint_policy_identity()
         digest = checkpoint_scientific_sha256(payload)
         return {
             **payload,

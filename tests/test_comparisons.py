@@ -91,7 +91,7 @@ class ComparisonDatabaseTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             database = Path(directory) / "results.sqlite3"
             connection = connect(database)
-            self.assertEqual(SCHEMA_VERSION, 17)
+            self.assertEqual(SCHEMA_VERSION, 18)
             self.assertEqual(
                 connection.execute("PRAGMA user_version").fetchone()[0],
                 SCHEMA_VERSION,

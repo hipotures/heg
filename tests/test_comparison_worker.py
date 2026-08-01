@@ -1369,7 +1369,7 @@ class ComparisonWorkerMigrationTests(unittest.TestCase):
             backup.close()
             connection.close()
             migrated = connect(backup_path)
-            self.assertEqual(SCHEMA_VERSION, 17)
+            self.assertEqual(SCHEMA_VERSION, 18)
             self.assertEqual(
                 migrated.execute("PRAGMA user_version").fetchone()[0],
                 SCHEMA_VERSION,

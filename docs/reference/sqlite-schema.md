@@ -2,7 +2,7 @@
 
 ## Version
 
-The documented baseline uses SQLite schema version **17**.
+The documented baseline uses SQLite schema version **18**.
 
 ```sql
 PRAGMA user_version;
@@ -49,6 +49,8 @@ or a passive scheduler decision.
 - candidate pins and immutable snapshots;
 - `provenance_json` on retained candidates and immutable snapshots;
 - action outcomes.
+- `research_lane_policy_identities`, an append-only identity ledger for
+  explicitly enabled reviewed proposal-ranking lanes.
 
 ### Verification
 
@@ -112,6 +114,11 @@ The v16→v17 migration adds mode provenance and passive scheduler tables, then
 rebuilds only `director_action_batches` so its source may be either a model
 turn or scheduler decision. Historical batch IDs and fingerprints are copied
 unchanged and verified with `foreign_key_check`.
+
+The v17→v18 migration adds the reviewed proposal-ranking identity ledger and a
+campaign/lane lookup index. It is additive, preserves default-lane behavior,
+and is validated from an Online Backup snapshot with `integrity_check` and
+`foreign_key_check`.
 
 Seed-generation instrumentation requires no schema migration. Its bounded
 aggregate is stored in existing telemetry JSON and checkpoint artifacts; it

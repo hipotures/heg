@@ -34,6 +34,10 @@ Review:
 - start a new process generation;
 - do not advance SQLite telemetry beyond a durable checkpoint boundary;
 - report missing/corrupt checkpoint per lane.
+- verify the optional `proposal_ranking_identity` against the frozen catalog,
+  source/AST/behavior hashes, worker protocol, Stage 2B schemas, tie rule, and
+  failure policy. Any mismatch is a fail-closed Resume refusal; never fall
+  back to a random mutation operator.
 
 Selecting the faster `delta_local_v2` duplicate key requires an explicit
 algorithmic restart that creates fresh local duplicate state. It is not a
