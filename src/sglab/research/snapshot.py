@@ -547,6 +547,32 @@ class SnapshotBuilder:
                 (self.campaign_id,),
             )
         ]
+        retained_checkpoint_ids = tuple(
+            checkpoint_id
+            for item in candidates
+            for checkpoint_id in (
+                _checkpoint_id_from_ref(item["checkpoint_ref"]),
+            )
+            if checkpoint_id is not None
+        )
+        improvement_checkpoint_ids: tuple[str, ...] = ()
+        improvements = [
+            item
+            for runtime in self.manager.lanes.values()
+            for item in runtime.improvements
+            if isinstance(item.get("checkpoint_id"), str)
+            and isinstance(item.get("score"), dict)
+        ]
+        if improvements:
+            best_improvement = min(
+                improvements,
+                key=lambda item: tuple(
+                    item["score"].get("ordering_key", ())
+                ),
+            )
+            improvement_checkpoint_ids = (
+                str(best_improvement["checkpoint_id"]),
+            )
         validation_feedback = []
         for row in self.store.connection.execute(
             """
@@ -582,9 +608,10 @@ class SnapshotBuilder:
             "exact_verifier_outcomes": verifier,
             "candidate_ledger": candidates,
             "current_executable_candidate_ids": executable_candidates,
-            "current_executable_checkpoint_ids": sorted(
-                str(checkpoint_id)
-                for checkpoint_id in self.manager.checkpoints
+            "current_executable_checkpoint_ids": list(
+                self.manager.current_executable_checkpoint_ids(
+                    (*retained_checkpoint_ids, *improvement_checkpoint_ids)
+                )
             ),
             "lane_and_checkpoint_ledger": lanes,
             "explored_regions": [

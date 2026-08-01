@@ -94,11 +94,13 @@ equaled the number of successive targeted current-graph states. See
 ## Missing-checkpoint executability and terminal runner cleanup
 
 Resume and snapshot publication now distinguish immutable checkpoint history
-from current executability. An active-looking database lane reference is
-exposed as an executable checkpoint only when its integrity-checked object is
-present in the current `LaneManager` registry. Missing historical artifacts
-remain in the continuity ledger and cannot reach the orchestrator pin boundary
-or trigger `KeyError`.
+from current executability. Only the latest integrity-checked checkpoint of
+each active lane is exposed as a current executable target; older and
+non-current candidate-referenced checkpoints remain evidence. An explicit
+retained candidate target is included only when its object is present in the
+current `LaneManager` registry. Missing historical artifacts remain in the
+continuity ledger and cannot reach the orchestrator pin boundary or trigger
+`KeyError`.
 
 The orchestrator now validates and pins its complete executable checkpoint set
 in one atomic manager operation. The batch is kept ahead of older unrelated

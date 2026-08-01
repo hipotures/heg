@@ -90,6 +90,54 @@ class LaneManagerTests(unittest.TestCase):
             finally:
                 manager.shutdown()
 
+    def test_current_executable_checkpoints_exclude_history_and_stopped_lanes(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            manager = LaneManager(Path(directory), pinned_checkpoints=2)
+            process = Mock()
+            process.is_alive.return_value = False
+            runtime = LaneRuntime(
+                spec=lane_spec("lane-active", "simulated_annealing"),
+                process=process,
+                commands=manager.context.Queue(maxsize=1),
+                stop_event=Mock(),
+                pause_event=Mock(),
+                state="running",
+                latest_checkpoint_id="checkpoint-active-latest",
+            )
+            stopped = LaneRuntime(
+                spec=lane_spec("lane-stopped", "iterated_local_search"),
+                process=process,
+                commands=manager.context.Queue(maxsize=1),
+                stop_event=Mock(),
+                pause_event=Mock(),
+                state="stopped",
+                latest_checkpoint_id="checkpoint-stopped",
+            )
+            manager.lanes = {
+                runtime.spec.lane_id: runtime,
+                stopped.spec.lane_id: stopped,
+            }
+            manager.checkpoints = {
+                "checkpoint-active-old": {
+                    "checkpoint_id": "checkpoint-active-old"
+                },
+                "checkpoint-active-latest": {
+                    "checkpoint_id": "checkpoint-active-latest"
+                },
+                "checkpoint-stopped": {
+                    "checkpoint_id": "checkpoint-stopped"
+                },
+            }
+            try:
+                self.assertEqual(
+                    manager.current_executable_checkpoint_ids(),
+                    ("checkpoint-active-latest",),
+                )
+            finally:
+                manager.shutdown()
+
     def test_shutdown_closes_owned_multiprocessing_queues(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             manager = LaneManager(Path(directory))

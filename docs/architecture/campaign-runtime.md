@@ -135,12 +135,14 @@ the fault was produced by the current code, the shortcut refuses to retry;
 the operator must repair the code first or use the explicit Resume workflow.
 
 Checkpoint references remain immutable history even when their artifact is no
-longer available. Before and during recovery, only integrity-checked
-checkpoints loaded into the current lane manager are exposed as executable
-targets. A missing historical artifact therefore cannot be pinned or selected
-by a new Director cycle. The complete executable checkpoint set for one cycle
-is pinned atomically, so retention eviction cannot remove a target that the
-same cycle has not pinned yet.
+longer available. Before and during recovery, only the latest integrity-
+checked checkpoint for each active lane loaded into the current lane manager
+is exposed as an executable target. A retained candidate checkpoint is added
+only when it is an explicit current target; other older checkpoints remain
+evidence. A missing historical artifact therefore cannot be pinned or selected
+by a new Director cycle. The complete bounded executable checkpoint set for
+one cycle is pinned atomically, so retention eviction cannot remove a target
+that the same cycle has not pinned yet.
 
 Terminal attempt cleanup drains final lane events, reaps lane processes, and
 closes the manager-owned multiprocessing queues before the runner returns.

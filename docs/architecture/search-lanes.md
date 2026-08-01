@@ -176,11 +176,15 @@ Resume verifies hashes and starts a new process generation.
 An unavailable historical checkpoint remains in the durable lane/checkpoint
 ledger but is not an executable checkpoint target. Executability requires the
 artifact to have passed recovery and to be present in the current
-`LaneManager` checkpoint registry. Snapshot publication never promotes a
-database reference alone into an executable ID. Before a Director review, the
-coordinator validates and pins the complete executable checkpoint target set
-as one batch. Existing pins outside that batch are evicted first; the batch
-cannot evict one of its own targets because of iteration order.
+`LaneManager` checkpoint registry. For a live lane, only its latest
+integrity-checked checkpoint is a current executable target. Retained
+candidate-referenced checkpoints are added only when they are explicitly
+current targets; other older registered checkpoints remain immutable evidence.
+Snapshot publication never promotes a database reference alone into an
+executable ID. Before a Director review, the coordinator validates and pins
+the complete bounded executable checkpoint target set as one batch. Existing
+pins outside that batch are evicted first; the batch cannot evict one of its
+own targets because of iteration order.
 
 Live-frontier samples are not checkpoints. The coordinator atomically
 overwrites one SHA-256-protected `live-frontier-*.json` file per lane, keeps no

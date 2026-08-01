@@ -2385,6 +2385,37 @@ class LaneManager:
             if lane.state in {"starting", "running", "paused", "stopping"}
         ]
 
+    def current_executable_checkpoint_ids(
+        self,
+        additional_checkpoint_ids: tuple[str, ...] = (),
+    ) -> tuple[str, ...]:
+        """Return one integrity-checked checkpoint per active lane.
+
+        The manager also keeps bounded historical checkpoints in
+        ``self.checkpoints``. Those records remain evidence, but they are not
+        current Director targets. Retained candidate checkpoint references
+        may be supplied explicitly when a current best/fork target needs one.
+        Exposing the complete registry as executable IDs could exceed the
+        atomic pin-retention budget after a high-lane campaign accumulated
+        several checkpoints per lane. The active lane's latest checkpoint,
+        plus explicitly supplied retained targets, is the executable set.
+        """
+
+        identifiers = {
+            str(lane.latest_checkpoint_id)
+            for lane in self.active_lanes()
+            if (
+                lane.latest_checkpoint_id is not None
+                and lane.latest_checkpoint_id in self.checkpoints
+            )
+        }
+        identifiers.update(
+            str(checkpoint_id)
+            for checkpoint_id in additional_checkpoint_ids
+            if checkpoint_id in self.checkpoints
+        )
+        return tuple(sorted(identifiers))
+
     def send_patch(
         self,
         lane_id: str,
