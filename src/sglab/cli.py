@@ -872,6 +872,84 @@ def _read_experiment_state(workspace: Path) -> dict[str, object]:
     return state
 
 
+def _load_status_experiment_config(config_path: str | None) -> ExperimentConfig:
+    """Load the operator config used by the experiment run/status paths."""
+
+    if config_path is None:
+        default_path = Path("./experiment.toml")
+        if not default_path.is_file():
+            raise ExperimentConfigError(
+                "experiment configuration is unavailable; expected file: "
+                "./experiment.toml"
+            )
+        config_path = str(default_path)
+    return load_experiment_config(config_path)
+
+
+def _status_for_experiment_config(
+    config_path: str | None,
+    requested_campaign_id: str | None,
+) -> dict[str, object]:
+    """Resolve one configured experiment without selecting another campaign."""
+
+    config = _load_status_experiment_config(config_path)
+    workspace = config.workspace
+    if not workspace.is_dir():
+        raise ExperimentConfigError(
+            f"experiment '{config.experiment_id}' has no bound experiment state"
+        )
+    try:
+        state = _read_experiment_state(workspace)
+    except (OSError, ValueError) as error:
+        raise ExperimentConfigError(
+            f"experiment '{config.experiment_id}' has incompatible experiment state"
+        ) from error
+    if not state or state.get("experiment_id") != config.experiment_id:
+        raise ExperimentConfigError(
+            f"experiment '{config.experiment_id}' has no bound experiment state"
+        )
+    marker = read_json(workspace / "workspace.json", default={})
+    if (
+        marker.get("workspace_kind")
+        != FIRST_REAL_GRAPH_WORKSPACE_MARKER["workspace_kind"]
+        or marker.get("synthetic_data")
+        is not FIRST_REAL_GRAPH_WORKSPACE_MARKER["synthetic_data"]
+    ):
+        raise ExperimentConfigError(
+            f"experiment '{config.experiment_id}' has incompatible workspace state"
+        )
+    campaign_id = state.get("campaign_id")
+    if not isinstance(campaign_id, str) or not campaign_id:
+        raise ExperimentConfigError(
+            f"experiment '{config.experiment_id}' has incompatible experiment state"
+        )
+    if requested_campaign_id is not None and requested_campaign_id != campaign_id:
+        raise ExperimentConfigError(
+            f"experiment '{config.experiment_id}' is bound to a different campaign"
+        )
+    for pointer_name in ("active-research-campaign.json", PREPARED_CAMPAIGN_POINTER):
+        pointer = read_json(workspace / pointer_name, default={})
+        pointed_campaign = pointer.get("campaign_id")
+        if pointed_campaign is not None and pointed_campaign != campaign_id:
+            raise ExperimentConfigError(
+                f"experiment '{config.experiment_id}' has ambiguous campaign state"
+            )
+    status = campaign_status(workspace, campaign_id)
+    if status.get("campaign_id") != campaign_id or status.get("state") in {
+        "IDLE",
+        "NOT_FOUND",
+        "SCHEMA_UNAVAILABLE",
+    }:
+        raise ExperimentConfigError(
+            f"experiment '{config.experiment_id}' has no available campaign state"
+        )
+    return {
+        **status,
+        "experiment_id": config.experiment_id,
+        "workspace": str(workspace),
+    }
+
+
 def _process_is_live(pid_value: object) -> bool:
     try:
         pid = int(pid_value)
@@ -1178,8 +1256,24 @@ def cmd_experiment(args: Namespace) -> int:
 
 
 def cmd_research_campaign(args: Namespace) -> int:
-    workspace = _workspace(args.workspace)
     command = args.research_campaign_command
+    if command == "status":
+        try:
+            if args.workspace is None:
+                report = _status_for_experiment_config(
+                    args.config,
+                    args.campaign_id,
+                )
+            else:
+                report = campaign_status(
+                    _workspace(args.workspace),
+                    args.campaign_id,
+                )
+        except (ExperimentConfigError, ValueError) as error:
+            raise SystemExit(str(error)) from error
+        print(json.dumps(report, indent=2, sort_keys=True))
+        return 0
+    workspace = _workspace(args.workspace)
     if command == "prepare":
         # ``prepare`` is the supported operator entry point. Upgrade only a
         # fresh generic ``sglab init`` workspace (or a new directory); the
@@ -1319,15 +1413,6 @@ def cmd_research_campaign(args: Namespace) -> int:
             director_mode=args.director_mode,
         ).run()
         print(json.dumps(report, indent=2, sort_keys=True))
-        return 0
-    if command == "status":
-        print(
-            json.dumps(
-                campaign_status(workspace, args.campaign_id),
-                indent=2,
-                sort_keys=True,
-            )
-        )
         return 0
     if command == "continue":
         raise SystemExit(
@@ -1709,7 +1794,12 @@ def build_parser() -> ArgumentParser:
     campaign_auth.add_argument("--from-codex-home", required=True)
     campaign_auth.set_defaults(func=cmd_research_campaign)
     campaign_status_parser = campaign_commands.add_parser("status")
-    campaign_status_parser.add_argument("--workspace", required=True)
+    campaign_status_source = campaign_status_parser.add_mutually_exclusive_group()
+    campaign_status_source.add_argument("--workspace")
+    campaign_status_source.add_argument(
+        "--config",
+        help="persistent experiment TOML (default: ./experiment.toml)",
+    )
     campaign_status_parser.add_argument("--campaign-id")
     campaign_status_parser.set_defaults(func=cmd_research_campaign)
     campaign_resume = campaign_commands.add_parser("resume")
