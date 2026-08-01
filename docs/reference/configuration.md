@@ -46,6 +46,14 @@ and passive scheduler state.
 
 ## Search profiling
 
+An explicitly enabled proposal-ranking lane may request the bounded
+`proposal_ranking_profile_enabled` diagnostic. It emits one fixed-width
+`stage7.heg.profile.v1` aggregate at batch completion, including phase
+nanoseconds, cache/worker counters, and residual reconciliation. It is off by
+default and never changes the lane's scientific contract. The optimized worker
+batch is identified as `stage2a.worker.batch.v1` and is included in ranking
+checkpoint identity.
+
 `search_limits.score_profiling_enabled` controls per-forbidden-length
 nanosecond, DFS-node, evaluation, completeness and cutoff counters. It
 defaults to enabled for newly prepared campaigns. Disabling it removes the

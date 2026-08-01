@@ -207,6 +207,21 @@ ledger. Resume requires an exact identity match and cannot silently activate or
 deactivate the capability. A ranking worker failure terminates the lane
 fail-closed; no random/operator fallback is attempted.
 
+The performance-frozen implementation keeps the same policy bytes, host
+limits, pool size, selector weights, retry/matching limits, lane RNG contract,
+and Stage 2B schemas. It adds only exact graph-local feature reuse, cached
+matching shapes, copy-on-write local-risk adjacency, one bounded worker batch
+frame per pool, and a fixed-width in-memory profile. The batch extension is
+identified as `stage2a.worker.batch.v1` in checkpoint identity; the base worker
+protocol remains `stage2a.worker.v1`. A rejected graph keeps its feature cache;
+accepted rewrites, seed restarts, and checkpoint restores invalidate it.
+
+Profile output is aggregate-only (`stage7.heg.profile.v1`): fixed phase
+nanoseconds/counters, per-length witness and per-k/selector generation totals,
+cache/budget/worker counters, selected-plan scorer count, and reconciliation.
+It never stores per-proposal history. Score contexts never map an absent witness
+length to scientific zero; the complete bounded host context is used instead.
+
 ## Concurrency
 
 The coordinator remains the single SQLite writer. Workers communicate through

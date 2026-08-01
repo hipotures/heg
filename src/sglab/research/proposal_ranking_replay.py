@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import json
+import os
+import platform
 import statistics
+import sys
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -242,6 +245,7 @@ def run_faithful_heg_benchmark(
     calls: int = 100_000,
     e2e_evaluations: int = 100,
     strata: tuple[int, ...] = (14,),
+    proposal_ranking_profile_enabled: bool = False,
 ) -> dict[str, Any]:
     """Run the frozen worker gate and a real HEG baseline/projection pair."""
 
@@ -285,7 +289,10 @@ def run_faithful_heg_benchmark(
                 baseline_spec, max_evaluations=e2e_evaluations, max_wall_seconds=120
             )
             ranked = run_bounded_lane_batch(
-                ranking_spec, max_evaluations=e2e_evaluations, max_wall_seconds=120
+                ranking_spec,
+                max_evaluations=e2e_evaluations,
+                max_wall_seconds=120,
+                proposal_ranking_profile_enabled=proposal_ranking_profile_enabled,
             )
             baseline_rate = float(baseline["throughput"])
             ranked_rate = float(ranked["throughput"])
@@ -328,6 +335,193 @@ def run_faithful_heg_benchmark(
         "e2e_strata": e2e,
         "e2e_passed": e2e_gate,
         "status": "passed" if policy_gate and e2e_gate else "no_go",
+    }
+
+
+def _issue16_lane_spec(*, order: int, seed: int, lane_id: str, ranked: bool) -> Any:
+    """Build one preregistered, faithful issue-16 arm without hidden defaults."""
+
+    from .lanes import LaneSpec
+
+    parameters: dict[str, Any] = {
+        "order": order,
+        "batch_candidates": 2_000,
+        "witness_cap": 32,
+        "tabu_tenure": 48,
+        "perturbation_interval": 200,
+    }
+    if ranked:
+        parameters["proposal_ranking"] = CATALOG_ID
+    return LaneSpec(
+        lane_id=lane_id,
+        campaign_id="mutation-forge-ranking-seam-performance-issue-16",
+        target="erdos_gyarfas",
+        algorithm="iterated_local_search_tabu",
+        graph_family="connected_cubic",
+        seed=seed,
+        parameters=parameters,
+        resource_share=1.0,
+    )
+
+
+def _issue16_run_summary(result: Mapping[str, Any]) -> dict[str, Any]:
+    metrics = result.get("metrics", {})
+    ranking = metrics.get("proposal_ranking")
+    profile = ranking.get("profile") if isinstance(ranking, Mapping) else None
+    checkpoint = result.get("checkpoint", {})
+    failure_count = (
+        sum(
+            int(ranking.get(name, 0))
+            for name in (
+                "invalid_result_count",
+                "timeout_count",
+                "crash_count",
+                "protocol_count",
+                "non_finite_count",
+            )
+        )
+        if isinstance(ranking, Mapping)
+        else 0
+    )
+    return {
+        "evaluation_count": int(result.get("evaluation_count", 0)),
+        "throughput": float(result.get("throughput", 0.0)),
+        "elapsed_seconds": float(result.get("elapsed_seconds", 0.0)),
+        "termination_reason": result.get("termination_reason"),
+        "best_score": result.get("best_score"),
+        "best_graph_sha256": result.get("best_graph_sha256"),
+        "checkpoint_id": checkpoint.get("checkpoint_id"),
+        "checkpoint_sha256": checkpoint.get("sha256"),
+        "failures": failure_count,
+        "orphan_count": int(ranking.get("worker_orphan_count", 0)) if isinstance(ranking, Mapping) else 0,
+        "policy_call_count": int(ranking.get("policy_call_count", 0)) if isinstance(ranking, Mapping) else 0,
+        "worker_ipc_calls": int(profile.get("worker_ipc_calls", 0)) if isinstance(profile, Mapping) else 0,
+        "m4_calls": int(ranking.get("m4_calls", 0)) if isinstance(ranking, Mapping) else 0,
+        "selected_authoritative_scorer_calls": int(ranking.get("selected_authoritative_scorer_calls", 0)) if isinstance(ranking, Mapping) else 0,
+        "selected_plan_scorer_calls": int(profile.get("selected_plan_scorer_calls", 0)) if isinstance(profile, Mapping) else 0,
+        "profile": profile,
+    }
+
+
+def run_issue16_performance_matrix(
+    *,
+    repetitions: int = 3,
+    orders: tuple[int, ...] = (18, 24, 30),
+    seeds: tuple[int, ...] = (801, 802, 803, 804, 805),
+    max_wall_seconds: float = 120.0,
+) -> dict[str, Any]:
+    """Run the preregistered serial issue-16 matrix.
+
+    The coordinator intentionally invokes one arm at a time.  This helper is
+    the only fresh-timing entry point; callers should run it only after the
+    performance-frozen tag and issue comment have been published.
+    """
+
+    if repetitions != 3:
+        raise ValueError("issue-16 matrix repetitions are fixed at three")
+    if orders != (18, 24, 30):
+        raise ValueError("issue-16 matrix orders are fixed at 18, 24, and 30")
+    if seeds != (801, 802, 803, 804, 805):
+        raise ValueError("issue-16 matrix seeds are fixed at 801..805")
+    if max_wall_seconds <= 0 or max_wall_seconds > 120:
+        raise ValueError("matrix arm wall bound must be in (0, 120]")
+
+    from .lanes import run_bounded_lane_batch
+
+    host = {
+        "python": sys.version,
+        "platform": platform.platform(),
+        "processor": platform.processor(),
+        "cpu_count": os.cpu_count(),
+        "affinity": sorted(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else None,
+    }
+    rows: list[dict[str, Any]] = []
+    for repetition in range(1, repetitions + 1):
+        for order in orders:
+            for seed in seeds:
+                arms: dict[str, Any] = {}
+                for arm, ranked in (("baseline_disabled", False), ("ranked_opt_in", True)):
+                    spec = _issue16_lane_spec(
+                        order=order,
+                        seed=seed,
+                        lane_id=f"issue16-r{repetition}-o{order}-s{seed}-{arm}",
+                        ranked=ranked,
+                    )
+                    started = time.perf_counter_ns()
+                    try:
+                        result = run_bounded_lane_batch(
+                            spec,
+                            max_evaluations=2_000,
+                            max_wall_seconds=max_wall_seconds,
+                            proposal_ranking_profile_enabled=ranked,
+                        )
+                        arm_result = _issue16_run_summary(result)
+                        arm_result["status"] = "measured"
+                    except Exception as exc:  # pragma: no cover - environment gate
+                        arm_result = {
+                            "status": "infrastructure_failure",
+                            "error": f"{type(exc).__name__}: {exc}",
+                        }
+                    arm_result["wall_ns"] = time.perf_counter_ns() - started
+                    arms[arm] = arm_result
+                baseline = arms["baseline_disabled"]
+                ranked = arms["ranked_opt_in"]
+                ratio = None
+                if baseline.get("status") == "measured" and ranked.get("status") == "measured":
+                    ratio = ranked["throughput"] / max(baseline["throughput"], 1e-12)
+                rows.append(
+                    {
+                        "repetition": repetition,
+                        "order": order,
+                        "seed": seed,
+                        "baseline_disabled": baseline,
+                        "ranked_opt_in": ranked,
+                        "ranking_over_baseline": ratio,
+                    }
+                )
+
+    ratios = [
+        float(row["ranking_over_baseline"])
+        for row in rows
+        if row["ranking_over_baseline"] is not None
+    ]
+    per_order = {
+        str(order): statistics.median(
+            [float(row["ranking_over_baseline"]) for row in rows if row["order"] == order and row["ranking_over_baseline"] is not None]
+        )
+        if any(row["order"] == order and row["ranking_over_baseline"] is not None for row in rows)
+        else None
+        for order in orders
+    }
+    per_seed = {
+        str(seed): statistics.median(
+            [float(row["ranking_over_baseline"]) for row in rows if row["seed"] == seed and row["ranking_over_baseline"] is not None]
+        )
+        if any(row["seed"] == seed and row["ranking_over_baseline"] is not None for row in rows)
+        else None
+        for seed in seeds
+    }
+    return {
+        "schema_version": "stage7.heg.issue16.performance-matrix.v1",
+        "matrix": {
+            "orders": list(orders),
+            "seeds": list(seeds),
+            "repetitions": repetitions,
+            "evaluations_per_arm_seed": 2_000,
+            "serial": True,
+            "baseline": "ranking parameter omitted",
+            "ranked": {"catalog_id": CATALOG_ID, "explicit_opt_in": True},
+        },
+        "host": host,
+        "rows": rows,
+        "summary": {
+            "measured_rows": len(ratios),
+            "expected_rows": len(orders) * len(seeds) * repetitions,
+            "pooled_median_ratio": statistics.median(ratios) if ratios else None,
+            "per_order_median_ratio": per_order,
+            "paired_seed_median_ratio": per_seed,
+            "all_arms_measured": len(ratios) == len(rows),
+        },
     }
 
 

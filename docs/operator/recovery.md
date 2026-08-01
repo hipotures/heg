@@ -38,6 +38,9 @@ Review:
   source/AST/behavior hashes, worker protocol, Stage 2B schemas, tie rule, and
   failure policy. Any mismatch is a fail-closed Resume refusal; never fall
   back to a random mutation operator.
+- For the performance-frozen implementation, the exact identity also includes
+  `stage2a.worker.batch.v1`; a checkpoint from another batch extension is
+  historical evidence and is not an executable Resume target.
 
 Selecting the faster `delta_local_v2` duplicate key requires an explicit
 algorithmic restart that creates fresh local duplicate state. It is not a

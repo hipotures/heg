@@ -49,6 +49,12 @@ cannot be patched and an unknown catalog ID is rejected. The host still owns
 legal graph rewrites, HEG scoring, and exact verification, so enabling the
 ranker does not make a heuristic candidate a counterexample.
 
+The performance-frozen ranker uses exact graph-local caches and one bounded
+worker batch per proposal pool. Its aggregate `stage7.heg.profile.v1` report is
+diagnostic only and contains no per-proposal history. The worker batch
+extension is part of the lane/checkpoint identity; it does not change the
+policy catalog or enable the lane by default.
+
 ## No-LLM passive search
 
 Choose `director_mode=passive` when graph search should run without Codex

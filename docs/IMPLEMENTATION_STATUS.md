@@ -15,6 +15,22 @@ trajectory; the Director cannot patch the parameter. See
 gates and terminal result. The authoritative faithful HEG end-to-end gate is
 `NO_GO`; rollout remains disabled and no Stage 7R issue is created.
 
+## Issue #16 — exact proposal-ranking performance seam
+
+The opt-in ranking path now reuses immutable graph-local Stage 2B facts,
+matching shapes, and copy-on-write local-risk adjacency, and sends each
+bounded proposal pool through one reviewed worker batch frame. The base worker
+protocol remains `stage2a.worker.v1`; the bounded extension is
+`stage2a.worker.batch.v1` and is part of the exact checkpoint identity. A
+fixed-width `stage7.heg.profile.v1` aggregate is available only when explicitly
+requested; it contains no per-proposal history. Missing score witness lengths
+are completed from the bounded host context rather than coerced to zero.
+
+The policy remains disabled by default and the performance-frozen branch is
+still subject to the serial order-18/24/30, seed-801..805, three-repetition
+authoritative matrix. See ADR 0017 and the issue-16 performance report; no
+rollout or future Stage 7R issue is created by this work.
+
 ## Reusable direct-mutation witness context
 
 The forbidden-cycle-break optimization is no longer private to `_LaneKernel`.

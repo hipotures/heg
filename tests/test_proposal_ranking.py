@@ -9,10 +9,12 @@ from random import Random
 from sglab.db import BASE_SCHEMA_SQL, SCHEMA_VERSION, migrate
 from sglab.research.lanes import LaneSpec, replay_micro_batches, run_bounded_lane_batch
 from sglab.research.proposal_ranking import (
+    BATCH_PROTOCOL_VERSION,
     CATALOG_ID,
     FROZEN_IDENTITY,
     HegPolicyBridge,
     PolicyWorker,
+    RANKING_PROFILE_PHASES,
     checkpoint_policy_identity,
     require_checkpoint_identity,
     verify_frozen_policy,
@@ -72,6 +74,69 @@ class ProposalRankingTests(unittest.TestCase):
         source = Path("src/sglab/research/assets/mutation_policy_stage4r_v1.py").read_text()
         with self.assertRaises(Exception):
             PolicyWorker(source=source + "\n")
+
+    def test_worker_batch_is_exact_and_bound_to_identity(self) -> None:
+        records = build_replay_records(record_count=2_048)[:12]
+        with PolicyWorker() as worker:
+            batched = worker.call_many(
+                records[0]["context"],
+                [record["proposal"] for record in records],
+            )
+            self.assertEqual(worker.calls, len(records))
+            self.assertEqual(worker.telemetry()["batch_protocol_version"], BATCH_PROTOCOL_VERSION)
+        with PolicyWorker() as worker:
+            singles = tuple(
+                worker.call(record["context"], record["proposal"])
+                for record in records
+            )
+        self.assertEqual(batched, singles)
+        self.assertEqual(checkpoint_policy_identity()["batch_protocol_version"], BATCH_PROTOCOL_VERSION)
+
+    def test_profile_is_fixed_width_reconciled_and_opt_in(self) -> None:
+        result = run_bounded_lane_batch(
+            ranking_spec(),
+            max_evaluations=2,
+            max_wall_seconds=30,
+            proposal_ranking_profile_enabled=True,
+        )
+        profile = result["metrics"]["proposal_ranking"]["profile"]
+        self.assertEqual(tuple(profile["phase_ns"]), RANKING_PROFILE_PHASES)
+        self.assertLessEqual(profile["residual_fraction"], 0.02)
+        self.assertEqual(profile["worker_orphans"], 0)
+        baseline = run_bounded_lane_batch(
+            LaneSpec(
+                lane_id="ranking-disabled",
+                campaign_id="ranking-test-campaign",
+                target="erdos_gyarfas",
+                algorithm="iterated_local_search_tabu",
+                graph_family="connected_cubic",
+                seed=20260801,
+                parameters={
+                    "order": 14,
+                    "batch_candidates": 100,
+                    "witness_cap": 32,
+                    "tabu_tenure": 48,
+                    "perturbation_interval": 200,
+                },
+                resource_share=1.0,
+            ),
+            max_evaluations=1,
+            max_wall_seconds=30,
+        )
+        self.assertNotIn("proposal_ranking", baseline["metrics"])
+
+    def test_missing_score_lengths_use_host_context_not_zero(self) -> None:
+        graph = TARGETS["erdos_gyarfas"].generate_seed(
+            Random(20260801), {"order": 14, "mode": "cubic_first"}
+        )
+        with HegPolicyBridge() as bridge:
+            complete = bridge.context_for_graph(graph)
+            partial = bridge.context_for_graph(
+                graph,
+                score={"witness_counts": [(4, 4), (8, 7)], "weighted_penalty": 120},
+            )
+        self.assertEqual(partial.capped_cycle_counts, complete.capped_cycle_counts)
+        self.assertTrue(all(partial.capped_cycle_counts[index] > 0 for index in (1, 2, 3, 5)))
 
     def test_checkpoint_identity_is_exact_and_disabled_is_refused(self) -> None:
         identity = checkpoint_policy_identity()

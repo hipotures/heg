@@ -41,6 +41,8 @@ This is the authoritative engineering-invariant matrix.
 | Proposal worker cannot choose a fallback | host bridge/worker boundary | red-team and process tests | lane fails closed and worker group is reaped |
 | Policy cannot certify or score | proposal bridge/M4 broker | scorer/M4 isolation tests | selected plan is the only scored plan; M4 remains sole authority |
 | Proposal-ranking checkpoint identity is exact | checkpoint/recovery | checkpoint/resume tests | resume rejected on any identity drift |
+| Proposal-ranking optimization preserves the frozen contract | host pool/worker/profile boundary | batch parity, replay, profile and performance-matrix gates | any hash, RNG, limit, schema, scorer, M4, or lane-state drift fails closed |
+| Ranking profile is bounded and reconciled | bridge/lane telemetry | fixed-width profile and residual gate | per-proposal history is not emitted; residual above 2% is a gate failure |
 
 When changing an invariant:
 

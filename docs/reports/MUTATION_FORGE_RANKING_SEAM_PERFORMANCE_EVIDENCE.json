@@ -1,0 +1,50 @@
+{
+  "schema_version": "stage7.heg.issue16.evidence.v1",
+  "issue": "hipotures/heg#16",
+  "decision": "PENDING_FRESH_MATRIX",
+  "branch": "agent/mutation-forge-ranking-seam-performance",
+  "base_commit": "b701cabffab6d249a5cd647d1b339d2c653edcb9",
+  "reference_repository": {
+    "path": "/home/user/DEV/mutation-forge-lab",
+    "commit": "92915d614ee8ec414406b631246a5e9f85770aaf"
+  },
+  "policy_identity": {
+    "catalog_id": "mutation_forge_stage4r_v1",
+    "policy_id": "program-d5ad1c8203e0d9f25f03aabd",
+    "source_sha256": "e444562c1b308e3b23cb732be5f769ea1923ac1809501cea8571318c4aff0a7b",
+    "normalized_ast_sha256": "2243214df58c805e9a9343dc31ed082279e1c2ac31b21243bf889dbc9a19e165",
+    "behavior_sha256": "8c2bdaa213f11b253d3ffcae1653bd01536879bb5c254a1586ded9ae522a868e",
+    "validator_version": "stage2a.validator.v2",
+    "runtime_protocol_version": "stage2a.worker.v1",
+    "batch_protocol_version": "stage2a.worker.batch.v1"
+  },
+  "fresh_matrix": {
+    "orders": [18, 24, 30],
+    "seeds": [801, 802, 803, 804, 805],
+    "repetitions": 3,
+    "evaluations_per_arm_seed": 2000,
+    "serial": true,
+    "observed": false
+  },
+  "gates": {
+    "pooled_median_ratio": {"threshold": 0.9, "observed": null},
+    "per_order_median_ratio": {"threshold": 0.85, "observed": null},
+    "paired_seed_median_ratio": {"threshold": 0.75, "observed": null},
+    "policy_p99_ns": {"threshold": 5000000, "observed": null},
+    "profile_residual_fraction": {"threshold": 0.02, "observed": null},
+    "failures": {"observed": null},
+    "orphans": {"observed": null},
+    "unauthorized_calls": {"observed": null},
+    "nonselected_scorer_calls": {"observed": null}
+  },
+  "activation": {
+    "default_enabled": false,
+    "rollout_enabled": false,
+    "future_stage7r_issue_created": false
+  },
+  "artifacts": {
+    "profile_contract": "docs/reports/MUTATION_FORGE_RANKING_SEAM_PROFILE.md",
+    "fresh_matrix": "runs/mutation-forge-ranking-seam-performance/issue-16/fresh-matrix.json",
+    "external_evidence_root": "/home/user/DEV/heg-evidence/mutation-forge-ranking-seam-performance-issue-16-final"
+  }
+}

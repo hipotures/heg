@@ -575,6 +575,7 @@ class _LaneKernel:
         optimized_legacy_key: bool = True,
         independent_sample_provenance: bool = True,
         mutation_witness_cache: bool = True,
+        proposal_ranking_profile_enabled: bool = False,
     ):
         self.spec = spec
         self.plugin = TARGETS[spec.target]
@@ -582,6 +583,7 @@ class _LaneKernel:
         self.mode = GRAPH_FAMILIES[spec.graph_family]
         self.proposal_ranking_catalog_id = self.parameters.get("proposal_ranking")
         self.proposal_ranking = None
+        self._last_policy_ranking_started_ns: int | None = None
         if self.proposal_ranking_catalog_id is not None:
             from .proposal_ranking import (
                 HegPolicyBridge,
@@ -591,7 +593,8 @@ class _LaneKernel:
             if checkpoint is not None:
                 require_checkpoint_identity(checkpoint, enabled=True)
             self.proposal_ranking = HegPolicyBridge(
-                catalog_id=str(self.proposal_ranking_catalog_id)
+                catalog_id=str(self.proposal_ranking_catalog_id),
+                profile_enabled=proposal_ranking_profile_enabled,
             )
         elif checkpoint is not None:
             from .proposal_ranking import require_checkpoint_identity
@@ -898,6 +901,8 @@ class _LaneKernel:
             in_search_loop=source == "automatic_algorithm_restart",
         )
         self._invalidate_mutation_witness_cache()
+        if self.proposal_ranking is not None:
+            self.proposal_ranking.invalidate_graph_cache()
         self.score = self._score(self.graph)
         self.best_graph = self.graph
         self.best_score = self.score
@@ -932,6 +937,8 @@ class _LaneKernel:
     ) -> None:
         self.graph = BitGraph.from_graph6(str(checkpoint["graph6"]))
         self._invalidate_mutation_witness_cache()
+        if self.proposal_ranking is not None:
+            self.proposal_ranking.invalidate_graph_cache()
         self.tabu_key_scheme = (
             FAST_GRAPH_KEY_SCHEME
             if self.fast_duplicate_key_enabled
@@ -1085,6 +1092,7 @@ class _LaneKernel:
             operator_counts["uses"] += 1
             mutation_delta = None
             if self.proposal_ranking is not None:
+                self._last_policy_ranking_started_ns = time.perf_counter_ns()
                 mutation_delta = self._policy_mutation(
                     self.graph,
                     step=self.high_water + evaluated,
@@ -1162,7 +1170,23 @@ class _LaneKernel:
                     time.perf_counter_ns() - duplicate_started
                 )
             score_cutoff = self._score_cutoff(key)
+            selected_score_started = (
+                time.perf_counter_ns()
+                if self.proposal_ranking is not None
+                and self.proposal_ranking.profile is not None
+                else None
+            )
             candidate_score = self._score(candidate, score_cutoff)
+            if self.proposal_ranking is not None and selected_score_started is not None:
+                self.proposal_ranking.record_external_phase(
+                    "authoritative_selected_plan_scoring",
+                    time.perf_counter_ns() - selected_score_started,
+                )
+                if self._last_policy_ranking_started_ns is not None:
+                    self.proposal_ranking.record_ranked_evaluation(
+                        time.perf_counter_ns() - self._last_policy_ranking_started_ns
+                    )
+                    self._last_policy_ranking_started_ns = None
             if candidate_score is None:
                 early_rejected += 1
                 self.stagnation += 1
@@ -1234,6 +1258,8 @@ class _LaneKernel:
             if accept:
                 self.graph = candidate
                 self._invalidate_mutation_witness_cache()
+                if self.proposal_ranking is not None:
+                    self.proposal_ranking.invalidate_graph_cache()
                 self.score = candidate_score
                 self.current_graph_key = key
                 self.current_evaluation_index = (
@@ -3016,6 +3042,7 @@ def run_bounded_lane_batch(
     score_profiling_enabled: bool = True,
     optimized_legacy_key: bool = True,
     independent_sample_provenance: bool = True,
+    proposal_ranking_profile_enabled: bool = False,
 ) -> dict[str, Any]:
     """Run exactly one bounded batch in the coordinator process."""
 
@@ -3032,6 +3059,7 @@ def run_bounded_lane_batch(
         score_profiling_enabled=score_profiling_enabled,
         optimized_legacy_key=optimized_legacy_key,
         independent_sample_provenance=independent_sample_provenance,
+        proposal_ranking_profile_enabled=proposal_ranking_profile_enabled,
     )
     try:
         metrics = kernel.run_batch(

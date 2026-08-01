@@ -84,6 +84,10 @@ An explicitly ranked lane also carries an immutable
 drifted policy identity fails the lane closed and never selects a legacy
 operator as a fallback.
 
+The optimized ranked lane also binds the reviewed bounded-batch worker
+extension (`stage2a.worker.batch.v1`) in that identity. A checkpoint made by a
+different batch extension is historical evidence only and is not executable.
+
 ## Candidate
 
 Representative states:

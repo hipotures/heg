@@ -71,6 +71,9 @@ Resume may not silently change:
   checkpoint resumes only with the exact frozen identity; a disabled lane
   cannot consume a ranking checkpoint.
 
+For the optimized implementation this exact identity includes the reviewed
+`stage2a.worker.batch.v1` extension. Any mismatch is a fail-closed refusal.
+
 A scientifically different contract requires a new campaign.
 Selecting the already fingerprinted passive or LLM orchestration contract is
 an explicit execution-attempt transition, not a silent scientific-contract
