@@ -1,0 +1,39 @@
+PYTHONPATH=src python3 -m sglab doctor
+{
+  "cgroup_v2": true,
+  "cyclecheck": {
+    "available": true,
+    "path": "/home/user/DEV/heg/_build/sglab-cyclecheck",
+    "version": "sglab-cyclecheck 1"
+  },
+  "platform": "Linux-7.0.0-28-generic-x86_64-with-glibc2.43",
+  "python": "3.12.13",
+  "python_supported": true,
+  "score_worker": {
+    "available": true,
+    "path": "/home/user/DEV/heg/_build/sglab-score-worker",
+    "version": "sglab-score-worker 2"
+  },
+  "tools": {
+    "cadical": {
+      "path": null,
+      "version": null
+    },
+    "glasgow-subgraph-solver": {
+      "path": null,
+      "version": null
+    },
+    "nauty-geng": {
+      "path": "/home/user/.local/bin/geng",
+      "version": ""
+    },
+    "nauty-labelg": {
+      "path": "/home/user/.local/bin/labelg",
+      "version": ""
+    },
+    "sat-modulo-symmetries": {
+      "path": null,
+      "version": null
+    }
+  }
+}

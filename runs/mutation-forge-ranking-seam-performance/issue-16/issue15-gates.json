@@ -1,0 +1,102 @@
+{
+  "checkpoint_resume": {
+    "identity_exact": true,
+    "passed": true,
+    "resume_completed": true,
+    "resumed_checkpoint_id": "checkpoint-7583b6ac70b57737eba83c24"
+  },
+  "default_disabled": {
+    "passed": true,
+    "proposal_ranking_absent": true
+  },
+  "isolation": {
+    "m4_calls": 0,
+    "passed": true,
+    "selected_authoritative_scorer_calls": 0
+  },
+  "migration": {
+    "foreign_key_violations": 0,
+    "identity_ledger_present": true,
+    "integrity_check": "ok",
+    "passed": true,
+    "prior_schema": 17,
+    "schema": 18
+  },
+  "passed": true,
+  "pins": {
+    "head": "4a9c0814e3d350bfc3ba82d0dfd9506241a66d18",
+    "reference_commit": "92915d614ee8ec414406b631246a5e9f85770aaf",
+    "tag_commit": "4a9c0814e3d350bfc3ba82d0dfd9506241a66d18"
+  },
+  "policy_worker": {
+    "calls": 100000,
+    "elapsed_seconds": 7.443472146987915,
+    "failures": 0,
+    "orphan_count": 0,
+    "p50_ns": 70650,
+    "p95_ns": 91240,
+    "p99_gate_ns": 5000000,
+    "p99_ns": 122920,
+    "passed": true
+  },
+  "red_team": {
+    "case_count": 30,
+    "cases": [
+      "wrong_source_identity",
+      "modified_source_bytes",
+      "wrong_ast_identity",
+      "wrong_behavior_identity",
+      "stale_checkpoint_identity",
+      "arbitrary_source_path",
+      "director_source_text",
+      "path_traversal",
+      "missing_field",
+      "extra_field",
+      "unsupported_contract_version",
+      "mutated_input",
+      "nan_output",
+      "infinity_output",
+      "bool_output",
+      "container_output",
+      "timeout",
+      "crash",
+      "protocol_corruption",
+      "oversized_frame",
+      "illegal_proposal",
+      "duplicate_proposal_ids",
+      "unstable_tie_breaking",
+      "full_pool_scorer_leakage",
+      "m4_coupling",
+      "silent_fallback",
+      "process_orphans",
+      "telemetry_cardinality_explosion",
+      "runtime_authority",
+      "non_legal_pool"
+    ],
+    "failures": {},
+    "passed": 30,
+    "schema_version": "stage7.heg.redteam.v1",
+    "status": "passed"
+  },
+  "replay": {
+    "canonical_mismatches": 0,
+    "passed": true,
+    "policy_identity_mismatches": 0,
+    "priority_mismatches": 0,
+    "rank_mismatches": 0,
+    "record_count": 2048,
+    "selection_mismatches": 0
+  },
+  "schema_version": "stage7.heg.issue16.gates.v1",
+  "source_identity": {
+    "behavior_signature_sha256": "8c2bdaa213f11b253d3ffcae1653bd01536879bb5c254a1586ded9ae522a868e",
+    "catalog_id": "mutation_forge_stage4r_v1",
+    "catalog_source_path": "sglab/research/assets/mutation_policy_stage4r_v1.py",
+    "normalized_ast_sha256": "2243214df58c805e9a9343dc31ed082279e1c2ac31b21243bf889dbc9a19e165",
+    "policy_id": "program-d5ad1c8203e0d9f25f03aabd",
+    "runtime_protocol_version": "stage2a.worker.v1",
+    "source_sha256": "e444562c1b308e3b23cb732be5f769ea1923ac1809501cea8571318c4aff0a7b",
+    "status": "verified",
+    "validator_version": "stage2a.validator.v2"
+  }
+}

@@ -46,3 +46,17 @@ evaluation interval. Any measured coordinator remainder is assigned to the
 fixed checkpoint/telemetry integration phase; `residual_unattributed` is
 required to remain ≤2% of ranked wall time. The final profile artifact and
 phase Pareto table are recorded under the external issue-16 evidence root.
+
+## Fresh frozen profile reduction
+
+Across the 45 ranked matrix rows, median ranked wall time was 4,130,568,607
+ns. The largest median phases were proposal generation (1,144,519,243 ns;
+27.71%), Python object construction/copying (769,932,266 ns; 18.64%), policy
+IPC (564,781,396 ns; 13.67%), legality/deduplication (434,616,689 ns;
+10.52%), and sampled-cycle discovery (294,956,446 ns; 7.14%). The residual
+fraction was 0.0 in every row. The aggregate worker p99 was 122,920 ns and
+the ranked arms made exactly one worker IPC batch per evaluation.
+
+This profile explains the measured `NO_GO`: the exact optimizations removed
+repeated feature work and per-proposal framing, but the remaining bounded
+host pool and validation work still dominates the faithful HEG baseline.

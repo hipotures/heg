@@ -70,8 +70,37 @@ unless the total gate passes.
 
 ## Terminal decision
 
-This section is filled only from the frozen serial matrix and the complete
-issue #15 gate rerun. The allowed terminal values are exactly
-`GO_TO_STAGE7R_REASSESSMENT`, `NO_GO`, or
-`INCONCLUSIVE_INFRASTRUCTURE_FAILURE`. Rollout remains disabled, no merge is
-performed, and no future Stage 7R issue is created by this report.
+The frozen serial matrix completed all 45 paired rows (3 orders × 5 seeds × 3
+repetitions), with 2,000 evaluations in every arm and zero failures/orphans.
+The observed ratios were:
+
+| reduction | median ranked/baseline |
+|---|---:|
+| pooled | 0.03790645 |
+| order 18 | 0.03606911 |
+| order 24 | 0.03957182 |
+| order 30 | 0.03792431 |
+| paired seed 801 | 0.03897687 |
+| paired seed 802 | 0.03792041 |
+| paired seed 803 | 0.03880485 |
+| paired seed 804 | 0.03764863 |
+| paired seed 805 | 0.03734612 |
+
+The pooled, per-order, and paired-seed thresholds therefore failed. The
+100,000-call worker gate passed at p99 122,920 ns, with zero failures and
+orphans. The profile gate passed: residual fraction was 0 across the fresh
+rows; median cache hits/misses were 1,930/70 and the single-batch worker IPC
+count was 2,000 per 2,000-evaluation ranked arm. Replay (2,048 records), the
+30-case red-team suite, v17→v18 Online Backup migration, exact checkpoint /
+Resume identity, default-disabled refusal, M4/scorer isolation, and all six
+standard repository commands passed. The faithful performance gate is the
+only failed gate, and it is a measured scientific result rather than an
+infrastructure failure.
+
+The authoritative terminal decision is **`NO_GO`**. The policy remains
+explicitly opt-in and disabled by default. No merge is performed and no future
+Stage 7R issue is created. Repository evidence is under
+`runs/mutation-forge-ranking-seam-performance/issue-16`; the byte-manifested
+external evidence root is
+`/home/user/DEV/heg-evidence/mutation-forge-ranking-seam-performance-issue-16-final`
+with a sorted SHA-256 `manifest.json`.

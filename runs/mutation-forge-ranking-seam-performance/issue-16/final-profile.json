@@ -1,0 +1,165 @@
+{
+  "cache_hits_median": 1930,
+  "cache_misses_median": 70,
+  "pareto": [
+    {
+      "median_ns": 1144519243,
+      "median_seconds": 1.144519243,
+      "phase": "proposal_generation",
+      "share": 0.27708515507051595
+    },
+    {
+      "median_ns": 769932266,
+      "median_seconds": 0.769932266,
+      "phase": "python_object_construction_copying",
+      "share": 0.18639861463509158
+    },
+    {
+      "median_ns": 564781396,
+      "median_seconds": 0.564781396,
+      "phase": "policy_ipc_execution",
+      "share": 0.1367321184407578
+    },
+    {
+      "median_ns": 434616689,
+      "median_seconds": 0.434616689,
+      "phase": "legality_validation_and_deduplication",
+      "share": 0.10521957879200045
+    },
+    {
+      "median_ns": 294956446,
+      "median_seconds": 0.294956446,
+      "phase": "sampled_cycle_witness_discovery",
+      "share": 0.07140819438276431
+    },
+    {
+      "median_ns": 200818617,
+      "median_seconds": 0.200818617,
+      "phase": "proposal_id_pool_hash_canonicalization",
+      "share": 0.048617668923275195
+    },
+    {
+      "median_ns": 173611322,
+      "median_seconds": 0.173611322,
+      "phase": "triangle_c4_local_risk_computation",
+      "share": 0.042030853017617
+    },
+    {
+      "median_ns": 140467760,
+      "median_seconds": 0.14046776,
+      "phase": "checkpoint_telemetry_integration",
+      "share": 0.034006882190977736
+    },
+    {
+      "median_ns": 119265584,
+      "median_seconds": 0.119265584,
+      "phase": "authoritative_selected_plan_scoring",
+      "share": 0.028873890097814322
+    },
+    {
+      "median_ns": 108176667,
+      "median_seconds": 0.108176667,
+      "phase": "json_framing_serialization",
+      "share": 0.02618929190927248
+    },
+    {
+      "median_ns": 66963141,
+      "median_seconds": 0.066963141,
+      "phase": "removed_edge_distance_computation",
+      "share": 0.016211603624382072
+    },
+    {
+      "median_ns": 27189302,
+      "median_seconds": 0.027189302,
+      "phase": "base_current_graph_preparation",
+      "share": 0.00658245984679271
+    },
+    {
+      "median_ns": 25335619,
+      "median_seconds": 0.025335619,
+      "phase": "selected_rewrite_application",
+      "share": 0.006133687976290767
+    },
+    {
+      "median_ns": 16322644,
+      "median_seconds": 0.016322644,
+      "phase": "new_edge_distance_computation",
+      "share": 0.003951669988567267
+    },
+    {
+      "median_ns": 11857767,
+      "median_seconds": 0.011857767,
+      "phase": "context_cycle_count_preparation",
+      "share": 0.0028707347893713367
+    },
+    {
+      "median_ns": 6802928,
+      "median_seconds": 0.006802928,
+      "phase": "sorting_tie_breaking",
+      "share": 0.0016469713124898108
+    },
+    {
+      "median_ns": 4495099,
+      "median_seconds": 0.004495099,
+      "phase": "edge_load_construction",
+      "share": 0.0010882518674020416
+    },
+    {
+      "median_ns": 0,
+      "median_seconds": 0.0,
+      "phase": "residual_unattributed",
+      "share": 0.0
+    }
+  ],
+  "phase_medians_counts": {
+    "authoritative_selected_plan_scoring": 2000,
+    "base_current_graph_preparation": 2070,
+    "checkpoint_telemetry_integration": 4000,
+    "context_cycle_count_preparation": 4000,
+    "edge_load_construction": 70,
+    "json_framing_serialization": 4000,
+    "legality_validation_and_deduplication": 56784,
+    "new_edge_distance_computation": 24000,
+    "policy_ipc_execution": 2000,
+    "proposal_generation": 26945,
+    "proposal_id_pool_hash_canonicalization": 26000,
+    "python_object_construction_copying": 30000,
+    "removed_edge_distance_computation": 24000,
+    "residual_unattributed": 2000,
+    "sampled_cycle_witness_discovery": 420,
+    "selected_rewrite_application": 2000,
+    "sorting_tie_breaking": 2000,
+    "triangle_c4_local_risk_computation": 24000
+  },
+  "phase_medians_ns": {
+    "authoritative_selected_plan_scoring": 119265584,
+    "base_current_graph_preparation": 27189302,
+    "checkpoint_telemetry_integration": 140467760,
+    "context_cycle_count_preparation": 11857767,
+    "edge_load_construction": 4495099,
+    "json_framing_serialization": 108176667,
+    "legality_validation_and_deduplication": 434616689,
+    "new_edge_distance_computation": 16322644,
+    "policy_ipc_execution": 564781396,
+    "proposal_generation": 1144519243,
+    "proposal_id_pool_hash_canonicalization": 200818617,
+    "python_object_construction_copying": 769932266,
+    "removed_edge_distance_computation": 66963141,
+    "residual_unattributed": 0,
+    "sampled_cycle_witness_discovery": 294956446,
+    "selected_rewrite_application": 25335619,
+    "sorting_tie_breaking": 6802928,
+    "triangle_c4_local_risk_computation": 173611322
+  },
+  "policy_calls_median": 24000,
+  "policy_p99_ns": 122920,
+  "ranked_wall_median_ns": 4130568607,
+  "residual_fraction_max": 0.0,
+  "residual_fraction_median": 0.0,
+  "sample_count": 45,
+  "schema_version": "stage7.heg.profile.summary.v1",
+  "selected_plan_scorer_calls_median": 2000,
+  "selection_wall_median_ns": 3929830548,
+  "source": "fresh-matrix.json",
+  "worker_ipc_calls_median": 2000
+}

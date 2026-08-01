@@ -26,10 +26,14 @@ fixed-width `stage7.heg.profile.v1` aggregate is available only when explicitly
 requested; it contains no per-proposal history. Missing score witness lengths
 are completed from the bounded host context rather than coerced to zero.
 
-The policy remains disabled by default and the performance-frozen branch is
-still subject to the serial order-18/24/30, seed-801..805, three-repetition
-authoritative matrix. See ADR 0017 and the issue-16 performance report; no
-rollout or future Stage 7R issue is created by this work.
+The policy remains disabled by default. The frozen serial order-18/24/30,
+seed-801..805, three-repetition matrix completed all 45 paired rows but
+measured a pooled median ranked/baseline ratio of 0.03790645 (all order and
+paired-seed medians were below threshold). Replay, red-team, migration,
+checkpoint/resume, process-safety, M4-isolation, worker, and repository gates
+passed. The authoritative issue-16 decision is `NO_GO`; see the performance
+report and byte-manifested evidence root. No rollout or future Stage 7R issue
+is created by this work.
 
 ## Reusable direct-mutation witness context
 

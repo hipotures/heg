@@ -1,8 +1,10 @@
 {
   "schema_version": "stage7.heg.issue16.evidence.v1",
   "issue": "hipotures/heg#16",
-  "decision": "PENDING_FRESH_MATRIX",
+  "decision": "NO_GO",
   "branch": "agent/mutation-forge-ranking-seam-performance",
+  "implementation_commit": "4a9c0814e3d350bfc3ba82d0dfd9506241a66d18",
+  "implementation_tag": "heg-mutation-forge-ranking-seam-performance-frozen-v1",
   "base_commit": "b701cabffab6d249a5cd647d1b339d2c653edcb9",
   "reference_repository": {
     "path": "/home/user/DEV/mutation-forge-lab",
@@ -16,35 +18,54 @@
     "behavior_sha256": "8c2bdaa213f11b253d3ffcae1653bd01536879bb5c254a1586ded9ae522a868e",
     "validator_version": "stage2a.validator.v2",
     "runtime_protocol_version": "stage2a.worker.v1",
-    "batch_protocol_version": "stage2a.worker.batch.v1"
+    "batch_protocol_version": "stage2a.worker.batch.v1",
+    "checkpoint_identity_sha256": "0dbfda2aff30736ec17f2b72261f0c88fb71caf20c17c69b49f76f6865045634",
+    "integration_contract_sha256": "75b1f3ad2e405b402cf3733f4c117e52334ecf675b1fbd46560a3c780ba6a9c8"
   },
-  "fresh_matrix": {
-    "orders": [18, 24, 30],
-    "seeds": [801, 802, 803, 804, 805],
-    "repetitions": 3,
-    "evaluations_per_arm_seed": 2000,
-    "serial": true,
-    "observed": false
+  "authoritative_gates": {
+    "fresh_matrix": {
+      "status": "failed",
+      "artifact": "runs/mutation-forge-ranking-seam-performance/issue-16/fresh-matrix.json",
+      "rows": 45,
+      "all_arms_measured": true,
+      "evaluations_per_arm": 2000,
+      "pooled_median_ratio": 0.03790645352432354,
+      "per_order_median_ratio": {"18": 0.03606910770153522, "24": 0.03957182275565101, "30": 0.03792431292727817},
+      "paired_seed_median_ratio": {"801": 0.03897687245959831, "802": 0.03792041171872386, "803": 0.038804851035898785, "804": 0.037648631636292104, "805": 0.03734611614480583},
+      "failures": 0,
+      "orphans": 0
+    },
+    "replay": {"status": "passed", "records": 2048, "priority_mismatches": 0, "rank_mismatches": 0, "selection_mismatches": 0, "canonical_mismatches": 0, "policy_identity_mismatches": 0},
+    "red_team": {"status": "passed", "cases": 30, "passed": 30, "failures": {}},
+    "migration": {"status": "passed", "prior_schema": 17, "schema": 18, "integrity_check": "ok", "foreign_key_violations": 0, "identity_ledger_present": true},
+    "checkpoint_resume": {"status": "passed", "identity_exact": true, "resume_completed": true},
+    "default_disabled": {"status": "passed", "proposal_ranking_absent": true},
+    "m4_and_scorer_isolation": {"status": "passed", "m4_calls": 0, "selected_authoritative_scorer_calls": 0},
+    "policy_worker": {"status": "passed", "calls": 100000, "p50_ns": 70650, "p95_ns": 91240, "p99_ns": 122920, "p99_gate_ns": 5000000, "failures": 0, "orphans": 0},
+    "repository_gates": {"status": "passed", "commands": ["make doctor", "make test", "make check", "make benchmark-smoke", "make dashboard-smoke", "git diff --check"]}
   },
-  "gates": {
-    "pooled_median_ratio": {"threshold": 0.9, "observed": null},
-    "per_order_median_ratio": {"threshold": 0.85, "observed": null},
-    "paired_seed_median_ratio": {"threshold": 0.75, "observed": null},
-    "policy_p99_ns": {"threshold": 5000000, "observed": null},
-    "profile_residual_fraction": {"threshold": 0.02, "observed": null},
-    "failures": {"observed": null},
-    "orphans": {"observed": null},
-    "unauthorized_calls": {"observed": null},
-    "nonselected_scorer_calls": {"observed": null}
+  "profile": {
+    "status": "passed",
+    "artifact": "runs/mutation-forge-ranking-seam-performance/issue-16/final-profile.json",
+    "residual_fraction_max": 0.0,
+    "cache_hits_median": 1930,
+    "cache_misses_median": 70,
+    "worker_ipc_calls_median": 2000,
+    "selected_plan_scorer_calls_median": 2000
+  },
+  "artifacts": {
+    "fresh_matrix_sha256": "46fe11aa7959b6829ef34ca918cf2871098829e86e930861e2756ce557aba26b",
+    "issue15_gates_sha256": "6a96f06178c6fd27918a04b29ff575df5e643ee3e142d08538d696fdbb268466",
+    "final_profile_sha256": "d69d6956562ad3f2341219d11acf43c34609ae25a03d5ad9110e1b2b504390dc",
+    "terminal_report_sha256": "c4e27ba7dd283626ccbe2f8e078162304ff40221a23e9b2a84714ad0ce05b211",
+    "profile_contract_sha256": "451a150ada222b8a337728c2457e21ddfbc4492d9845d16a962781946edf8710",
+    "external_evidence_root": "/home/user/DEV/heg-evidence/mutation-forge-ranking-seam-performance-issue-16-final",
+    "manifest": "runs/mutation-forge-ranking-seam-performance/issue-16/manifest.json"
   },
   "activation": {
     "default_enabled": false,
     "rollout_enabled": false,
-    "future_stage7r_issue_created": false
-  },
-  "artifacts": {
-    "profile_contract": "docs/reports/MUTATION_FORGE_RANKING_SEAM_PROFILE.md",
-    "fresh_matrix": "runs/mutation-forge-ranking-seam-performance/issue-16/fresh-matrix.json",
-    "external_evidence_root": "/home/user/DEV/heg-evidence/mutation-forge-ranking-seam-performance-issue-16-final"
+    "future_stage7r_issue_created": false,
+    "merge_performed": false
   }
 }

@@ -1,0 +1,76 @@
+{
+  "files": [
+    {
+      "bytes": 4168,
+      "path": "MUTATION_FORGE_RANKING_SEAM_PERFORMANCE_EVIDENCE.json",
+      "sha256": "3058013f5e4b5a1b13928a1341b048cc4a3ab3c14ac99495c3bcccd5c841626d"
+    },
+    {
+      "bytes": 5111,
+      "path": "MUTATION_FORGE_RANKING_SEAM_PERFORMANCE_REPORT.md",
+      "sha256": "c4e27ba7dd283626ccbe2f8e078162304ff40221a23e9b2a84714ad0ce05b211"
+    },
+    {
+      "bytes": 2939,
+      "path": "MUTATION_FORGE_RANKING_SEAM_PROFILE.md",
+      "sha256": "451a150ada222b8a337728c2457e21ddfbc4492d9845d16a962781946edf8710"
+    },
+    {
+      "bytes": 5056,
+      "path": "final-profile.json",
+      "sha256": "d69d6956562ad3f2341219d11acf43c34609ae25a03d5ad9110e1b2b504390dc"
+    },
+    {
+      "bytes": 357427,
+      "path": "fresh-matrix.json",
+      "sha256": "46fe11aa7959b6829ef34ca918cf2871098829e86e930861e2756ce557aba26b"
+    },
+    {
+      "bytes": 2891,
+      "path": "issue15-gates.json",
+      "sha256": "6a96f06178c6fd27918a04b29ff575df5e643ee3e142d08538d696fdbb268466"
+    },
+    {
+      "bytes": 1316,
+      "path": "preregistration.json",
+      "sha256": "f911037e22b73540d39954446ea156155fadc86379f15e1ec2d3b84f3ee7812f"
+    },
+    {
+      "bytes": 726,
+      "path": "retained-reproduction.json",
+      "sha256": "20560abfb4c6dc91ccb3001e2ae4d5b00c1cad8230367c280f99277439b95041"
+    },
+    {
+      "bytes": 893,
+      "path": "standard-gate-01.log",
+      "sha256": "18e4836b2bb730d2c6a204846f6b5c8653fe4d26624375de8d41b41cd62ac025"
+    },
+    {
+      "bytes": 58290,
+      "path": "standard-gate-02.log",
+      "sha256": "2548b6e36b3459198c38a3bd339597b8809710b22be6f350d6f660adb8c47717"
+    },
+    {
+      "bytes": 35,
+      "path": "standard-gate-03.log",
+      "sha256": "57bf606c39eaae501bb0b73e8eb604917109563725835e4833ff5d090f441873"
+    },
+    {
+      "bytes": 12502,
+      "path": "standard-gate-04.log",
+      "sha256": "781a228c8844a20a05b818f22885431dfaa38bc3e4b5cd41a7112cdff1282b63"
+    },
+    {
+      "bytes": 68,
+      "path": "standard-gate-05.log",
+      "sha256": "16a926e6ef6ab6b4d97af311d8e738d0535217414e5d65858f1c90891d09d5c0"
+    },
+    {
+      "bytes": 0,
+      "path": "standard-gate-06.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "root": "/home/user/DEV/heg-evidence/mutation-forge-ranking-seam-performance-issue-16-final",
+  "schema_version": "stage7.heg.issue16.manifest.v1"
+}
