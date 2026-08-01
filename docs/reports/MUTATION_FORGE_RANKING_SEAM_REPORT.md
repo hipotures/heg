@@ -44,5 +44,38 @@ artifacts are recorded in the adjacent evidence manifest.
 
 ## Terminal result
 
-This report is updated only after the freeze commit/tag and authoritative gates
-run. The final decision is one of `GO_TO_STAGE7R_REASSESSMENT` or `NO_GO`.
+The frozen implementation is commit `7bff0a816196ea6fe780677b9ded5433b5641e1d`,
+tagged `heg-mutation-forge-ranking-seam-frozen-v1`. The authoritative gate
+artifact was produced from that commit on 2026-08-01 and is retained at
+`/home/user/DEV/heg-evidence/mutation-forge-ranking-seam-final/authoritative-gates.json`.
+
+- Exact identity/source, checkpoint/resume, disabled-by-default refusal,
+  process-group reap, scorer/M4 isolation, and selected-plan-only scoring:
+  **PASS** (the 30-case red-team suite passed 30/30).
+- Replay corpus: **PASS**, 2,048 records and zero canonical, priority, rank,
+  selection, or policy-identity mismatches.
+- v17→v18 SQLite migration: **PASS** using `sqlite3.Connection.backup`, with
+  `PRAGMA integrity_check = ok`, zero foreign-key violations, and the durable
+  policy-identity ledger present. The process-safety evidence reports one
+  worker call, zero failures, and zero orphans. Artifact:
+  `/home/user/DEV/heg-evidence/mutation-forge-ranking-seam-final/migration-process.json`.
+- Persistent policy worker: **PASS**, 100,000 calls, p99 116,330 ns against the
+  5,000,000 ns gate, zero failures, and zero orphans.
+- Repository verification: **PASS** for `make doctor`, `make test`, `make
+  check`, `make benchmark-smoke`, `make dashboard-smoke`, the focused proposal,
+  protocol, lane, and recovery tests, and `git diff --check`.
+- Faithful HEG end-to-end projection: **FAIL**. Order 14 measured baseline
+  15,075.0434 versus ranked 135.8712 evaluations/s (ratio 0.009013); order 16
+  measured baseline 11,923.0069 versus ranked 127.3887 evaluations/s (ratio
+  0.010684). Both preregistered strata exceed the allowed 10% median / 15%
+  per-stratum regression.
+
+The authoritative terminal decision is **`NO_GO`**. The policy remains opt-in
+and disabled by default; no rollout is enabled and no future Stage 7R issue is
+created. The gate runner wrote the complete artifact before its compact status
+printer raised a non-authoritative `TypeError` while taking `len()` of the
+integer red-team pass count; the recorded gate fields above are the source of
+truth.
+
+See `MUTATION_FORGE_RANKING_SEAM_EVIDENCE.json` for the compact evidence
+manifest and hashes.

@@ -1,0 +1,114 @@
+{
+  "schema_version": "stage7.heg.evidence.v1",
+  "issue": "hipotures/heg#15",
+  "decision": "NO_GO",
+  "implementation_commit": "7bff0a816196ea6fe780677b9ded5433b5641e1d",
+  "implementation_tag": "heg-mutation-forge-ranking-seam-frozen-v1",
+  "base_commit": "fd97451b0f3d87400d1d955a2c6b1b18303344ff",
+  "reference_repository": {
+    "path": "/home/user/DEV/mutation-forge-lab",
+    "commit": "92915d614ee8ec414406b631246a5e9f85770aaf"
+  },
+  "policy_identity": {
+    "catalog_id": "mutation_forge_stage4r_v1",
+    "policy_id": "program-d5ad1c8203e0d9f25f03aabd",
+    "source_sha256": "e444562c1b308e3b23cb732be5f769ea1923ac1809501cea8571318c4aff0a7b",
+    "normalized_ast_sha256": "2243214df58c805e9a9343dc31ed082279e1c2ac31b21243bf889dbc9a19e165",
+    "behavior_sha256": "8c2bdaa213f11b253d3ffcae1653bd01536879bb5c254a1586ded9ae522a868e",
+    "validator_version": "stage2a.validator.v2",
+    "runtime_protocol_version": "stage2a.worker.v1"
+  },
+  "authoritative_gates": {
+    "replay": {
+      "status": "passed",
+      "records": 2048,
+      "canonical_mismatches": 0,
+      "priority_mismatches": 0,
+      "rank_mismatches": 0,
+      "selection_mismatches": 0,
+      "policy_identity_mismatches": 0
+    },
+    "red_team": {
+      "status": "passed",
+      "cases": 30,
+      "passed": 30,
+      "failures": {}
+    },
+    "migration_and_process": {
+      "status": "passed",
+      "prior_schema": 17,
+      "schema": 18,
+      "integrity_check": "ok",
+      "foreign_key_violations": 0,
+      "identity_ledger_present": true,
+      "worker_failures": 0,
+      "worker_orphans": 0
+    },
+    "policy_worker": {
+      "status": "passed",
+      "calls": 100000,
+      "p50_ns": 71770,
+      "p95_ns": 94070,
+      "p99_ns": 116330,
+      "p99_gate_ns": 5000000,
+      "failures": 0,
+      "orphans": 0
+    },
+    "repository_gates": {
+      "status": "passed",
+      "commands": [
+        "make doctor",
+        "make test",
+        "make check",
+        "make benchmark-smoke",
+        "make dashboard-smoke",
+        "uv run python -m unittest tests.test_proposal_ranking tests.test_research_protocol tests.test_lanes tests.test_recovery",
+        "git diff --check"
+      ]
+    },
+    "faithful_heg_e2e": {
+      "status": "failed",
+      "order_14": {
+        "baseline_evaluations_per_second": 15075.043386270128,
+        "ranked_evaluations_per_second": 135.87124478843683,
+        "ranked_over_baseline": 0.009012991956771682
+      },
+      "order_16": {
+        "baseline_evaluations_per_second": 11923.00687031373,
+        "ranked_evaluations_per_second": 127.38866095869302,
+        "ranked_over_baseline": 0.010684273048258426
+      }
+    }
+  },
+  "artifacts": {
+    "authoritative_gates": {
+      "path": "/home/user/DEV/heg-evidence/mutation-forge-ranking-seam-final/authoritative-gates.json",
+      "sha256": "d5cbe9057aed4d6278af3b93ebd485b253048432eb899aeb4953f0a361609138"
+    },
+    "migration_process": {
+      "path": "/home/user/DEV/heg-evidence/mutation-forge-ranking-seam-final/migration-process.json",
+      "sha256": "37aa40574378100fa5fa68ca268dfc02540c346f3efec7529ddd5cfa65bdd98b"
+    },
+    "integration_contract": {
+      "path": "configs/stage7-heg-integration-contract-v1.json",
+      "sha256": "227e7c3edd61c5a77dade8e67d9f153437e340c1413e42bd645b32b67d721aff"
+    },
+    "field_mapping": {
+      "path": "configs/stage7-heg-field-mapping-v1.json",
+      "sha256": "25eab1b599f4f2997b31a6e2dc4851129d67ec7b91092fd3ce29209c55610af6"
+    },
+    "replay_corpus": {
+      "path": "configs/stage7-heg-replay-corpus-v1.json",
+      "sha256": "e9e7e437cfd7f0bf9c8c543321f1ae7c2187561018d6ce5d344356c6ccace178"
+    },
+    "terminal_report": {
+      "path": "docs/reports/MUTATION_FORGE_RANKING_SEAM_REPORT.md",
+      "sha256": "1b5d2f72201284989eeb22b7c73b400e12e02f630b6993176768522dc4f31a27"
+    }
+  },
+  "activation": {
+    "default_enabled": false,
+    "rollout_enabled": false,
+    "future_stage7r_issue_created": false
+  }
+}
