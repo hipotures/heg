@@ -17,7 +17,10 @@ from sglab.research.campaign import (
     load_prepared_campaign_plan,
     prepare_campaign_plan,
 )
-from sglab.research.catalog import REVIEWED_PROPOSAL_RANKING_CATALOG_ID
+from sglab.research.catalog import (
+    REVIEWED_PROPOSAL_RANKING_CATALOG_ID,
+    action_catalog,
+)
 from sglab.research.export import export_campaign
 from sglab.research.lanes import LaneManager, LaneSpec
 from sglab.research.passive import PassiveScheduler
@@ -132,6 +135,16 @@ def _context(
 
 
 class ProposalRankingActivationTests(unittest.TestCase):
+    def test_action_catalog_keeps_random_restart_unranked(self) -> None:
+        parameters = action_catalog()["algorithm_parameters"]
+        self.assertNotIn("proposal_ranking", parameters["random_restart"])
+        for algorithm in (
+            "simulated_annealing",
+            "iterated_local_search",
+            "iterated_local_search_tabu",
+        ):
+            self.assertIn("proposal_ranking", parameters[algorithm])
+
     def test_dashboard_api_projects_and_forwards_reviewed_ranking(self) -> None:
         class _FakeProcess:
             pid = 4217

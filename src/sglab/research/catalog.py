@@ -110,7 +110,6 @@ ALGORITHM_PARAMETERS = {
         "order",
         "batch_candidates",
         "witness_cap",
-        "proposal_ranking",
     },
     "simulated_annealing": {
         "order",
