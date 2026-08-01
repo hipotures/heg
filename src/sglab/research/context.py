@@ -9,6 +9,7 @@ import json
 
 from .catalog import (
     PROPOSAL_RANKING_MUTATION_ALGORITHMS,
+    RANDOM_RESTART_UNRANKED_INSTRUCTION,
     REVIEWED_PROPOSAL_RANKING_CATALOG_ID,
     action_catalog,
     normalize_proposal_ranking_catalog_id,
@@ -915,6 +916,7 @@ def _applicable_action_space(
                 "include the exact catalog_id. Omit it when disabled; "
                 "random_restart is always unranked."
             ),
+            "random_restart_rule": RANDOM_RESTART_UNRANKED_INSTRUCTION,
         },
     }
     if checkpoint_ids:

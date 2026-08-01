@@ -9,6 +9,11 @@ PROPOSAL_RANKING_MUTATION_ALGORITHMS = (
     "iterated_local_search",
     "iterated_local_search_tabu",
 )
+RANDOM_RESTART_UNRANKED_INSTRUCTION = (
+    "For algorithm=random_restart, omit proposal_ranking entirely. The "
+    "parameters object must contain only order, batch_candidates, and "
+    "witness_cap; do not send the key with a null value."
+)
 
 
 def normalize_proposal_ranking_catalog_id(value: object) -> str | None:
@@ -167,7 +172,9 @@ def action_catalog() -> dict[str, Any]:
             "Normalized selection probabilities over reviewed safe mutations."
         ),
         "proposal_ranking": (
-            "Explicit reviewed proposal-ranking catalog ID; omitted means disabled."
+            "Explicit reviewed proposal-ranking catalog ID for mutation lanes; "
+            "omitted means disabled. "
+            f"{RANDOM_RESTART_UNRANKED_INSTRUCTION}"
         ),
     }
     return {

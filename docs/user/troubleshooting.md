@@ -11,6 +11,12 @@ checkpoints, and M4 outcomes remain.
 **Next step:** inspect `fault_kind` and `fault_detail`, repair the cause,
 preview Resume with a repair acknowledgement, then start a new attempt.
 
+The one-command `sglab experiment run` path can perform that recovery without
+campaign IDs after the repository commit advances. It records the recovery
+acknowledgement on the new attempt. If the same failed commit is still
+installed, it refuses to launch another blind retry; use the explicit Resume
+workflow only after documenting the repair.
+
 [screenshot: ID=USR-TROUBLE-01; save as docs/assets/screenshots/user/troubleshooting/fault-detail.png; crop the campaign status and fault card showing full fault kind and detail, the “fail-closed” explanation, prior attempt status, disabled live controls, and available Resume preview control; exclude lower unrelated sections.]
 
 If the detail is `KeyError: checkpoint is not available`, the referenced

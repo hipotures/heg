@@ -123,6 +123,11 @@ def build_director_prompt(snapshot: dict[str, Any]) -> str:
                 "Proposal ranking is disabled; omit proposal_ranking from all lanes."
             ),
         }),
+        "random_restart_rule": (
+            "When algorithm is random_restart, omit proposal_ranking entirely "
+            "from parameters, including as null. Only reviewed mutation "
+            "algorithms may carry the exact catalog ID."
+        ),
         "hypothesis_update_contract": hypothesis_update_contract(
             hypothesis_ids
         ),

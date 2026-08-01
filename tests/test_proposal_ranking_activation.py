@@ -10,7 +10,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from sglab.cli import build_parser, main
+from sglab.cli import (
+    _automatic_fault_repair_acknowledgement,
+    _launch_experiment_campaign,
+    build_parser,
+    main,
+)
 from sglab.research.campaign import (
     CampaignPlanError,
     campaign_status,
@@ -24,6 +29,7 @@ from sglab.research.catalog import (
 from sglab.research.export import export_campaign
 from sglab.research.lanes import LaneManager, LaneSpec
 from sglab.research.passive import PassiveScheduler
+from sglab.research.operator import ExperimentConfigError
 from sglab.research.store import ResearchStore
 from sglab.research.validation import DecisionContext, validate_decision
 from sglab.research.providers import SyntheticControlProvider
@@ -347,7 +353,16 @@ class ProposalRankingActivationTests(unittest.TestCase):
                 "proposal_ranking": CATALOG_ID,
             },
         )
-        self.assertFalse(validate_decision(random_ranked, _context(ranking=CATALOG_ID)).accepted)
+        random_result = validate_decision(
+            random_ranked, _context(ranking=CATALOG_ID)
+        )
+        self.assertFalse(random_result.accepted)
+        self.assertTrue(
+            any(
+                "omit proposal_ranking entirely" in issue.message
+                for issue in random_result.issues
+            )
+        )
         patch = _decision(
             action_type="patch_lane",
             parameters={"proposal_ranking": CATALOG_ID},
@@ -532,6 +547,44 @@ class ProposalRankingActivationTests(unittest.TestCase):
         self.assertEqual(report["worker_after_call"]["failures"], 0)
         self.assertTrue(report["clean_shutdown"])
         self.assertTrue(report["no_orphan"])
+
+    def test_experiment_fault_retry_requires_code_advance_and_passes_ack(self) -> None:
+        fault_status = {
+            "state": "paused_fault",
+            "execution_attempts": [{"code_commit": "old-commit"}],
+        }
+        with patch("sglab.cli.repository_commit", return_value="new-commit"):
+            acknowledgement = _automatic_fault_repair_acknowledgement(
+                fault_status
+            )
+        self.assertIsNotNone(acknowledgement)
+        with patch(
+            "sglab.cli.repository_commit", return_value="old-commit"
+        ):
+            with self.assertRaisesRegex(
+                ExperimentConfigError, "apply a repair before retrying"
+            ):
+                _automatic_fault_repair_acknowledgement(fault_status)
+
+        with tempfile.TemporaryDirectory() as directory:
+            with patch("sglab.cli.Popen") as launch:
+                launch.return_value.pid = 1234
+                _launch_experiment_campaign(
+                    Path(directory),
+                    campaign_id="campaign-1",
+                    plan_fingerprint=None,
+                    time_limit="1h",
+                    resume=True,
+                    repair_acknowledgement="repair recorded",
+                )
+            command = launch.call_args.args[0]
+            self.assertIn("--repair-acknowledgement", command)
+            self.assertEqual(
+                command[
+                    command.index("--repair-acknowledgement") + 1
+                ],
+                "repair recorded",
+            )
 
     def test_short_cli_created_llm_campaign_starts_ranked_lane(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
