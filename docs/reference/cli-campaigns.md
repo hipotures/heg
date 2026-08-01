@@ -33,6 +33,15 @@ Run it with:
 sglab experiment run --config experiment.toml
 ```
 
+When the file is `./experiment.toml`, `--config` may be omitted:
+
+```bash
+sglab experiment run
+```
+
+Missing `./experiment.toml` is reported as one actionable error naming the
+expected path.
+
 The command creates or validates the private workspace marker, prepares the
 fixed one-hour Director contract, imports only the authorized `auth.json` from
 `~/.codex`, verifies the immutable plan fingerprint, and starts the campaign

@@ -38,6 +38,9 @@ id = "heg-ranked-001"
 sglab experiment run --config ./experiment.toml
 ```
 
+With the conventional filename, the equivalent shorter command is
+`sglab experiment run`.
+
 This creates the non-synthetic marker internally, imports the authorized
 `~/.codex/auth.json`, verifies the immutable plan, and starts the campaign.
 Running the same ID again resumes the latest resumable attempt. The reviewed

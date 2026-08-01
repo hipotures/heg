@@ -19,6 +19,10 @@ id = "heg-ranked-001"
 sglab experiment run --config experiment.toml
 ```
 
+The `--config` option defaults to `./experiment.toml`, so the equivalent
+short form is `sglab experiment run`. A missing default file fails with one
+actionable message naming that path.
+
 The command owns workspace-marker creation, immutable plan preparation,
 authorized `auth.json` import from `~/.codex`, fingerprint validation, and
 process start. The same ID automatically resumes the latest resumable

@@ -1087,6 +1087,7 @@ def cmd_experiment(args: Namespace) -> int:
             config_path=config.config_path,
             experiment_id=config.experiment_id,
             workspace=config.workspace,
+            target=config.target,
             time_limit=config.time_limit,
             director_mode=effective_mode,
             director_mode_explicit=config.director_mode_explicit,
@@ -1656,7 +1657,11 @@ def build_parser() -> ArgumentParser:
         dest="experiment_command", required=True
     )
     experiment_run = experiment_commands.add_parser("run")
-    experiment_run.add_argument("--config", required=True)
+    experiment_run.add_argument(
+        "--config",
+        default="./experiment.toml",
+        help="persistent experiment TOML (default: ./experiment.toml)",
+    )
     experiment_run.set_defaults(func=cmd_experiment)
 
     research_campaign = subparsers.add_parser("research-campaign")

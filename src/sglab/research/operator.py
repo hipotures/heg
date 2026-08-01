@@ -31,6 +31,7 @@ class ExperimentConfig:
     config_path: Path
     experiment_id: str
     workspace: Path
+    target: str
     time_limit: str
     director_mode: str
     director_mode_explicit: bool
@@ -64,7 +65,8 @@ def load_experiment_config(path: str | Path) -> ExperimentConfig:
             payload = tomllib.load(handle)
     except OSError as error:
         raise ExperimentConfigError(
-            f"experiment configuration is unavailable: {config_path}"
+            "experiment configuration is unavailable; expected file: "
+            f"{config_path}"
         ) from error
     except tomllib.TOMLDecodeError as error:
         raise ExperimentConfigError(
@@ -99,12 +101,29 @@ def load_experiment_config(path: str | Path) -> ExperimentConfig:
     if workspace in {Path("/"), Path.home().resolve()}:
         raise ExperimentConfigError("experiment workspace is too broad")
 
+    target = _optional_string(
+        experiment,
+        "target",
+        default="erdos_gyarfas",
+    )
+    assert target is not None
+    if target != "erdos_gyarfas":
+        raise ExperimentConfigError(
+            "the first real graph experiment contract fixes target to erdos_gyarfas"
+        )
+
     time_limit = _optional_string(experiment, "time_limit", default="1h")
     assert time_limit is not None
     director_mode_explicit = "director_mode" in experiment
+    if "mode" in director:
+        if director_mode_explicit:
+            raise ExperimentConfigError(
+                "Director mode must be specified in one configuration section"
+            )
+        director_mode_explicit = True
     director_mode = _optional_string(
-        experiment,
-        "director_mode",
+        experiment if "director_mode" in experiment else director,
+        "director_mode" if "director_mode" in experiment else "mode",
         default="llm",
     )
     assert director_mode is not None
@@ -149,6 +168,7 @@ def load_experiment_config(path: str | Path) -> ExperimentConfig:
     allowed_experiment = {
         "id",
         "workspace",
+        "target",
         "time_limit",
         "director_mode",
         "proposal_ranking",
@@ -160,12 +180,32 @@ def load_experiment_config(path: str | Path) -> ExperimentConfig:
             "unsupported [experiment] keys: "
             + ", ".join(sorted(str(key) for key in unknown_experiment))
         )
-    unknown_director = set(director) - {"model", "reasoning_effort", "codex_home"}
+    unknown_director = set(director) - {
+        "mode",
+        "model",
+        "reasoning_effort",
+        "effort",
+        "codex_home",
+    }
     if unknown_director:
         raise ExperimentConfigError(
             "unsupported [director] keys: "
             + ", ".join(sorted(str(key) for key in unknown_director))
         )
+    configured_alias_effort = _optional_string(director, "effort")
+    if (
+        configured_alias_effort is not None
+        and configured_effort is not None
+        and configured_alias_effort != configured_effort
+    ):
+        raise ExperimentConfigError(
+            "Director effort must be specified in one configuration field"
+        )
+    if configured_alias_effort is not None:
+        if configured_alias_effort != PRODUCTION_DIRECTOR_EFFORT:
+            raise ExperimentConfigError(
+                "the experiment contract fixes the reviewed Director effort"
+            )
     unknown_search = set(search) - {"proposal_ranking"}
     if unknown_search:
         raise ExperimentConfigError(
@@ -176,6 +216,7 @@ def load_experiment_config(path: str | Path) -> ExperimentConfig:
         config_path=config_path,
         experiment_id=experiment_id,
         workspace=workspace,
+        target=target,
         time_limit=time_limit,
         director_mode=director_mode,
         director_mode_explicit=director_mode_explicit,

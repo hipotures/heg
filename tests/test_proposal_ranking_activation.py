@@ -463,6 +463,18 @@ class ProposalRankingActivationTests(unittest.TestCase):
             self.assertEqual(state["experiment_id"], "heg-ranked-001")
             self.assertIsNone(state["proposal_ranking"])
 
+    def test_experiment_run_defaults_to_local_experiment_toml(self) -> None:
+        parsed = build_parser().parse_args(["experiment", "run"])
+        self.assertEqual(parsed.config, "./experiment.toml")
+        with tempfile.TemporaryDirectory() as directory:
+            previous = Path.cwd()
+            os.chdir(directory)
+            try:
+                with self.assertRaisesRegex(SystemExit, "experiment.toml"):
+                    main(["experiment", "run"])
+            finally:
+                os.chdir(previous)
+
     def test_experiment_run_ranker_is_explicit_and_persistent(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
