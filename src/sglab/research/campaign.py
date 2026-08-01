@@ -40,6 +40,7 @@ from .auth import (
     import_authorized_auth,
 )
 from .candidates import CandidateArchive
+from .catalog import normalize_proposal_ranking_catalog_id
 from .context import (
     CONTEXT_RECOMMENDATION_BASIS,
     DEFAULT_DIRECTOR_CONTEXT_MODE,
@@ -121,7 +122,7 @@ def _score_runtime_provenance() -> dict[str, Any]:
     }
 
 
-CAMPAIGN_PLAN_SCHEMA_VERSION = "1.2"
+CAMPAIGN_PLAN_SCHEMA_VERSION = "1.3"
 PRODUCTION_DIRECTOR_MODEL = "gpt-5.6-luna"
 PRODUCTION_DIRECTOR_EFFORT = "high"
 PRODUCTION_CONTEXT_MODE = DirectorContextMode.STATELESS_TURNS
@@ -272,12 +273,23 @@ def prepare_campaign_plan(
     duration_seconds: float,
     director_mode: str = "llm",
     passive_seed: int = 0,
+    proposal_ranking: str | None = None,
 ) -> dict[str, Any]:
     if director_mode not in DIRECTOR_MODES:
         raise CampaignPlanError("unsupported director mode")
     if not 0 <= passive_seed < 2**63:
         raise CampaignPlanError(
             "passive scheduler seed must be in [0, 2**63)"
+        )
+    try:
+        proposal_ranking = normalize_proposal_ranking_catalog_id(
+            proposal_ranking
+        )
+    except ValueError as error:
+        raise CampaignPlanError(str(error)) from error
+    if proposal_ranking is not None and director_mode != "llm":
+        raise CampaignPlanError(
+            "proposal-ranking activation requires LLM Director mode"
         )
     root = workspace.resolve()
     marker = read_json(root / "workspace.json", default={})
@@ -317,6 +329,7 @@ def prepare_campaign_plan(
             "schema_version": CAMPAIGN_PLAN_SCHEMA_VERSION,
             "campaign_id": campaign_id,
             "director_mode": director_mode,
+            "proposal_ranking": proposal_ranking,
             "target": "erdos_gyarfas",
             "target_definition_sha256": target_definition_sha256(),
             "stop_contract": {
@@ -515,6 +528,18 @@ def load_prepared_campaign_plan(
     if director_mode not in DIRECTOR_MODES:
         raise CampaignPlanError("prepared campaign director mode is invalid")
     try:
+        normalized_ranking = normalize_proposal_ranking_catalog_id(
+            plan.get("proposal_ranking")
+        )
+    except ValueError as error:
+        raise CampaignPlanError(str(error)) from error
+    if plan.get("proposal_ranking") != normalized_ranking:
+        raise CampaignPlanError("prepared campaign proposal-ranking field is invalid")
+    if normalized_ranking is not None and director_mode != "llm":
+        raise CampaignPlanError(
+            "proposal-ranking activation requires LLM Director mode"
+        )
+    try:
         validate_campaign_plan_fingerprint(
             plan, expected=expected_fingerprint
         )
@@ -586,6 +611,8 @@ def campaign_status(workspace: Path, campaign_id: str | None = None) -> dict[str
             "state": "IDLE",
             "target": "erdos_gyarfas",
             "auth_imported": auth_is_imported(root / ".sglab"),
+            "proposal_ranking": None,
+            "proposal_ranking_enabled": False,
         }
     auth_data = (
         campaign_application_data(root, str(selected))
@@ -600,7 +627,12 @@ def campaign_status(workspace: Path, campaign_id: str | None = None) -> dict[str
             "SELECT * FROM research_campaigns WHERE campaign_id=?", (selected,)
         ).fetchone()
         if campaign is None:
-            return {"campaign_id": selected, "state": "NOT_FOUND"}
+            return {
+                "campaign_id": selected,
+                "state": "NOT_FOUND",
+                "proposal_ranking": None,
+                "proposal_ranking_enabled": False,
+            }
         campaign_state = str(campaign["state"])
         campaign_columns = set(campaign.keys())
         director_mode = str(
@@ -977,6 +1009,14 @@ def campaign_status(workspace: Path, campaign_id: str | None = None) -> dict[str
         plan_summary = read_json(
             _prepared_plan_path(root, str(selected)), default={}
         )
+        proposal_ranking_error = None
+        try:
+            projected_proposal_ranking = normalize_proposal_ranking_catalog_id(
+                plan_summary.get("proposal_ranking")
+            )
+        except ValueError as error:
+            projected_proposal_ranking = None
+            proposal_ranking_error = str(error)
         try:
             pid = int(process.get("pid", 0))
         except (TypeError, ValueError):
@@ -1029,6 +1069,9 @@ def campaign_status(workspace: Path, campaign_id: str | None = None) -> dict[str
                     "maximum_turns_including_replans"
                 )
             ),
+            "proposal_ranking": projected_proposal_ranking,
+            "proposal_ranking_enabled": projected_proposal_ranking is not None,
+            "proposal_ranking_error": proposal_ranking_error,
             "resume_supported": (
                 campaign_state
                 in {
@@ -1056,6 +1099,8 @@ def campaign_status(workspace: Path, campaign_id: str | None = None) -> dict[str
             "state": "SCHEMA_UNAVAILABLE",
             "target": "erdos_gyarfas",
             "auth_imported": auth_is_imported(auth_data),
+            "proposal_ranking": None,
+            "proposal_ranking_enabled": False,
         }
     finally:
         connection.close()
@@ -1096,6 +1141,7 @@ class ResearchCampaignRunner:
         code_commit: str | None = None,
         director_mode: str | None = None,
         passive_seed: int = 0,
+        proposal_ranking: str | None = None,
     ):
         if stop_mode not in {"time_limit", "until_success"}:
             raise ValueError("invalid stop mode")
@@ -1109,6 +1155,12 @@ class ResearchCampaignRunner:
             raise ValueError(
                 "passive scheduler seed must be in [0, 2**63)"
             )
+        try:
+            proposal_ranking = normalize_proposal_ranking_catalog_id(
+                proposal_ranking
+            )
+        except ValueError as error:
+            raise ValueError(str(error)) from error
         if maximum_director_turns is not None and not (
             1 <= maximum_director_turns <= 1000
         ):
@@ -1129,6 +1181,7 @@ class ResearchCampaignRunner:
         self.controller_seed = controller_seed
         self.director_mode = director_mode
         self.passive_seed = passive_seed
+        self.proposal_ranking = proposal_ranking
         self.maximum_director_turns = maximum_director_turns
         self.context_mode = DirectorContextMode(context_mode)
         self.prepared_plan = prepared_plan
@@ -1162,6 +1215,26 @@ class ResearchCampaignRunner:
                 director_plan["maximum_cycles"]
             ):
                 raise ValueError("prepared Director cycle limit mismatch")
+            try:
+                planned_ranking = normalize_proposal_ranking_catalog_id(
+                    prepared_plan.get("proposal_ranking")
+                )
+            except ValueError as error:
+                raise ValueError(str(error)) from error
+            if (
+                self.proposal_ranking is not None
+                and self.proposal_ranking != planned_ranking
+            ):
+                raise ValueError(
+                    "start proposal-ranking does not match the prepared campaign"
+                )
+            if planned_ranking is not None and prepared_plan.get(
+                "director_mode", "llm"
+            ) != "llm":
+                raise ValueError(
+                    "proposal-ranking activation requires LLM Director mode"
+                )
+            self.proposal_ranking = planned_ranking
 
     def run(self) -> dict[str, Any]:
         with campaign_lock(self.workspace):
@@ -1201,6 +1274,27 @@ class ResearchCampaignRunner:
         if effective_director_mode not in DIRECTOR_MODES:
             raise ValueError("durable campaign has an unsupported director mode")
         self.effective_director_mode = effective_director_mode
+        try:
+            effective_proposal_ranking = normalize_proposal_ranking_catalog_id(
+                (durable_plan or {}).get(
+                    "proposal_ranking", self.proposal_ranking
+                )
+            )
+        except ValueError as error:
+            raise CampaignPlanError(str(error)) from error
+        if is_resume and self.proposal_ranking is not None:
+            if self.proposal_ranking != effective_proposal_ranking:
+                raise ValueError(
+                    "Resume cannot change the proposal-ranking contract"
+                )
+        self.proposal_ranking = effective_proposal_ranking
+        if (
+            self.proposal_ranking is not None
+            and effective_director_mode != "llm"
+        ):
+            raise CampaignPlanError(
+                "proposal-ranking activation requires LLM Director mode"
+            )
         passive_plan = (durable_plan or {}).get("passive_scheduler", {})
         effective_passive_seed = int(
             passive_plan.get("seed", self.passive_seed)
@@ -1407,6 +1501,7 @@ class ResearchCampaignRunner:
                 "schema_version": CAMPAIGN_PLAN_SCHEMA_VERSION,
                 "campaign_id": campaign_id,
                 "director_mode": effective_director_mode,
+                "proposal_ranking": self.proposal_ranking,
                 "target": self.target,
                 "target_definition_sha256": target_definition_sha256(
                     self.target
@@ -1528,6 +1623,7 @@ class ResearchCampaignRunner:
                 campaign_id=campaign_id,
                 campaign_dir=campaign_dir,
                 memory_policy=memory_policy,
+                proposal_ranking_catalog_id=self.proposal_ranking,
             )
             starting_memory = store.latest_memory_snapshot(campaign_id)
             pre_resume_builder.publish(memory_trigger="resume")
@@ -1618,6 +1714,7 @@ class ResearchCampaignRunner:
                         if effective_director_mode == "passive"
                         else None
                     ),
+                    "proposal_ranking": self.proposal_ranking,
                     **_score_runtime_provenance(),
                 },
                 process_id=os.getpid(),
@@ -1672,6 +1769,7 @@ class ResearchCampaignRunner:
                         if effective_director_mode == "passive"
                         else None
                     ),
+                    "proposal_ranking": self.proposal_ranking,
                     **_score_runtime_provenance(),
                 },
                 process_id=os.getpid(),
@@ -1791,6 +1889,7 @@ class ResearchCampaignRunner:
                 campaign_id=campaign_id,
                 mode=self.controller_mode,
                 seed=self.controller_seed,
+                proposal_ranking=self.proposal_ranking,
             )
             provider = director
         candidates = CandidateArchive(
@@ -1844,6 +1943,7 @@ class ResearchCampaignRunner:
                 campaign_id=campaign_id,
                 campaign_dir=campaign_dir,
                 memory_policy=memory_policy,
+                proposal_ranking_catalog_id=self.proposal_ranking,
             ),
             provider=provider,
             triggers=(

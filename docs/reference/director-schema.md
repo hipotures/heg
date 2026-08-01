@@ -33,6 +33,13 @@ compact lane-lifecycle map. Reference registries deterministically recover
 status and evidence/advisory/executable roles from these values. A duplicated
 per-reference object list is not part of the model-facing contract.
 
+When the immutable campaign plan enables proposal ranking, the action space
+also carries the exact reviewed `mutation_forge_stage4r_v1` contract. New
+simulated-annealing and ILS/ILS-tabu starts must name that ID; `random_restart`
+is always unranked, and patches cannot add or remove the capability. This
+contract is available only to LLM Director campaigns; passive mode remains
+unchanged. A plan without the option remains default-disabled.
+
 ## Hypothesis updates
 
 Operations:

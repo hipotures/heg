@@ -6,6 +6,7 @@ from shutil import which
 from threading import Thread
 from urllib.request import urlopen
 import asyncio
+import hashlib
 import json
 import os
 import platform
@@ -71,6 +72,12 @@ from .research.proposal_ranking_replay import (
     run_faithful_heg_benchmark,
     run_red_team,
     run_replay,
+)
+from .research.proposal_ranking import (
+    CATALOG_ID as PROPOSAL_RANKING_CATALOG_ID,
+    PolicyWorker,
+    build_context as build_proposal_ranking_context,
+    verify_frozen_policy,
 )
 from .search import ALGORITHMS, MODES, SearchConfig, config_from_run, run_search
 from .sat import run_pysat_cegar
@@ -157,6 +164,81 @@ def cmd_doctor(_: Namespace) -> int:
     }
     print(json.dumps(report, indent=2, sort_keys=True))
     return 0 if report["python_supported"] else 1
+
+
+def cmd_proposal_ranking(args: Namespace) -> int:
+    """Run a bounded identity, worker-call, and shutdown health check."""
+
+    del args
+    report: dict[str, object] = {
+        "catalog_id": PROPOSAL_RANKING_CATALOG_ID,
+        "identity": None,
+        "worker_before": None,
+        "worker_after_call": None,
+        "worker_after_close": None,
+        "priority": None,
+        "clean_shutdown": False,
+        "no_orphan": False,
+        "ok": False,
+    }
+    worker: PolicyWorker | None = None
+    try:
+        identity = verify_frozen_policy()
+        if identity.get("catalog_id") != PROPOSAL_RANKING_CATALOG_ID:
+            raise RuntimeError("frozen policy catalog identity mismatch")
+        report["identity"] = identity
+        context = build_proposal_ranking_context(
+            BitGraph.empty(4), capped_cycle_counts=(0,) * 6
+        ).as_dict()
+        proposal_id = hashlib.sha256(
+            b"sglab-proposal-ranking-doctor"
+        ).hexdigest()
+        proposal = {
+            "schema_version": "stage2b.proposal.v1",
+            "proposal_id": proposal_id,
+            "k": 2,
+            "operator_family": "legal_2_switch",
+            "selector_tags": ["uniform_random"],
+            "anchor_forbidden_length": None,
+            "broken_sampled_witnesses_by_length": [0] * 6,
+            "removed_edge_load_sum_by_length": [0] * 6,
+            "removed_edge_load_max_by_length": [0] * 6,
+            "minimum_distance_between_removed_edges": 0,
+            "mean_distance_between_removed_edges": 0.0,
+            "minimum_preexisting_distance_for_new_edges": 0,
+            "mean_preexisting_distance_for_new_edges": 0.0,
+            "local_triangle_risk": 0,
+            "local_c4_risk": 0,
+            "reconnection_span": 0.0,
+        }
+        worker = PolicyWorker()
+        report["worker_before"] = worker.telemetry()
+        report["priority"] = worker.call(context, proposal)
+        report["worker_after_call"] = worker.telemetry()
+        worker.close()
+        report["worker_after_close"] = worker.telemetry()
+        after_close = report["worker_after_close"]
+        if isinstance(after_close, dict):
+            report["clean_shutdown"] = not bool(after_close.get("usable"))
+            report["no_orphan"] = int(after_close.get("orphan_count", 0)) == 0
+        after_call = report["worker_after_call"]
+        report["ok"] = bool(
+            isinstance(after_call, dict)
+            and int(after_call.get("calls", 0)) == 1
+            and int(after_call.get("failures", 0)) == 0
+            and bool(report["clean_shutdown"])
+            and bool(report["no_orphan"])
+        )
+    except BaseException as error:
+        report["error"] = f"{type(error).__name__}: {error}"
+        if worker is not None:
+            try:
+                worker.close()
+                report["worker_after_close"] = worker.telemetry()
+            except BaseException:
+                pass
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0 if bool(report["ok"]) else 1
 
 
 def cmd_init(args: Namespace) -> int:
@@ -604,6 +686,7 @@ def cmd_research_campaign(args: Namespace) -> int:
             duration_seconds=duration,
             director_mode=args.director_mode,
             passive_seed=args.passive_seed,
+            proposal_ranking=args.proposal_ranking,
         )
         print(json.dumps(report, indent=2, sort_keys=True))
         return 0
@@ -678,6 +761,7 @@ def cmd_research_campaign(args: Namespace) -> int:
             prepared_plan=prepared,
             director_mode=args.director_mode,
             passive_seed=args.passive_seed,
+            proposal_ranking=args.proposal_ranking,
         ).run()
         print(json.dumps(report, indent=2, sort_keys=True))
         return 0
@@ -873,6 +957,13 @@ def build_parser() -> ArgumentParser:
     doctor = subparsers.add_parser("doctor")
     doctor.set_defaults(func=cmd_doctor)
 
+    proposal_ranking = subparsers.add_parser("proposal-ranking")
+    proposal_ranking_commands = proposal_ranking.add_subparsers(
+        dest="proposal_ranking_command", required=True
+    )
+    proposal_ranking_doctor = proposal_ranking_commands.add_parser("doctor")
+    proposal_ranking_doctor.set_defaults(func=cmd_proposal_ranking)
+
     init = subparsers.add_parser("init")
     init.add_argument("--workspace", required=True)
     init.set_defaults(func=cmd_init)
@@ -1066,6 +1157,10 @@ def build_parser() -> ArgumentParser:
         "--director-mode", choices=["llm", "passive"]
     )
     campaign_start.add_argument("--passive-seed", type=int, default=0)
+    campaign_start.add_argument(
+        "--proposal-ranking",
+        choices=["mutation_forge_stage4r_v1"],
+    )
     campaign_start.set_defaults(func=cmd_research_campaign)
     campaign_prepare = campaign_commands.add_parser("prepare")
     campaign_prepare.add_argument("--workspace", required=True)
@@ -1076,6 +1171,10 @@ def build_parser() -> ArgumentParser:
         default="llm",
     )
     campaign_prepare.add_argument("--passive-seed", type=int, default=0)
+    campaign_prepare.add_argument(
+        "--proposal-ranking",
+        choices=["mutation_forge_stage4r_v1"],
+    )
     campaign_prepare.set_defaults(func=cmd_research_campaign)
     campaign_auth = campaign_commands.add_parser("auth-import")
     campaign_auth.add_argument("--workspace", required=True)

@@ -2,6 +2,19 @@
 
 Last implementation audit: **2026-08-01**.
 
+## Issue #17 — operator activation path
+
+The integrated ranker now has an explicit operator boundary. `research-campaign
+prepare` accepts only `--proposal-ranking mutation_forge_stage4r_v1`; the
+nullable value is persisted and fingerprinted in the immutable campaign plan,
+inherited by Resume/restart/fork/checkpoint recovery, and projected through
+status, export, the API, and dashboard. The operator-facing activation is
+LLM-Director-only: Director state names the plan-bound requirement and
+semantic validation rejects omission, changes, random-restart use, and patch
+activation. Passive mode remains unchanged. `sglab proposal-ranking doctor`
+performs one bounded worker call and verifies clean shutdown without running a
+benchmark. Omission remains default-disabled.
+
 ## Issue #15 — reviewed Mutation Forge Stage 4R ranking seam
 
 Implemented on the opt-in branch `agent/mutation-forge-ranking-seam` from the

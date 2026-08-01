@@ -10,6 +10,7 @@ import sqlite3
 import zipfile
 
 from ..state import utc_now
+from .catalog import normalize_proposal_ranking_catalog_id
 from .store import ResearchStore
 
 
@@ -53,6 +54,19 @@ def export_campaign(
         files.append(("campaign.sqlite3", database_bytes))
         total += len(database_bytes)
         campaign = store.campaign(campaign_id)
+        plan = {}
+        plan_path = root / "campaign-plan.json"
+        if plan_path.is_file():
+            try:
+                plan = json.loads(plan_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as error:
+                raise RuntimeError("campaign plan is unavailable for export") from error
+        try:
+            proposal_ranking = normalize_proposal_ranking_catalog_id(
+                plan.get("proposal_ranking")
+            )
+        except ValueError as error:
+            raise RuntimeError(str(error)) from error
         scheduler = store.connection.execute(
             """
             SELECT policy_id, policy_version, scheduler_state_version,
@@ -88,6 +102,9 @@ def export_campaign(
             "director_mode": str(
                 campaign.get("director_mode", "llm")
             ),
+            "plan_fingerprint": plan.get("plan_fingerprint"),
+            "proposal_ranking": proposal_ranking,
+            "proposal_ranking_enabled": proposal_ranking is not None,
             "passive_scheduler": (
                 dict(scheduler) if scheduler is not None else None
             ),

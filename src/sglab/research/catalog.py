@@ -4,6 +4,24 @@ from typing import Any
 
 
 REVIEWED_PROPOSAL_RANKING_CATALOG_ID = "mutation_forge_stage4r_v1"
+PROPOSAL_RANKING_MUTATION_ALGORITHMS = (
+    "simulated_annealing",
+    "iterated_local_search",
+    "iterated_local_search_tabu",
+)
+
+
+def normalize_proposal_ranking_catalog_id(value: object) -> str | None:
+    """Return the only reviewed ranker ID, or fail closed for any other value."""
+
+    if value is None:
+        return None
+    if value != REVIEWED_PROPOSAL_RANKING_CATALOG_ID:
+        raise ValueError(
+            "proposal-ranking must use the reviewed catalog ID "
+            f"{REVIEWED_PROPOSAL_RANKING_CATALOG_ID}"
+        )
+    return REVIEWED_PROPOSAL_RANKING_CATALOG_ID
 
 
 EXPERIMENT_ALGORITHMS = (

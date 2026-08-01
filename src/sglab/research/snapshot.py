@@ -12,7 +12,7 @@ from ..model import BitGraph
 from ..state import utc_now
 from ..targets import target_summary
 from .lanes import LaneManager
-from .catalog import action_catalog
+from .catalog import action_catalog, normalize_proposal_ranking_catalog_id
 from .context import (
     director_state_v2_memory_input,
     evidence_registry_ids,
@@ -43,6 +43,7 @@ class SnapshotBuilder:
         maximum_actions: int = 64,
         maximum_hypotheses: int = 64,
         memory_policy: ScientificMemoryPolicy | None = None,
+        proposal_ranking_catalog_id: str | None = None,
     ):
         self.store = store
         self.manager = manager
@@ -52,6 +53,14 @@ class SnapshotBuilder:
         self.maximum_actions = maximum_actions
         self.maximum_hypotheses = maximum_hypotheses
         self.memory_policy = memory_policy or ScientificMemoryPolicy()
+        try:
+            self.proposal_ranking_catalog_id = (
+                normalize_proposal_ranking_catalog_id(
+                    proposal_ranking_catalog_id
+                )
+            )
+        except ValueError as error:
+            raise ValueError(str(error)) from error
         self.memory = ScientificMemoryCompactor(self.memory_policy)
         self.snapshot_dir = self.campaign_dir / "snapshots"
         self.snapshot_dir.mkdir(parents=True, exist_ok=True)
@@ -92,6 +101,7 @@ class SnapshotBuilder:
                 "stop_mode": campaign["stop_mode"],
                 "elapsed_seconds": elapsed,
                 "remaining_seconds": remaining,
+                "proposal_ranking": self.proposal_ranking_catalog_id,
             },
             "target": {
                 **target_summary(str(campaign["target"])),
@@ -261,6 +271,7 @@ class SnapshotBuilder:
                     "SELECT action_id FROM director_actions"
                 )
             ),
+            proposal_ranking_catalog_id=self.proposal_ranking_catalog_id,
         )
         return snapshot, context
 

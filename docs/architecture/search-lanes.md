@@ -196,6 +196,13 @@ patched onto an existing lane. A ranking lane uses the host-owned bounded
 2B context/proposal schemas. The worker receives no file path, shell, network,
 database, scorer, or M4 capability.
 
+For LLM-Director campaigns, the operator authorizes this value with
+`research-campaign prepare --proposal-ranking mutation_forge_stage4r_v1`.
+The nullable choice is plan-fingerprinted and inherited by every execution
+attempt. Passive mode remains unchanged. The LLM Director receives the
+plan-bound contract in its action space and cannot add or remove it through a
+patch; `random_restart` stays unranked.
+
 The HEG C++ score already computed for the current graph supplies context
 witness counts and weighted penalty. Only the selected rewrite is handed back
 to the ordinary lane score path; the policy never scores the pool. M4 remains

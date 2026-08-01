@@ -23,6 +23,19 @@ sglab research-campaign prepare   --workspace <workspace>   --time-limit 1h   --
 Preparation creates the campaign and exact fingerprint without auth or model
 access.
 
+For an LLM Director campaign, the reviewed proposal ranker is opt-in and
+plan-bound:
+
+```bash
+sglab research-campaign prepare \
+  --workspace <workspace> \
+  --time-limit 1h \
+  --director-mode llm \
+  --proposal-ranking mutation_forge_stage4r_v1
+```
+
+Omitting the option keeps ranking disabled. Resume has no ranking switch.
+
 ## Compliance and auth
 
 ```bash
@@ -81,6 +94,13 @@ passive attempt never accesses auth.
 
 ```bash
 sglab research-campaign export   --workspace <workspace>   --campaign-id <campaign-id>   --output ./campaign.zip
+```
+
+Verify the frozen ranker identity and one bounded worker call without a
+benchmark:
+
+```bash
+sglab proposal-ranking doctor
 ```
 
 ## Duration syntax

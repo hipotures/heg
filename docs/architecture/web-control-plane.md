@@ -38,6 +38,12 @@ version, latest reason codes, and scheduler-decision count. Model-token fields
 are rendered as not applicable in passive mode rather than as an
 authentication or connection fault.
 
+LLM campaign creation also exposes the reviewed `mutation_forge_stage4r_v1`
+proposal-ranking choice. The dashboard sends only that catalog ID (or an
+explicit disabled value); status and export project the plan-bound value and
+enabled state. Passive mode remains unchanged. Resume has no ranking control
+and therefore cannot silently change the scientific contract.
+
 The dashboard launches a campaign runner as a detached child so a dashboard
 restart does not silently terminate a healthy scientific attempt. The runner
 therefore owns and closes all lane multiprocessing resources when its attempt

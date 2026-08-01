@@ -42,12 +42,21 @@ The Director works through a reviewed action catalog. It may:
 The operator does not normally choose algorithms or mutation parameters for
 the Active Director campaign.
 
-The reviewed Mutation Forge Stage 4R proposal ranker is an explicit research
-lane option, not a default. A lane may include
-`proposal_ranking=mutation_forge_stage4r_v1` only at creation; the parameter
-cannot be patched and an unknown catalog ID is rejected. The host still owns
+The reviewed Mutation Forge Stage 4R proposal ranker is an explicit LLM
+Director campaign option, not a default. Authorize it before the first start:
+
+```text
+sglab research-campaign prepare --workspace <workspace> --time-limit 1h \
+  --director-mode llm --proposal-ranking mutation_forge_stage4r_v1
+```
+
+The exact ID is persisted and fingerprinted in the immutable plan. It reaches
+new simulated-annealing and ILS/ILS-tabu lanes, while `random_restart` stays
+unranked. Resume, restart, fork, and checkpoint recovery inherit the value;
+there is no Resume toggle. Passive mode remains unchanged. The host still owns
 legal graph rewrites, HEG scoring, and exact verification, so enabling the
-ranker does not make a heuristic candidate a counterexample.
+ranker does not make a heuristic candidate a counterexample. Omitting the
+option leaves the worker and ranking telemetry absent.
 
 The performance-frozen ranker uses exact graph-local caches and one bounded
 worker batch per proposal pool. Its aggregate `stage7.heg.profile.v1` report is

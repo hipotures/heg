@@ -31,8 +31,9 @@ Examples:
 - unsupported parameters rejected;
 - mutation weights known, non-negative, positive-sum, normalized;
 - `proposal_ranking` is optional and, when present, must equal the reviewed
-  catalog ID `mutation_forge_stage4r_v1`; it is trajectory-breaking and is not
-  patchable;
+  catalog ID `mutation_forge_stage4r_v1`; it is trajectory-breaking, applies
+  only to reviewed mutation starts in an LLM campaign, leaves
+  `random_restart` unranked, and is not patchable;
 - resource and evaluation windows bounded;
 - null transport fields removed during normalization.
 

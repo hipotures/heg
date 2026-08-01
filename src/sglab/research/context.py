@@ -7,7 +7,12 @@ from typing import Any
 import hashlib
 import json
 
-from .catalog import action_catalog
+from .catalog import (
+    PROPOSAL_RANKING_MUTATION_ALGORITHMS,
+    REVIEWED_PROPOSAL_RANKING_CATALOG_ID,
+    action_catalog,
+    normalize_proposal_ranking_catalog_id,
+)
 from .continuity import (
     ScientificMemoryCompactor,
     ScientificMemoryPolicy,
@@ -800,6 +805,12 @@ def _applicable_action_space(
     )
     actions: list[str] = []
     explanations: dict[str, str] = {}
+    try:
+        proposal_ranking = normalize_proposal_ranking_catalog_id(
+            (snapshot.get("campaign") or {}).get("proposal_ranking")
+        )
+    except ValueError as error:
+        raise ValueError(str(error)) from error
 
     def expose(action: str, reason: str) -> None:
         actions.append(action)
@@ -888,6 +899,23 @@ def _applicable_action_space(
         "algorithm_parameters": catalog["algorithm_parameters"],
         "mutation_operators": catalog["mutation_operators"],
         "mutation_weights_contract": catalog["mutation_weights_contract"],
+        "proposal_ranking": {
+            "enabled": proposal_ranking is not None,
+            "catalog_id": proposal_ranking,
+            "reviewed_catalog_id": (
+                proposal_ranking
+                if proposal_ranking is not None
+                else REVIEWED_PROPOSAL_RANKING_CATALOG_ID
+            ),
+            "mutation_algorithms": list(PROPOSAL_RANKING_MUTATION_ALGORITHMS),
+            "random_restart_unranked": True,
+            "patchable": False,
+            "instruction": (
+                "When enabled, every newly started reviewed mutation lane must "
+                "include the exact catalog_id. Omit it when disabled; "
+                "random_restart is always unranked."
+            ),
+        },
     }
     if checkpoint_ids:
         result["checkpoint_target_ids"] = checkpoint_ids

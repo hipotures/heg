@@ -16,6 +16,14 @@ selects the versioned `balanced_v1` host scheduler and its seed. Both reviewed
 contracts remain in the plan so a later execution attempt may explicitly
 select either mode without rewriting campaign history.
 
+The optional `proposal_ranking` plan field is either `null` (the default) or
+the reviewed catalog ID `mutation_forge_stage4r_v1`. It is authorized only by
+the LLM-Director prepare/start CLI or dashboard allowlist, is included in the
+plan fingerprint, and is inherited unchanged by every attempt. Passive mode
+does not activate this option and retains its existing behavior. Director
+validation uses the same plan-bound capability and rejects an omitted,
+changed, random-restart, or patch-supplied ranking field.
+
 ## Start
 
 Start performs:

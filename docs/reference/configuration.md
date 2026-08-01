@@ -19,7 +19,9 @@ Fingerprint-stable fields include:
 - replan policy;
 - search/verifier limits;
 - App Server/resource policy;
-- scientific-memory policy.
+- scientific-memory policy;
+- proposal-ranking activation (`null` by default or the reviewed
+  `mutation_forge_stage4r_v1` catalog ID).
 
 Resume cannot silently change scientific-contract fields.
 
@@ -43,6 +45,19 @@ Attempt-local override fields include:
 `--director-mode` may explicitly select the already fingerprinted LLM or
 passive contract for the new attempt. Omitting it preserves the current mode
 and passive scheduler state.
+
+To authorize the reviewed ranker for a new campaign, prepare with:
+
+```text
+sglab research-campaign prepare --workspace <workspace> --time-limit 1h \
+  --director-mode llm \
+  --proposal-ranking mutation_forge_stage4r_v1
+```
+
+The option is restricted to LLM Director campaigns and deliberately absent
+from Resume: the plan-bound value is preserved exactly. Unknown IDs, arbitrary
+source/path values, and attempts to patch or toggle a lane are rejected before
+execution. Passive mode remains unchanged.
 
 ## Search profiling
 

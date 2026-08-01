@@ -15,6 +15,7 @@ from .continuity import (
     ScientificMemoryPolicy,
     CampaignResumeError,
 )
+from .catalog import normalize_proposal_ranking_catalog_id
 from .context import prepare_director_state_v2
 from .protocol import canonical_json
 from .recovery import CampaignRecovery
@@ -33,6 +34,23 @@ def campaign_plan(workspace: Path, campaign_id: str) -> dict[str, Any]:
         raise CampaignResumeError("campaign plan is unavailable") from error
     if value.get("campaign_id") != campaign_id:
         raise CampaignResumeError("campaign plan ID mismatch")
+    stored_fingerprint = value.get("plan_fingerprint")
+    if stored_fingerprint is not None:
+        payload = {
+            key: item
+            for key, item in value.items()
+            if key != "plan_fingerprint"
+        }
+        recomputed = hashlib.sha256(
+            json.dumps(
+                payload,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+            ).encode("ascii")
+        ).hexdigest()
+        if not isinstance(stored_fingerprint, str) or stored_fingerprint != recomputed:
+            raise CampaignResumeError("campaign plan fingerprint mismatch")
     return value
 
 
@@ -191,6 +209,12 @@ def build_resume_preview(
             else CampaignResources.from_plan(plan).as_dict()
         )
         policy = _memory_policy(plan, campaign)
+        try:
+            proposal_ranking = normalize_proposal_ranking_catalog_id(
+                plan.get("proposal_ranking")
+            )
+        except ValueError as error:
+            raise CampaignResumeError(str(error)) from error
         return {
             "schema_version": "1.0",
             "campaign_id": campaign_id,
@@ -238,6 +262,9 @@ def build_resume_preview(
                 "passive_scheduler": plan.get(
                     "passive_scheduler", {}
                 ),
+                "proposal_ranking": proposal_ranking,
+                "proposal_ranking_enabled": proposal_ranking is not None,
+                "plan_fingerprint": plan.get("plan_fingerprint"),
                 "unchanged": True,
             },
             "scientific_memory": {

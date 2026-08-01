@@ -79,6 +79,10 @@ Selecting the already fingerprinted passive or LLM orchestration contract is
 an explicit execution-attempt transition, not a silent scientific-contract
 change.
 
+Proposal ranking is authorized only when the campaign is prepared with the
+reviewed `mutation_forge_stage4r_v1` ID. Resume exposes the preserved value in
+its preview but has no ranking switch.
+
 ## Preview first
 
 ```bash

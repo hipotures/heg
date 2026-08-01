@@ -16,9 +16,11 @@ from .catalog import (
     MUTATION_WEIGHTS_PARAMETER,
     PARAMETER_DOMAINS,
     PATCHABLE_PARAMETERS,
+    PROPOSAL_RANKING_MUTATION_ALGORITHMS,
     REVIEWED_PROPOSAL_RANKING_CATALOG_ID,
     REVIEW_EVENTS,
     action_catalog,
+    normalize_proposal_ranking_catalog_id,
 )
 from .protocol import (
     DecisionValidation,
@@ -78,6 +80,7 @@ class DecisionContext:
     diagnostic_subject_ids: frozenset[str] | None = None
     applicable_action_types: frozenset[str] = frozenset(ACTION_TYPES)
     reserved_action_ids: frozenset[str] = frozenset()
+    proposal_ranking_catalog_id: str | None = None
 
     def __post_init__(self) -> None:
         # Backward-compatible construction for callers predating explicit
@@ -101,6 +104,13 @@ class DecisionContext:
                 "diagnostic_subject_ids",
                 frozenset(self.lane_versions) | self.candidate_ids,
             )
+        try:
+            normalized = normalize_proposal_ranking_catalog_id(
+                self.proposal_ranking_catalog_id
+            )
+        except ValueError as error:
+            raise ValueError(str(error)) from error
+        object.__setattr__(self, "proposal_ranking_catalog_id", normalized)
 
 
 class _Issues:
@@ -251,7 +261,7 @@ def validate_decision(
             )
         if action_type == "start_lane":
             projected_starts += 1
-            _start_lane(issues, action["spec"], f"{path}.spec")
+            _start_lane(issues, action["spec"], f"{path}.spec", context)
         elif action_type in {
             "patch_lane",
             "fork_lane",
@@ -266,9 +276,17 @@ def validate_decision(
                     f"{path}.patch",
                     algorithm,
                     partial=True,
+                    proposal_ranking_catalog_id=context.proposal_ranking_catalog_id,
                 )
             elif action_type == "fork_lane":
-                _fork(issues, action, path, context, algorithm)
+                _fork(
+                    issues,
+                    action,
+                    path,
+                    context,
+                    algorithm,
+                    context.proposal_ranking_catalog_id,
+                )
                 if isinstance(action["variants"], list):
                     projected_starts += len(action["variants"])
             elif action_type == "restart_lane":
@@ -419,7 +437,12 @@ def _validate_hypotheses(
     return frozenset(created)
 
 
-def _start_lane(issues: _Issues, spec: Any, path: str) -> None:
+def _start_lane(
+    issues: _Issues,
+    spec: Any,
+    path: str,
+    context: DecisionContext | None = None,
+) -> None:
     fields = {"algorithm", "graph_family", "seed", "parameters", "resource_share"}
     if not issues.exact_keys(spec, path, fields):
         return
@@ -431,7 +454,15 @@ def _start_lane(issues: _Issues, spec: Any, path: str) -> None:
         issues.add(f"{path}.graph_family", "is not supported")
     _integer(issues, spec["seed"], f"{path}.seed", 0, 2**63 - 1)
     _number(issues, spec["resource_share"], f"{path}.resource_share", 0, 1, exclusive_min=True)
-    _parameters(issues, spec["parameters"], f"{path}.parameters", algorithm)
+    _parameters(
+        issues,
+        spec["parameters"],
+        f"{path}.parameters",
+        algorithm,
+        proposal_ranking_catalog_id=(
+            context.proposal_ranking_catalog_id if context is not None else None
+        ),
+    )
     if (
         isinstance(spec["parameters"], dict)
         and spec["graph_family"] == "connected_cubic"
@@ -478,6 +509,7 @@ def _fork(
     path: str,
     context: DecisionContext,
     algorithm: str | None,
+    proposal_ranking_catalog_id: str | None = None,
 ) -> None:
     checkpoint = _identifier(
         issues, action["checkpoint_id"], f"{path}.checkpoint_id"
@@ -505,6 +537,7 @@ def _fork(
             f"{variant_path}.patch",
             algorithm,
             partial=True,
+            proposal_ranking_catalog_id=proposal_ranking_catalog_id,
         )
         _number(
             issues,
@@ -591,6 +624,7 @@ def _parameters(
     algorithm: str | None,
     *,
     partial: bool = False,
+    proposal_ranking_catalog_id: str | None = None,
 ) -> None:
     if not isinstance(value, dict):
         issues.add(path, "must be an object")
@@ -613,6 +647,21 @@ def _parameters(
                     f"{path}.{name}",
                     "must name the reviewed proposal-ranking catalog entry",
                 )
+            elif proposal_ranking_catalog_id is None:
+                issues.add(
+                    f"{path}.{name}",
+                    "is unavailable because proposal ranking is disabled in the campaign plan",
+                )
+            elif algorithm == "random_restart":
+                issues.add(
+                    f"{path}.{name}",
+                    "random_restart lanes must remain unranked",
+                )
+            elif algorithm not in PROPOSAL_RANKING_MUTATION_ALGORITHMS:
+                issues.add(
+                    f"{path}.{name}",
+                    "is only supported for reviewed mutation lanes",
+                )
             continue
         if domain["type"] == "integer":
             _integer(
@@ -634,6 +683,16 @@ def _parameters(
         for required in ("order", "batch_candidates", "witness_cap"):
             if required not in value:
                 issues.add(f"{path}.{required}", "is required")
+        if (
+            algorithm in PROPOSAL_RANKING_MUTATION_ALGORITHMS
+            and proposal_ranking_catalog_id is not None
+            and value.get("proposal_ranking")
+            != proposal_ranking_catalog_id
+        ):
+            issues.add(
+                f"{path}.proposal_ranking",
+                "must equal the campaign's reviewed proposal-ranking catalog ID",
+            )
 
 
 def _mutation_weights(issues: _Issues, value: Any, path: str) -> None:

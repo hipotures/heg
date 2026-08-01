@@ -7,6 +7,10 @@ import copy
 
 from .director import ActiveDirector, DirectorEvidence
 from .lanes import LaneManager
+from .catalog import (
+    PROPOSAL_RANKING_MUTATION_ALGORITHMS,
+    normalize_proposal_ranking_catalog_id,
+)
 from .validation import DecisionContext, validate_decision
 from .store import ResearchStore, new_id
 
@@ -101,12 +105,20 @@ class SyntheticControlProvider:
         campaign_id: str,
         mode: str,
         seed: int,
+        proposal_ranking: str | None = None,
     ):
         if mode not in {"static", "random", "continuity_demo"}:
             raise ValueError("synthetic control mode must be static or random")
+        try:
+            proposal_ranking = normalize_proposal_ranking_catalog_id(
+                proposal_ranking
+            )
+        except ValueError as error:
+            raise ValueError(str(error)) from error
         self.store = store
         self.campaign_id = campaign_id
         self.mode = mode
+        self.proposal_ranking = proposal_ranking
         self.rng = Random(seed)
         self.session_record_id = f"control-session:{campaign_id}"
         self.thread_id = f"control-thread:{campaign_id}"
@@ -352,6 +364,11 @@ class SyntheticControlProvider:
             parameters.update(
                 {"tabu_tenure": 64, "perturbation_interval": 500}
             )
+        if (
+            self.proposal_ranking is not None
+            and algorithm in PROPOSAL_RANKING_MUTATION_ALGORITHMS
+        ):
+            parameters["proposal_ranking"] = self.proposal_ranking
         action["spec"] = {
             "algorithm": algorithm,
             "graph_family": "connected_cubic",

@@ -38,6 +38,7 @@ from .comparison_worker import (
 from .resources import recommended_workers
 from .locations import asset_path
 from .research.auth import auth_is_imported
+from .research.catalog import normalize_proposal_ranking_catalog_id
 from .research.campaign import (
     campaign_application_data,
     campaign_status,
@@ -412,6 +413,7 @@ class DashboardServer(ThreadingHTTPServer):
                 "duration",
                 "director_mode",
                 "passive_seed",
+                "proposal_ranking",
             }:
                 return 400, {"error": "unsupported campaign input"}
             director_mode = str(payload.get("director_mode", "llm"))
@@ -423,6 +425,16 @@ class DashboardServer(ThreadingHTTPServer):
                 return 400, {"error": "passive_seed must be an integer"}
             if not 0 <= passive_seed < 2**63:
                 return 400, {"error": "passive_seed is outside its bounds"}
+            try:
+                proposal_ranking = normalize_proposal_ranking_catalog_id(
+                    payload.get("proposal_ranking")
+                )
+            except ValueError as error:
+                return 400, {"error": str(error)}
+            if proposal_ranking is not None and director_mode != "llm":
+                return 400, {
+                    "error": "proposal-ranking activation requires LLM Director mode"
+                }
             if (
                 director_mode == "llm"
                 and not auth_is_imported(self.workspace / ".sglab")
@@ -446,6 +458,8 @@ class DashboardServer(ThreadingHTTPServer):
                 "--passive-seed",
                 str(passive_seed),
             ]
+            if proposal_ranking is not None:
+                command.extend(("--proposal-ranking", proposal_ranking))
             if stop_mode == "time_limit":
                 duration = payload.get("duration")
                 if not isinstance(duration, str):
@@ -483,6 +497,8 @@ class DashboardServer(ThreadingHTTPServer):
                 "target": "erdos_gyarfas",
                 "stop_mode": stop_mode,
                 "director_mode": director_mode,
+                "proposal_ranking": proposal_ranking,
+                "proposal_ranking_enabled": proposal_ranking is not None,
             }
 
     def resume_campaign(

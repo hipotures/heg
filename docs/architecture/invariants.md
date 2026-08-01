@@ -38,6 +38,8 @@ This is the authoritative engineering-invariant matrix.
 | Resume never silently migrates duplicate membership | versioned lane checkpoint key scheme | legacy alias, fork and explicit-restart tests | inherit checkpoint scheme; require explicit restart |
 | Browser cannot supply executable/auth path | HTTP validation | security tests | request rejected |
 | Reviewed proposal ranking is opt-in and catalog-bound | lane/catalog validation | proposal-ranking seam tests | reject unknown/patch activation |
+| Campaign ranking authorization is plan-bound | prepare/start CLI, plan fingerprint, Director validation | issue-17 activation tests | reject disabled/changed/unknown values before dispatch |
+| Random restart remains unranked | Director validation and lane validator | issue-17 activation tests | reject ranker on random_restart |
 | Proposal worker cannot choose a fallback | host bridge/worker boundary | red-team and process tests | lane fails closed and worker group is reaped |
 | Policy cannot certify or score | proposal bridge/M4 broker | scorer/M4 isolation tests | selected plan is the only scored plan; M4 remains sole authority |
 | Proposal-ranking checkpoint identity is exact | checkpoint/recovery | checkpoint/resume tests | resume rejected on any identity drift |

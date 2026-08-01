@@ -114,6 +114,15 @@ def build_director_prompt(snapshot: dict[str, Any]) -> str:
                 "IDs. Historical IDs are evidence, not execution targets."
             ),
         },
+        "proposal_ranking_contract": director_state[
+            "allowed_action_space"
+        ].get("proposal_ranking", {
+            "enabled": False,
+            "catalog_id": None,
+            "instruction": (
+                "Proposal ranking is disabled; omit proposal_ranking from all lanes."
+            ),
+        }),
         "hypothesis_update_contract": hypothesis_update_contract(
             hypothesis_ids
         ),
