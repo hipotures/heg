@@ -1114,6 +1114,11 @@ def cmd_experiment(args: Namespace) -> int:
         resumable = bool(status.get("resume_supported"))
         if status.get("state") == "prepared":
             assert plan is not None
+            if effective_mode == "llm":
+                import_authorized_auth(
+                    config.codex_home,
+                    campaign_application_data(workspace, campaign_id),
+                )
             pid = _launch_experiment_campaign(
                 workspace,
                 campaign_id=campaign_id,
