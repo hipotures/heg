@@ -8,6 +8,12 @@ from the failed attempt and refuses repeated blind retries under unchanged
 code. Director ranking guidance also states that `random_restart` must omit
 `proposal_ranking` entirely, while validation remains fail-closed.
 
+The model-facing Director schema now discriminates `start_lane` parameters by
+algorithm. Ranked mutation branches require the reviewed catalog ID only when
+the immutable plan enables it, and `random_restart` has no ranking field or
+unrelated nullable parameters. Semantic validation remains authoritative and
+still rejects any malformed response without dispatching work.
+
 ## Issue #17 — operator activation path
 
 The integrated ranker now has an explicit operator boundary. `research-campaign

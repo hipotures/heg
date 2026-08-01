@@ -110,6 +110,13 @@ submitted registry is empty, these arrays have `maxItems: 0`. Unknown,
 historical-only, and invented evidence IDs remain independently rejected by
 semantic validation.
 
+`start_lane.spec` is emitted as algorithm-specific branches. A
+`random_restart` branch contains only its three required seed parameters and
+cannot contain `proposal_ranking`; when ranking is enabled, each supported
+mutation branch requires the exact reviewed catalog ID. Unsupported fields are
+therefore excluded from the model-facing contract before semantic validation,
+while the validator remains fail-closed defense in depth.
+
 ## Validation
 
 Validation covers:

@@ -258,6 +258,54 @@ class ResearchProtocolTests(unittest.TestCase):
         self.assertIn('"expected_lane_version"', encoded)
         self.assertNotIn('"command"', encoded)
 
+    def test_start_lane_schema_discriminates_random_restart_and_ranking(self) -> None:
+        def start_spec_schema(ranking: str | None) -> dict:
+            schema = director_decision_schema(
+                {
+                    "actions": ["start_lane"],
+                    "proposal_ranking": {
+                        "catalog_id": ranking,
+                    },
+                }
+            )
+            variant = schema["properties"]["actions"]["items"]["anyOf"][0]
+            return variant["properties"]["spec"]
+
+        disabled = start_spec_schema(None)
+        disabled_branches = {
+            branch["properties"]["algorithm"]["const"]: branch
+            for branch in disabled["anyOf"]
+        }
+        random_parameters = disabled_branches["random_restart"]["properties"][
+            "parameters"
+        ]
+        self.assertNotIn("proposal_ranking", random_parameters["properties"])
+        self.assertEqual(
+            random_parameters["required"],
+            ["order", "batch_candidates", "witness_cap"],
+        )
+
+        ranking = "mutation_forge_stage4r_v1"
+        enabled = start_spec_schema(ranking)
+        enabled_branches = {
+            branch["properties"]["algorithm"]["const"]: branch
+            for branch in enabled["anyOf"]
+        }
+        ranked_parameters = enabled_branches["simulated_annealing"][
+            "properties"
+        ]["parameters"]
+        self.assertEqual(
+            ranked_parameters["properties"]["proposal_ranking"],
+            {"type": "string", "const": ranking},
+        )
+        self.assertIn("proposal_ranking", ranked_parameters["required"])
+        self.assertNotIn(
+            "proposal_ranking",
+            enabled_branches["random_restart"]["properties"]["parameters"][
+                "properties"
+            ],
+        )
+
     def test_verification_schema_only_allows_submitted_candidates(
         self,
     ) -> None:

@@ -7,12 +7,14 @@ import json
 
 from .catalog import (
     ACTION_TYPES,
+    ALGORITHM_PARAMETERS,
     ALGORITHMS,
     DIAGNOSTICS,
     GRAPH_FAMILIES,
     MUTATION_OPERATORS,
     MUTATION_WEIGHTS_PARAMETER,
     PARAMETER_DOMAINS,
+    PROPOSAL_RANKING_MUTATION_ALGORITHMS,
     REVIEW_EVENTS,
 )
 
@@ -314,6 +316,121 @@ def _common_action_properties(
     }
 
 
+def _mutation_weights_schema() -> dict[str, Any]:
+    """Return the optional, host-normalized mutation-weight object schema."""
+
+    return {
+        "additionalProperties": False,
+        "type": ["object", "null"],
+        "required": list(MUTATION_OPERATORS),
+        "properties": {
+            name: {"type": "number", "minimum": 0}
+            for name in MUTATION_OPERATORS
+        },
+    }
+
+
+def _lane_parameter_schema(
+    algorithm: str,
+    *,
+    proposal_ranking_catalog_id: str | None,
+) -> dict[str, Any]:
+    """Build the exact parameter object accepted for one lane algorithm.
+
+    The previous model-facing schema exposed the union of every algorithm's
+    parameters and made most of them nullable.  That permitted a structured
+    response such as ``random_restart`` with ``proposal_ranking`` (or a large
+    set of unrelated null fields), leaving semantic validation to reject the
+    entire turn.  Keep semantic validation authoritative, but make the output
+    contract express the same algorithm-specific shape so the model cannot be
+    asked to choose an invalid combination in the first place.
+    """
+
+    allowed = ALGORITHM_PARAMETERS[algorithm]
+    properties: dict[str, Any] = {}
+    required = ["order", "batch_candidates", "witness_cap"]
+    for name in sorted(allowed):
+        if name == "proposal_ranking":
+            if proposal_ranking_catalog_id is None:
+                continue
+            properties[name] = {
+                "type": "string",
+                "const": proposal_ranking_catalog_id,
+            }
+            required.append(name)
+            continue
+        if name == MUTATION_WEIGHTS_PARAMETER:
+            properties[name] = _mutation_weights_schema()
+        else:
+            domain = PARAMETER_DOMAINS[name]
+            properties[name] = {
+                **domain,
+                "type": [domain["type"], "null"]
+                if name not in {"order", "batch_candidates", "witness_cap"}
+                else domain["type"],
+            }
+        if name not in required:
+            required.append(name)
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": required,
+        "properties": properties,
+    }
+
+
+def _start_lane_spec_schema(
+    *,
+    proposal_ranking_catalog_id: str | None,
+) -> dict[str, Any]:
+    """Build algorithm-discriminated start-lane specifications."""
+
+    common = {
+        "graph_family": {
+            "type": "string",
+            "enum": list(GRAPH_FAMILIES),
+        },
+        "seed": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2**63 - 1,
+        },
+        "resource_share": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+        },
+    }
+    branches: list[dict[str, Any]] = []
+    for algorithm in ALGORITHMS:
+        branches.append(
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "required": [
+                    "algorithm",
+                    "graph_family",
+                    "seed",
+                    "parameters",
+                    "resource_share",
+                ],
+                "properties": {
+                    "algorithm": {"type": "string", "const": algorithm},
+                    **common,
+                    "parameters": _lane_parameter_schema(
+                        algorithm,
+                        proposal_ranking_catalog_id=(
+                            proposal_ranking_catalog_id
+                            if algorithm in PROPOSAL_RANKING_MUTATION_ALGORITHMS
+                            else None
+                        ),
+                    ),
+                },
+            }
+        )
+    return {"anyOf": branches}
+
+
 def director_decision_schema(
     allowed_action_space: dict[str, Any] | None = None,
     *,
@@ -406,30 +523,13 @@ def director_decision_schema(
         "lease_seconds",
         "fallback",
     ]
-    required_parameter_names = {"order", "batch_candidates", "witness_cap"}
-    parameter_properties = {
-        name: (
-            dict(domain)
-            if name in required_parameter_names
-            else {**domain, "type": [domain["type"], "null"]}
-        )
-        for name, domain in PARAMETER_DOMAINS.items()
-    }
-    parameter_properties[MUTATION_WEIGHTS_PARAMETER] = {
-        "type": ["object", "null"],
-        "additionalProperties": False,
-        "required": list(MUTATION_OPERATORS),
-        "properties": {
-            name: {"type": "number", "minimum": 0}
-            for name in MUTATION_OPERATORS
-        },
-    }
-    parameter_schema = {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": parameter_properties,
-        "required": list(parameter_properties),
-    }
+    proposal_ranking_catalog_id: str | None = None
+    if isinstance(allowed_action_space, dict):
+        proposal_contract = allowed_action_space.get("proposal_ranking")
+        if isinstance(proposal_contract, dict):
+            value = proposal_contract.get("catalog_id")
+            if isinstance(value, str) and value:
+                proposal_ranking_catalog_id = value
 
     def variant(
         action_type: str,
@@ -458,59 +558,31 @@ def director_decision_schema(
         "lane_id": lane_id_schema,
         "expected_lane_version": {"type": "integer", "minimum": 0},
     }
-    patch_parameter_schema = {
-        **parameter_schema,
-        "properties": {
-            name: {**domain, "type": [domain["type"], "null"]}
-            for name, domain in PARAMETER_DOMAINS.items()
-            if name != "order"
+    patch_parameter_properties: dict[str, Any] = {}
+    for name, domain in PARAMETER_DOMAINS.items():
+        if name in {"order", "proposal_ranking"}:
+            continue
+        if name == MUTATION_WEIGHTS_PARAMETER:
+            patch_parameter_properties[name] = _mutation_weights_schema()
+            continue
+        patch_parameter_properties[name] = {
+            **domain,
+            "type": [domain["type"], "null"],
         }
-        | {
-            MUTATION_WEIGHTS_PARAMETER: parameter_properties[
-                MUTATION_WEIGHTS_PARAMETER
-            ]
-        },
-        "required": [
-            name for name in parameter_properties if name != "order"
-        ],
+    patch_parameter_schema = {
+        "additionalProperties": False,
+        "type": "object",
+        "properties": patch_parameter_properties,
+        "required": list(patch_parameter_properties),
     }
     action_variants = [
         variant(
             "start_lane",
             ["spec"],
             {
-                "spec": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": [
-                        "algorithm",
-                        "graph_family",
-                        "seed",
-                        "parameters",
-                        "resource_share",
-                    ],
-                    "properties": {
-                        "algorithm": {
-                            "type": "string",
-                            "enum": list(ALGORITHMS),
-                        },
-                        "graph_family": {
-                            "type": "string",
-                            "enum": list(GRAPH_FAMILIES),
-                        },
-                        "seed": {
-                            "type": "integer",
-                            "minimum": 0,
-                            "maximum": 2**63 - 1,
-                        },
-                        "parameters": parameter_schema,
-                        "resource_share": {
-                            "type": "number",
-                            "minimum": 0,
-                            "maximum": 1,
-                        },
-                    },
-                }
+                "spec": _start_lane_spec_schema(
+                    proposal_ranking_catalog_id=proposal_ranking_catalog_id
+                )
             },
         ),
         variant(

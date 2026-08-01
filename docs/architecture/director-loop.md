@@ -84,6 +84,13 @@ multiply the registry across action variants. An empty submitted registry
 forces all evidence-reference arrays to remain empty. Semantic membership
 validation remains authoritative defense in depth.
 
+The generated `start_lane.spec` contract is algorithm-discriminated. Each
+algorithm receives only its legal parameter keys; `random_restart` has no
+`proposal_ranking` key, while an explicitly ranked mutation campaign requires
+the reviewed catalog ID on every new mutation-lane branch. The host still
+performs the same semantic checks after inference, so an invalid model result
+is rejected rather than silently rewritten.
+
 ## Validation layers
 
 1. JSON/schema validation.
