@@ -14,6 +14,21 @@ the immutable plan enables it, and `random_restart` has no ranking field or
 unrelated nullable parameters. Semantic validation remains authoritative and
 still rejects any malformed response without dispatching work.
 
+## Issue #19 — zero-lane Director bootstrap
+
+Fresh ranked snapshots now recompute a constructive action space before every
+Director request. With capacity and no active lanes, `start_lane` is explicit;
+candidate-dependent and lane-targeting actions remain absent. The prompt,
+algorithm-discriminated strict Structured Outputs schema, transport-null
+normalization, and semantic validator share that projection, including the
+exact reviewed ranking ID for mutation starts and the unranked random-restart
+rule. Invalid initial and repair turns persist bounded validation paths and
+messages in schema v19 and expose them through status. A deterministic
+provider regression starts a ranked lane and records positive evaluations
+without a paid model turn. The existing experiment identity and workspace
+remain unchanged; no scoring, verifier authority, or ranking policy bytes were
+changed.
+
 ## Issue #17 — operator activation path
 
 The integrated ranker now has an explicit operator boundary. `research-campaign

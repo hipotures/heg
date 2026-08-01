@@ -111,9 +111,15 @@ faults stop fail-closed.
 Scientific/model-output validation faults:
 
 - preserve invalid response;
+- persist the bounded validation paths and messages for the initial and repair
+  turns;
 - execute nothing;
 - optionally perform one bounded fresh replan;
 - stop cleanly after a second invalid result.
+
+The status projection exposes those diagnostics alongside each Director turn,
+so an operator can distinguish an empty/stale action-space contract from a
+malformed action without editing the campaign database or artifacts.
 
 ## Resume
 

@@ -188,7 +188,7 @@ class ProposalRankingTests(unittest.TestCase):
         self.assertEqual(benchmark.failures, 0)
         self.assertEqual(benchmark.orphan_count, 0)
 
-    def test_online_backup_migration_to_schema_18(self) -> None:
+    def test_online_backup_migration_to_current_schema(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             source_path = Path(directory) / "source.sqlite3"
             target_path = Path(directory) / "snapshot.sqlite3"
@@ -203,8 +203,11 @@ class ProposalRankingTests(unittest.TestCase):
             source.backup(target)
             target.commit()
             migrate(target)
-            self.assertEqual(SCHEMA_VERSION, 18)
-            self.assertEqual(target.execute("PRAGMA user_version").fetchone()[0], 18)
+            self.assertEqual(SCHEMA_VERSION, 19)
+            self.assertEqual(
+                target.execute("PRAGMA user_version").fetchone()[0],
+                SCHEMA_VERSION,
+            )
             self.assertEqual(target.execute("PRAGMA integrity_check").fetchone()[0], "ok")
             self.assertEqual(target.execute("PRAGMA foreign_key_check").fetchall(), [])
             self.assertIsNotNone(

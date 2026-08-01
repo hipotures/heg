@@ -1167,10 +1167,33 @@ class ResearchStore:
         wall_seconds: float | None = None,
         error_kind: str | None = None,
         error_detail: str | None = None,
+        validation_issues: list[object] | None = None,
         lifecycle_status: str | None = None,
         terminal_reason: str | None = None,
     ) -> None:
         normalized = usage or {}
+        bounded_validation_issues = None
+        validation_issue_count = None
+        if validation_issues is not None:
+            normalized_issues = []
+            for item in validation_issues[:64]:
+                if isinstance(item, dict):
+                    path = item.get("path", "")
+                    message = item.get("message", "")
+                else:
+                    path = getattr(item, "path", "")
+                    message = getattr(item, "message", "")
+                normalized_issues.append(
+                    {
+                        "path": str(path)[:512],
+                        "message": str(message)[:2000],
+                    }
+                )
+            bounded_validation_issues = json.dumps(
+                normalized_issues,
+                sort_keys=True,
+            )
+            validation_issue_count = len(json.loads(bounded_validation_issues))
         with self.transaction() as database:
             row = database.execute(
                 "SELECT * FROM app_server_turns WHERE turn_record_id=?",
@@ -1244,6 +1267,12 @@ class ResearchStore:
                     wall_seconds=COALESCE(?, wall_seconds),
                     error_kind=COALESCE(?, error_kind),
                     error_detail=COALESCE(?, error_detail),
+                    validation_issues_json=COALESCE(
+                        ?, validation_issues_json
+                    ),
+                    validation_issue_count=COALESCE(
+                        ?, validation_issue_count
+                    ),
                     terminal_reason=?,
                     final_agent_item_id=COALESCE(
                         ?, final_agent_item_id
@@ -1270,6 +1299,8 @@ class ResearchStore:
                     wall_seconds,
                     error_kind,
                     error_detail,
+                    bounded_validation_issues,
+                    validation_issue_count,
                     resolved_reason,
                     final_agent_item_id,
                     utc_now(),

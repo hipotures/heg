@@ -6,6 +6,8 @@ This is the authoritative engineering-invariant matrix.
 |---|---|---|---|
 | Decision committed before dispatch | Director/store/action dispatcher | decision-before-search and campaign tests | action is not delivered |
 | Invalid decision never executes | schema/semantic validator | invalid/replan/passive-fault tests | persist; LLM permits one repair, invalid passive output faults immediately |
+| Zero-lane bootstrap is constructive | snapshot action-space projection, Director prompt/schema | issue-19 zero-lane bootstrap regression | expose `start_lane` when capacity exists; omit candidate/lane-target actions |
+| Validation diagnostics remain durable | app-server turn store/status projection | issue-19 repair persistence regression | retain bounded `{path,message}` issues for both invalid turns |
 | M4 alone certifies success | verification broker/terminal event | two-verifier gates | unknown/reject; no success |
 | Accepted candidate target is pinned | candidate store/action transaction | pin/pruning tests | reject action transaction |
 | M4 consumes immutable snapshot | verification job input | candidate snapshot tests | no mutable-row lookup |

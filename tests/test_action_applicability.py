@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import copy
 import hashlib
 import json
 import tempfile
@@ -14,6 +15,7 @@ from sglab.research.context_screen import (
     build_context_screen_prompt,
     decision_context_for_snapshot,
 )
+from sglab.research.director import build_director_prompt
 from sglab.research.protocol import (
     director_decision_schema,
 )
@@ -129,6 +131,9 @@ def director_context(source: dict) -> DecisionContext:
         applicable_action_types=frozenset(
             prepared.state["allowed_action_space"]["actions"]
         ),
+        proposal_ranking_catalog_id=(
+            source.get("campaign", {}).get("proposal_ranking")
+        ),
     )
 
 
@@ -219,6 +224,82 @@ def schema_actions(schema: dict) -> set[str]:
 
 
 class ActionApplicabilityTests(unittest.TestCase):
+    def test_zero_lane_ranked_bootstrap_is_constructive_end_to_end(self) -> None:
+        source = snapshot(active=False)
+        source["lanes"] = []
+        source["campaign"]["proposal_ranking"] = (
+            "mutation_forge_stage4r_v1"
+        )
+        prepared = prepare_director_state_v2(source)
+        action_space = prepared.state["allowed_action_space"]
+        self.assertEqual(
+            action_space["actions"], ["start_lane", "set_review_trigger"]
+        )
+        self.assertEqual(action_space["active_lane_count"], 0)
+        self.assertEqual(action_space["candidate_target_ids"], [])
+        self.assertNotIn("promote_candidate", action_space["actions"])
+        self.assertNotIn("schedule_verification", action_space["actions"])
+        self.assertNotIn("request_diagnostic", action_space["actions"])
+
+        prompt = json.loads(build_context_screen_prompt(source))
+        self.assertEqual(
+            prompt["applicable_action_description"]["actions"],
+            action_space["actions"],
+        )
+        director_prompt = json.loads(build_director_prompt(source))
+        self.assertEqual(
+            director_prompt["applicable_action_description"]["actions"],
+            action_space["actions"],
+        )
+        schema = director_decision_schema(action_space)
+        self.assertEqual(schema_actions(schema), set(action_space["actions"]))
+        start = {
+            **common_action("start_lane"),
+            "spec": {
+                "algorithm": "simulated_annealing",
+                "graph_family": "connected_cubic",
+                "seed": 17,
+                "parameters": {
+                    "order": 8,
+                    "batch_candidates": 100,
+                    "witness_cap": 4,
+                    "proposal_ranking": "mutation_forge_stage4r_v1",
+                },
+                "resource_share": 1.0,
+            },
+        }
+        decision = decision_with_action(start, snapshot_id=source["snapshot_id"])
+        result = validate_decision(decision, director_context(source))
+        self.assertTrue(result.accepted, result.issues)
+        ranked = next(
+            branch
+            for branch in next(
+                value
+                for value in schema["properties"]["actions"]["items"]["anyOf"]
+                if value["properties"]["type"]["const"] == "start_lane"
+            )["properties"]["spec"]["anyOf"]
+            if branch["properties"]["algorithm"]["const"]
+            == "simulated_annealing"
+        )
+        parameters = ranked["properties"]["parameters"]
+        self.assertIn("proposal_ranking", parameters["required"])
+        self.assertEqual(
+            set(parameters["required"]), set(parameters["properties"])
+        )
+        # Strict Structured Outputs represents semantic optional controls as
+        # nullable required placeholders.  Transport-null normalization then
+        # produces the minimal decision accepted above.
+        schema_compatible = copy.deepcopy(start)
+        for name in parameters["required"]:
+            schema_compatible["spec"]["parameters"].setdefault(name, None)
+        normalized_result = validate_decision(
+            decision_with_action(
+                schema_compatible, snapshot_id=source["snapshot_id"]
+            ),
+            director_context(source),
+        )
+        self.assertTrue(normalized_result.accepted, normalized_result.issues)
+
     def test_active_lane_versions_are_visible_and_strictly_validated(self) -> None:
         source = lane_capacity_snapshot(active_count=2)
         prepared = prepare_director_state_v2(source)

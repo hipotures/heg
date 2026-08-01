@@ -53,6 +53,14 @@ The action space carries compact target-ID lists. Evidence, advisory, and
 executable registries derive their roles from those lists; the prompt does not
 repeat a verbose object for every reference.
 
+For a fresh campaign with no active lanes and available lane capacity, the
+committed action space is constructive: it includes `start_lane` (and may
+include the lane-independent `set_review_trigger`). Candidate-dependent
+actions and lane-targeting actions are omitted until their exact executable
+targets exist. The prompt renders this action list and its applicability
+reasons directly from `DirectorStateV2`; it never substitutes an action count
+for the list.
+
 The surrounding prompt points to `director_state_v2.allowed_action_space`
 instead of embedding a second copy. It reports the number of durable reserved
 action IDs but does not replay their complete list. Workspace-scoped action-ID
@@ -113,6 +121,12 @@ The repair request uses:
 - exact validation issues;
 - invalid-response SHA-256;
 - no duplicated full invalid response.
+
+Both the initial invalid turn and its one repair turn persist a bounded list of
+`{path, message}` validation issues and a human-readable detail string. The
+same diagnostics are exposed by campaign status, so a terminal
+`Director response remained invalid after repair` fault retains the exact
+host-validator cause rather than only the generic terminal exception.
 
 If complete-request budgeting reduced the first turn below the ordinary
 Director-state limit, the repair reuses that exact prepared state and its

@@ -322,6 +322,10 @@ def _mutation_weights_schema() -> dict[str, Any]:
     return {
         "additionalProperties": False,
         "type": ["object", "null"],
+        # Strict Structured Outputs requires every declared object property
+        # to be present. Nullable transport placeholders are removed by
+        # _normalize_transport_nulls before validate_decision, where the
+        # host enforces the non-empty/positive-weight semantic contract.
         "required": list(MUTATION_OPERATORS),
         "properties": {
             name: {"type": "number", "minimum": 0}
@@ -348,6 +352,11 @@ def _lane_parameter_schema(
 
     allowed = ALGORITHM_PARAMETERS[algorithm]
     properties: dict[str, Any] = {}
+    # Strict Structured Outputs requires every declared property to be
+    # required. Algorithm controls are nullable transport placeholders;
+    # _normalize_transport_nulls removes nulls before _parameters() applies
+    # its semantic optional-field rules. Proposal ranking is required only
+    # for an explicitly ranked mutation branch.
     required = ["order", "batch_candidates", "witness_cap"]
     for name in sorted(allowed):
         if name == "proposal_ranking":
@@ -456,6 +465,23 @@ def director_decision_schema(
         available_lane_slots = max(0, int(available_lane_slots))
         if available_lane_slots == 0:
             applicable_actions.discard("fork_lane")
+    if isinstance(allowed_action_space, dict):
+        active_ids = allowed_action_space.get(
+            "active_executable_lane_ids", []
+        )
+        declared_actions = allowed_action_space.get("actions")
+        # Reconcile a stale/empty projection at the schema boundary.  A
+        # zero-lane campaign with capacity must be able to emit start_lane;
+        # set_review_trigger remains the lane-independent escape hatch for a
+        # genuinely full or otherwise non-constructive state.
+        if (
+            not active_ids
+            and (declared_actions is None or not declared_actions)
+            and (available_lane_slots is None or available_lane_slots > 0)
+        ):
+            applicable_actions.add("start_lane")
+        if not applicable_actions:
+            applicable_actions.add("set_review_trigger")
     fork_variant_max_items = min(
         4,
         available_lane_slots,
@@ -762,6 +788,13 @@ def director_decision_schema(
         for value in action_variants
         if value["properties"]["type"]["const"] in applicable_actions
     ]
+    if not action_variants:
+        # The action-space producer always includes set_review_trigger.  Keep
+        # the generated schema total for legacy/malformed snapshots rather
+        # than returning an impossible `anyOf: []` contract.
+        raise ValueError(
+            "applicable action space produced no schema-supported actions"
+        )
     schema = {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "title": "SglabDirectorDecisionBatchV1",

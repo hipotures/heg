@@ -117,6 +117,21 @@ mutation branch requires the exact reviewed catalog ID. Unsupported fields are
 therefore excluded from the model-facing contract before semantic validation,
 while the validator remains fail-closed defense in depth.
 
+## Zero-lane bootstrap
+
+When the submitted action space has zero active lanes, no candidates, and at
+least one available lane slot, the schema contains `start_lane` and the
+prompt's applicable-action description names it as the constructive bootstrap
+action. Candidate and lane-target branches are absent. A stale empty action
+projection is reconciled at the schema boundary only to this same
+zero-lane/start-capacity contract; it never invents candidate or lane IDs.
+
+Strict Structured Outputs represents semantic optional controls with nullable
+required transport properties. Host-side normalization removes those nulls
+before `validate_decision`, which remains authoritative for positive mutation
+weights, exclusive resource shares, target membership, and the exact
+proposal-ranking catalog ID.
+
 ## Validation
 
 Validation covers:

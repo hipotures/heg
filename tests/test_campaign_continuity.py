@@ -70,7 +70,7 @@ class CampaignContinuityTests(unittest.TestCase):
             snapshot.close()
             source.close()
             migrated = connect(snapshot_path)
-            self.assertEqual(SCHEMA_VERSION, 18)
+            self.assertEqual(SCHEMA_VERSION, 19)
             self.assertEqual(
                 migrated.execute("PRAGMA user_version").fetchone()[0],
                 SCHEMA_VERSION,

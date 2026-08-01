@@ -91,6 +91,7 @@ def build_director_prompt(snapshot: dict[str, Any]) -> str:
     )
     prepared = prepare_director_state_v2(snapshot)
     director_state = prepared.state
+    applicable = director_state["allowed_action_space"]
     hypothesis_ids = evidence_registry_ids(
         prepared.evidence_registry,
         kinds=frozenset({"hypothesis"}),
@@ -109,6 +110,28 @@ def build_director_prompt(snapshot: dict[str, Any]) -> str:
         "acceptance_control": acceptance_control,
         "applicable_action_description": {
             "source": "director_state_v2.allowed_action_space",
+            "actions": list(applicable.get("actions", [])),
+            "why_applicable": dict(
+                applicable.get("action_applicability", {})
+            ),
+            "active_lane_count": int(
+                applicable.get("active_lane_count", 0)
+            ),
+            "available_lane_slots": int(
+                applicable.get("available_lane_slots", 0)
+            ),
+            "candidate_target_ids": list(
+                applicable.get("candidate_target_ids", [])
+            ),
+            "diagnostic_subject_ids": list(
+                applicable.get("diagnostic_subject_ids", [])
+            ),
+            "bootstrap": (
+                "This is the committed zero-lane bootstrap state: start_lane "
+                "is admissible and candidate/lane-target actions are not."
+                if "start_lane" in applicable.get("actions", [])
+                else None
+            ),
             "instruction": (
                 "Use only the listed actions and current executable target "
                 "IDs. Historical IDs are evidence, not execution targets."
@@ -743,6 +766,7 @@ class ActiveDirector:
             validation = validate_decision(
                 result.parsed, validation_context
             )
+            validation_detail = _validation_detail(validation)
             self.store.complete_turn(
                 turn_record_id,
                 turn_id=result.turn_id,
@@ -755,6 +779,13 @@ class ActiveDirector:
                 usage=_usage_payload(result),
                 final_agent_item_id=result.final_agent_item_id,
                 wall_seconds=perf_counter() - started,
+                error_kind=("validation" if not validation.accepted else None),
+                error_detail=validation_detail,
+                validation_issues=(
+                    _validation_issue_payload(validation)
+                    if not validation.accepted
+                    else None
+                ),
                 lifecycle_status="completed",
             )
         except BaseException as error:
@@ -791,10 +822,7 @@ class ActiveDirector:
                 "invalid_response_sha256": hashlib.sha256(
                     response_bytes
                 ).hexdigest(),
-                "validation_errors": [
-                    {"path": issue.path, "message": issue.message}
-                    for issue in validation.issues
-                ],
+                "validation_errors": _validation_issue_payload(validation),
                 "action_identity_contract": _prompt_action_identity_contract(
                     snapshot,
                     snapshot_id,
@@ -835,7 +863,6 @@ class ActiveDirector:
                 result.final_answer_latency_seconds
             ),
         )
-
     async def _prepare_context_boundary(self) -> None:
         if self.session is None or self.session_record_id is None:
             raise RuntimeError("Director session has not been started")
@@ -960,6 +987,26 @@ class ActiveDirector:
                 for row in lanes
             ],
         }
+
+
+def _validation_issue_payload(
+    validation: DecisionValidation,
+) -> list[dict[str, str]]:
+    """Return bounded, structured validation evidence for durable storage."""
+
+    return [
+        {"path": issue.path, "message": issue.message}
+        for issue in validation.issues[:64]
+    ]
+
+
+def _validation_detail(validation: DecisionValidation) -> str | None:
+    if validation.accepted:
+        return None
+    detail = "; ".join(
+        f"{issue.path}: {issue.message}" for issue in validation.issues[:64]
+    )
+    return detail[:4000]
 
 
 def _usage_payload(result: AppServerTurnResult) -> dict[str, Any] | None:

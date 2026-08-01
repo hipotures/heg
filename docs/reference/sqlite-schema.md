@@ -2,7 +2,7 @@
 
 ## Version
 
-The documented baseline uses SQLite schema version **18**.
+The documented baseline uses SQLite schema version **19**.
 
 ```sql
 PRAGMA user_version;
@@ -25,6 +25,7 @@ PRAGMA foreign_key_check;
 - sessions and turns;
 - requests/responses;
 - usage;
+- bounded validation issue paths/messages and issue count;
 - decision batches/actions;
 - validations and hypotheses;
 - evidence/action registries.
@@ -119,6 +120,11 @@ The v17→v18 migration adds the reviewed proposal-ranking identity ledger and a
 campaign/lane lookup index. It is additive, preserves default-lane behavior,
 and is validated from an Online Backup snapshot with `integrity_check` and
 `foreign_key_check`.
+
+The v18→v19 migration adds defaulted `validation_issues_json` and
+`validation_issue_count` columns to `app_server_turns`. Existing turn rows are
+unchanged; new invalid Director and repair turns retain bounded exact paths
+and messages for status inspection.
 
 Seed-generation instrumentation requires no schema migration. Its bounded
 aggregate is stored in existing telemetry JSON and checkpoint artifacts; it

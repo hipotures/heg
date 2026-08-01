@@ -1194,7 +1194,9 @@ class ActiveDirectorTests(unittest.IsolatedAsyncioTestCase):
                 """
                 SELECT status, request_artifact_ref,
                        evidence_registry_artifact_ref,
-                       evidence_registry_sha256
+                       evidence_registry_sha256,
+                       validation_issues_json, validation_issue_count,
+                       error_detail
                 FROM app_server_turns ORDER BY started_at, rowid
                 """
             ).fetchall()
@@ -1202,6 +1204,16 @@ class ActiveDirectorTests(unittest.IsolatedAsyncioTestCase):
                 [row["status"] for row in rows],
                 ["completed_invalid", "completed_valid"],
             )
+            initial_issues = json.loads(rows[0]["validation_issues_json"])
+            self.assertEqual(
+                rows[0]["validation_issue_count"], len(initial_issues)
+            )
+            self.assertTrue(initial_issues)
+            self.assertTrue(
+                all("path" in item and "message" in item for item in initial_issues)
+            )
+            self.assertIn("$.", rows[0]["error_detail"])
+            self.assertEqual(json.loads(rows[1]["validation_issues_json"]), [])
             repair_prompt = json.loads(client.prompts[1])
             self.assertNotIn("invalid_response", repair_prompt)
             self.assertEqual(

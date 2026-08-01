@@ -720,6 +720,15 @@ def campaign_status(workspace: Path, campaign_id: str | None = None) -> dict[str
             )
             else ""
         )
+        validation_turn_fields = (
+            ", t.error_detail, t.validation_issues_json, "
+            "t.validation_issue_count"
+            if {
+                "validation_issues_json",
+                "validation_issue_count",
+            }.issubset(turn_columns)
+            else ", t.error_detail"
+        )
         turns = [
             dict(row)
             for row in connection.execute(
@@ -731,6 +740,7 @@ def campaign_status(workspace: Path, campaign_id: str | None = None) -> dict[str
                        t.completed_at, t.error_kind, t.final_agent_item_id,
                        t.thread_lifecycle, s.model_requested AS model,
                        s.effort_requested AS reasoning_effort
+                       {validation_turn_fields}
                        {attempt_turn_fields}
                 FROM app_server_turns AS t
                 JOIN app_server_sessions AS s
@@ -741,6 +751,20 @@ def campaign_status(workspace: Path, campaign_id: str | None = None) -> dict[str
                 (selected,),
             )
         ]
+        for turn in turns:
+            raw_issues = turn.get("validation_issues_json")
+            if isinstance(raw_issues, str):
+                try:
+                    turn["validation_issues"] = json.loads(raw_issues)
+                except json.JSONDecodeError:
+                    turn["validation_issues"] = []
+                turn.pop("validation_issues_json", None)
+            else:
+                turn["validation_issues"] = []
+            turn["validation_issue_count"] = int(
+                turn.get("validation_issue_count")
+                or len(turn["validation_issues"])
+            )
         actions = [
             {
                 **dict(row),

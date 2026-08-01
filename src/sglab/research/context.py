@@ -747,6 +747,11 @@ def _applicable_action_space(
     maximum_lanes = int(
         (snapshot.get("resources") or {}).get("max_active_lanes", 1)
     )
+    # A prepared campaign always has a positive lane capacity.  Keep the
+    # projection fail-closed for malformed historical snapshots, but never
+    # let a stale/empty action list erase the zero-lane bootstrap contract.
+    if maximum_lanes < 0:
+        maximum_lanes = 0
     active_lane_count = len(active_lanes)
     available_lane_slots = max(0, maximum_lanes - active_lane_count)
     active_lane_versions = {
@@ -869,6 +874,16 @@ def _applicable_action_space(
         "review scheduling is lane-independent",
     )
 
+    # This assertion is deliberately local to the projection: a fresh
+    # campaign with no lanes must always expose a constructive action.  It
+    # protects against regressions in memory carry-forward code that might
+    # otherwise publish an apparently valid but unexecutable empty space.
+    if not active_lanes and maximum_lanes > 0 and "start_lane" not in actions:
+        actions.insert(0, "start_lane")
+        explanations["start_lane"] = (
+            "zero-lane bootstrap has capacity for the first reviewed search lane"
+        )
+
     active_by_id = {str(value["lane_id"]): value for value in active_lanes}
     result = {
         "catalog_version": catalog["catalog_version"],
@@ -879,6 +894,12 @@ def _applicable_action_space(
         "active_lane_count": active_lane_count,
         "max_active_lanes": maximum_lanes,
         "available_lane_slots": available_lane_slots,
+        "bootstrap": {
+            "zero_lane": not active_lanes,
+            "start_lane_required": (
+                not active_lanes and maximum_lanes > 0
+            ),
+        },
         "historical_lane_ids": sorted(
             str(value["lane_id"])
             for value in lanes

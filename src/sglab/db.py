@@ -5,7 +5,7 @@ from typing import Any, Iterable
 import json
 import sqlite3
 
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 MAX_METRIC_ROWS = 100_000
 
 BASE_SCHEMA_SQL = """
@@ -394,6 +394,11 @@ APP_SERVER_TURN_LIFECYCLE_COLUMNS = {
     "terminal_reason": "TEXT",
     "evidence_registry_artifact_ref": "TEXT",
     "evidence_registry_sha256": "TEXT",
+}
+
+DIRECTOR_VALIDATION_COLUMNS = {
+    "validation_issues_json": "TEXT NOT NULL DEFAULT '[]'",
+    "validation_issue_count": "INTEGER NOT NULL DEFAULT 0",
 }
 
 APP_SERVER_TURN_LIFECYCLE_SCHEMA_SQL = """
@@ -1134,6 +1139,7 @@ def migrate(connection: sqlite3.Connection) -> None:
     _ensure_candidate_provenance_schema(connection)
     _ensure_passive_scheduler_schema(connection)
     _ensure_proposal_ranking_schema(connection)
+    _ensure_director_validation_columns(connection)
 
 
 def _ensure_proposal_ranking_schema(connection: sqlite3.Connection) -> None:
@@ -1318,6 +1324,33 @@ def _ensure_app_server_turn_lifecycle_columns(
             )
     if int(connection.execute("PRAGMA user_version").fetchone()[0]) < 9:
         connection.execute("PRAGMA user_version=9")
+    connection.commit()
+
+
+def _ensure_director_validation_columns(
+    connection: sqlite3.Connection,
+) -> None:
+    """Add bounded Director validation diagnostics to historical turn rows."""
+
+    exists = connection.execute(
+        """
+        SELECT 1 FROM sqlite_master
+        WHERE type='table' AND name='app_server_turns'
+        """
+    ).fetchone()
+    if exists is None:
+        return
+    present = {
+        str(row[1])
+        for row in connection.execute("PRAGMA table_info(app_server_turns)")
+    }
+    for name, definition in DIRECTOR_VALIDATION_COLUMNS.items():
+        if name not in present:
+            connection.execute(
+                f"ALTER TABLE app_server_turns ADD COLUMN {name} {definition}"
+            )
+    if int(connection.execute("PRAGMA user_version").fetchone()[0]) < 19:
+        connection.execute("PRAGMA user_version=19")
     connection.commit()
 
 

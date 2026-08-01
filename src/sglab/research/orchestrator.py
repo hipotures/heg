@@ -291,7 +291,7 @@ class ActiveResearchOrchestrator:
             if evidence.source_kind == "passive_scheduler":
                 detail = "; ".join(
                     f"{issue.path}: {issue.message}"
-                    for issue in evidence.validation.issues
+                    for issue in evidence.validation.issues[:64]
                 )
                 if (
                     evidence.source_record_id is None
@@ -311,7 +311,14 @@ class ActiveResearchOrchestrator:
                 raise PassiveSchedulerFault(
                     f"passive scheduler generated an invalid action: {detail}"
                 )
-            raise RuntimeError("Director response remained invalid after repair")
+            detail = "; ".join(
+                f"{issue.path}: {issue.message}"
+                for issue in evidence.validation.issues[:64]
+            )
+            raise RuntimeError(
+                "Director response remained invalid after repair"
+                + (f": {detail[:3800]}" if detail else "")
+            )
         passive = evidence.source_kind == "passive_scheduler"
         statuses = self.store.commit_decision_batch(
             decision_batch_id=new_id("decision-batch"),
