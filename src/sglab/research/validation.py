@@ -634,6 +634,13 @@ def _parameters(
     domains = PATCHABLE_PARAMETERS if partial else ALGORITHM_PARAMETERS
     allowed = domains.get(algorithm, set(PARAMETER_DOMAINS))
     for name in value:
+        if name == "proposal_ranking" and algorithm == "random_restart":
+            issues.add(
+                f"{path}.{name}",
+                "random_restart lanes must omit proposal_ranking entirely; "
+                "ranking is supported only by reviewed mutation lanes",
+            )
+            continue
         if name not in allowed:
             issues.add(f"{path}.{name}", "is not valid for this algorithm")
             continue

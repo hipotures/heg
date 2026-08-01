@@ -127,6 +127,13 @@ It:
 - records repair acknowledgement;
 - never silently changes the scientific contract.
 
+The high-level `sglab experiment run` shortcut treats selecting the same
+experiment ID after a `paused_fault` as the operator's recovery request only
+when the current repository commit differs from the failed attempt. It passes
+an explicit recorded acknowledgement to the lower-level Resume boundary. If
+the fault was produced by the current code, the shortcut refuses to retry;
+the operator must repair the code first or use the explicit Resume workflow.
+
 Checkpoint references remain immutable history even when their artifact is no
 longer available. Before and during recovery, only integrity-checked
 checkpoints loaded into the current lane manager are exposed as executable

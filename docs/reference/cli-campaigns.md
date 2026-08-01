@@ -52,6 +52,13 @@ remain durable provenance rather than operator inputs. Proposal ranking stays
 disabled unless the reviewed ID is explicitly present in the optional
 `[search] proposal_ranking` field.
 
+If the latest attempt is `paused_fault`, the shortcut records a recovery
+acknowledgement only after the repository commit has advanced beyond the
+failed attempt. Repeating the command under the same failed code is refused;
+this prevents blind retry loops. The lower-level `research-campaign resume`
+workflow remains available when an operator has a separate repair
+acknowledgement.
+
 ## Prepare
 
 ```bash

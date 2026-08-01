@@ -893,6 +893,7 @@ def _launch_experiment_campaign(
     plan_fingerprint: str | None,
     time_limit: str,
     resume: bool,
+    repair_acknowledgement: str | None = None,
 ) -> int:
     if resume:
         command = [
@@ -908,6 +909,10 @@ def _launch_experiment_campaign(
             "--additional-time",
             time_limit,
         ]
+        if repair_acknowledgement:
+            command.extend(
+                ["--repair-acknowledgement", repair_acknowledgement]
+            )
     else:
         if not plan_fingerprint:
             raise ValueError("prepared experiment is missing its fingerprint")
@@ -959,6 +964,29 @@ def _experiment_summary(
         "proposal_ranking_enabled": proposal_ranking is not None,
         "dashboard": "serve this workspace with sglab serve",
     }
+
+
+def _automatic_fault_repair_acknowledgement(
+    status: dict[str, object],
+) -> str | None:
+    """Authorize high-level retry only after the runtime code has advanced."""
+
+    if status.get("state") != "paused_fault":
+        return None
+    attempts = status.get("execution_attempts")
+    latest = attempts[0] if isinstance(attempts, list) and attempts else None
+    if isinstance(latest, dict):
+        latest_code = str(latest.get("code_commit") or "")
+        current_code = repository_commit(Path(__file__).resolve().parents[2])
+        if latest_code and latest_code == current_code:
+            raise ExperimentConfigError(
+                "the latest experiment attempt failed under the current code; "
+                "apply a repair before retrying the same experiment ID"
+            )
+    return (
+        "sglab experiment run acknowledged recovery after the persisted "
+        "fault; the current reviewed code differs from the failed attempt"
+    )
 
 
 def cmd_experiment(args: Namespace) -> int:
@@ -1138,12 +1166,16 @@ def cmd_experiment(args: Namespace) -> int:
             )
             next_state = "starting"
         elif resumable:
+            repair_acknowledgement = _automatic_fault_repair_acknowledgement(
+                status
+            )
             pid = _launch_experiment_campaign(
                 workspace,
                 campaign_id=campaign_id,
                 plan_fingerprint=None,
                 time_limit=config.time_limit,
                 resume=True,
+                repair_acknowledgement=repair_acknowledgement,
             )
             _write_experiment_state(
                 workspace,

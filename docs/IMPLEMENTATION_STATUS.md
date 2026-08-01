@@ -2,6 +2,12 @@
 
 Last implementation audit: **2026-08-01**.
 
+The operator shortcut now handles a repaired `paused_fault` safely: it passes
+an explicit recovery acknowledgement only when the repository commit differs
+from the failed attempt and refuses repeated blind retries under unchanged
+code. Director ranking guidance also states that `random_restart` must omit
+`proposal_ranking` entirely, while validation remains fail-closed.
+
 ## Issue #17 — operator activation path
 
 The integrated ranker now has an explicit operator boundary. `research-campaign
