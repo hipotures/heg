@@ -230,9 +230,20 @@ def _bounded_integer(value: Any, field: str, minimum: int, maximum: int) -> int:
 
 
 class ComparisonStore:
-    def __init__(self, path: Path, *, catalog: ModelCatalog | None = None):
+    def __init__(
+        self,
+        path: Path,
+        *,
+        catalog: ModelCatalog | None = None,
+        read_only: bool = False,
+    ):
         self.path = path.resolve()
-        self.connection = connect(self.path)
+        if read_only:
+            uri = f"{self.path.as_uri()}?mode=ro"
+            self.connection = sqlite3.connect(uri, uri=True, timeout=2)
+            self.connection.row_factory = sqlite3.Row
+        else:
+            self.connection = connect(self.path)
         self.catalog = catalog or ModelCatalog.load()
 
     def close(self) -> None:

@@ -781,7 +781,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/comparisons/new":
             with ComparisonStore(
-                self.server.workspace / "results.sqlite3"
+                self.server.workspace / "results.sqlite3",
+                read_only=True,
             ) as store:
                 fixtures = [
                     dict(row)
@@ -797,7 +798,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if comparison_match:
             suite_id = comparison_match.group(1)
             with ComparisonStore(
-                self.server.workspace / "results.sqlite3"
+                self.server.workspace / "results.sqlite3",
+                read_only=True,
             ) as store:
                 try:
                     store.suite_detail(suite_id)
@@ -830,14 +832,16 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 and values[0]
             }
             with ComparisonStore(
-                self.server.workspace / "results.sqlite3"
+                self.server.workspace / "results.sqlite3",
+                read_only=True,
             ) as store:
                 suites = store.list_suites(filters)
             self._json(200, {"suites": suites})
             return
         if parsed.path == "/api/comparisons-summary":
             with ComparisonStore(
-                self.server.workspace / "results.sqlite3"
+                self.server.workspace / "results.sqlite3",
+                read_only=True,
             ) as store:
                 suites = store.list_suites()
             self._json(
@@ -857,7 +861,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
             suite_id, view = progress_match.groups()
             recover_stale_workers(self.server.workspace / "results.sqlite3")
             with ComparisonStore(
-                self.server.workspace / "results.sqlite3"
+                self.server.workspace / "results.sqlite3",
+                read_only=True,
             ) as store:
                 try:
                     detail = store.suite_detail(suite_id)
@@ -883,7 +888,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
         )
         if api_match:
             with ComparisonStore(
-                self.server.workspace / "results.sqlite3"
+                self.server.workspace / "results.sqlite3",
+                read_only=True,
             ) as store:
                 try:
                     detail = store.suite_detail(
@@ -905,7 +911,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/model-cost-profiles":
             with ComparisonStore(
-                self.server.workspace / "results.sqlite3"
+                self.server.workspace / "results.sqlite3",
+                read_only=True,
             ) as store:
                 profiles = [
                     dict(row)
