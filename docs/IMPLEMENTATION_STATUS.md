@@ -29,6 +29,29 @@ without a paid model turn. The existing experiment identity and workspace
 remain unchanged; no scoring, verifier authority, or ranking policy bytes were
 changed.
 
+## Issue #20 — AI candidate archive and Director turn capsules
+
+The exact Mutation Forge Stage 4R recovery archive is now imported under
+`artifacts/proposal-ranking/mutation_forge_stage4r_v1/`. Its 288 original
+files (10,574,800 bytes), including valid, invalid, repaired, and failed
+slots, raw protocol records, readable requests/responses, recovery lineage,
+and selection reports, are byte-preserved and listed in
+`import-manifest.json`. The manifest verifier detects missing, changed,
+duplicate, or extra paths; the champion proof records the exact
+source/AST/behavior identities and byte identity with HEG's frozen policy
+source. The import was scanned for credential payloads without altering the
+read-only Mutation Forge repository.
+
+Every retained HEG App Server turn is projected into an idempotent bounded
+capsule under `workspace/<experiment-id>/artifacts/director-turns/`, with
+readable request/response views, exact validation issues, usage, provenance,
+events, and raw references. `artifacts/README.md` indexes the imported
+archive and turn capsules, including the latest turn. `sglab experiment run`
+and experiment-aware status migrate the existing `heg-ranked-001` workspace
+without model calls; projection failures cannot change SQLite or turn
+dispatch. The ranking policy remains opt-in/default-disabled and no graph,
+scorer, verifier, or experiment-identity semantics changed.
+
 ## Issue #17 — operator activation path
 
 The integrated ranker now has an explicit operator boundary. `research-campaign

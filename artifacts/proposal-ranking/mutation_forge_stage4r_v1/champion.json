@@ -1,0 +1,24 @@
+{
+  "behavior_sha256": "8c2bdaa213f11b253d3ffcae1653bd01536879bb5c254a1586ded9ae522a868e",
+  "catalog_id": "mutation_forge_stage4r_v1",
+  "champion_source_mirror": "champion/source.py",
+  "generation": 5,
+  "heg_policy_path": "src/sglab/research/assets/mutation_policy_stage4r_v1.py",
+  "normalized_ast_sha256": "2243214df58c805e9a9343dc31ed082279e1c2ac31b21243bf889dbc9a19e165",
+  "program_id": "program-d5ad1c8203e0d9f25f03aabd",
+  "schema_version": "heg.mutation_forge.champion.v1",
+  "slot_id": "slot-00",
+  "source_byte_identical_to_heg_frozen_policy": true,
+  "source_byte_identical_to_import": true,
+  "source_byte_identity_check": {
+    "heg_path": "src/sglab/research/assets/mutation_policy_stage4r_v1.py",
+    "imported_path": "recovery/sources/program-d5ad1c8203e0d9f25f03aabd.py",
+    "sha256": "e444562c1b308e3b23cb732be5f769ea1923ac1809501cea8571318c4aff0a7b"
+  },
+  "source_path": "recovery/sources/program-d5ad1c8203e0d9f25f03aabd.py",
+  "source_repo_commit": "7259d92ca668b5f2d46ac96e23336f0583e44469",
+  "source_run_id": "stage4r-issue-11-recovery-v1",
+  "source_run_path": "/home/user/DEV/mutation-forge-lab/runs/stage4r-search/issue-11",
+  "source_sha256": "e444562c1b308e3b23cb732be5f769ea1923ac1809501cea8571318c4aff0a7b",
+  "validation_repo_commit": "08f27cde08ff496d1a8839c28488e0a1a1721731"
+}

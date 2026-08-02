@@ -63,6 +63,7 @@ from .research.context_screen import (
     run_authenticated_context_screen,
 )
 from .research.export import export_campaign
+from .research.artifacts import artifact_paths, migrate_workspace_artifacts
 from .research.continuity import repository_commit
 from .research.resume import build_resume_preview, campaign_plan
 from .research.experiment import (
@@ -908,6 +909,7 @@ def _status_for_experiment_config(
         raise ExperimentConfigError(
             f"experiment '{config.experiment_id}' has no bound experiment state"
         )
+    migrate_workspace_artifacts(workspace, campaign_id=str(state["campaign_id"]))
     marker = read_json(workspace / "workspace.json", default={})
     if (
         marker.get("workspace_kind")
@@ -1041,6 +1043,7 @@ def _experiment_summary(
         "proposal_ranking": proposal_ranking,
         "proposal_ranking_enabled": proposal_ranking is not None,
         "dashboard": "serve this workspace with sglab serve",
+        **artifact_paths(config.workspace),
     }
 
 
@@ -1078,6 +1081,7 @@ def cmd_experiment(args: Namespace) -> int:
                 "the first real graph experiment contract is fixed at one hour"
             )
         workspace = _ensure_first_real_graph_workspace(config.workspace)
+        migrate_workspace_artifacts(workspace)
         state = _read_experiment_state(workspace)
         if state and state.get("experiment_id") != config.experiment_id:
             raise ExperimentConfigError(
@@ -1296,11 +1300,16 @@ def cmd_research_campaign(args: Namespace) -> int:
                     args.config,
                     args.campaign_id,
                 )
+                status_workspace = Path(str(report["workspace"]))
             else:
+                workspace = _workspace(args.workspace)
+                migrate_workspace_artifacts(workspace, campaign_id=args.campaign_id)
                 report = campaign_status(
-                    _workspace(args.workspace),
+                    workspace,
                     args.campaign_id,
                 )
+                status_workspace = workspace
+            report.update(artifact_paths(status_workspace))
         except (ExperimentConfigError, ValueError) as error:
             raise SystemExit(str(error)) from error
         print(json.dumps(report, indent=2, sort_keys=True))
@@ -1312,6 +1321,7 @@ def cmd_research_campaign(args: Namespace) -> int:
         # campaign planner itself still enforces the marker for library and
         # recovery callers.
         _ensure_first_real_graph_workspace(workspace)
+        migrate_workspace_artifacts(workspace)
         duration = parse_duration(args.time_limit)
         report = prepare_campaign_plan(
             workspace,

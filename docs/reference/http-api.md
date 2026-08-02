@@ -50,6 +50,10 @@ The research-campaign response supplies Director turns in descending
 `started_at` order. Timestamps remain persisted and transported as UTC; the
 dashboard alone formats each turn's start time in the browser's local
 timezone with European day-month-year order and a 24-hour clock.
+It also exposes `artifact_index` and `latest_turn_capsule` as workspace-relative
+paths. These point to the readable capsule index and latest Director-turn
+directory; raw request/response/wire records remain available below each
+capsule.
 Section navigation is entirely client-side. One-word anchors target every
 main dashboard section, and conditional anchors are hidden together with
 their target sections; no API contract is involved.

@@ -3,8 +3,25 @@
 Exact paths are workspace-versioned, but the logical layout is:
 
 ```text
+repository/artifacts/proposal-ranking/mutation_forge_stage4r_v1/
+├── README.md
+├── import-manifest.json
+├── champion.json
+└── generation-summary.json
+
 workspace/
 ├── results.sqlite3
+├── artifacts/
+│   ├── README.md
+│   └── director-turns/turn-<sequence>/
+│       ├── README.md
+│       ├── request.json / request.md
+│       ├── response.json / response.md
+│       ├── validation.json
+│       ├── usage.json
+│       ├── provenance.json
+│       ├── events.json
+│       └── raw/
 ├── director/
 │   ├── requests/
 │   ├── responses/
@@ -58,6 +75,21 @@ May include:
 - schema;
 - validation report;
 - bounded wire/stderr logs.
+
+The operator-facing projection for every retained App Server turn is a
+`artifacts/director-turns/turn-<sequence>/` capsule.  SQLite rows and the
+original campaign request/response/wire files remain authoritative; the
+capsule copies bounded raw records and adds readable Markdown plus exact
+validation paths/messages.  `artifacts/README.md` indexes capsules
+chronologically and links the latest turn and the imported proposal-ranking
+archive.
+
+The repository-level
+`artifacts/proposal-ranking/mutation_forge_stage4r_v1/` directory is a
+byte-preserving import of the reviewed Mutation Forge AI-program candidate
+archive.  It contains the original valid, invalid, repaired, duplicate, and
+failed slot records and a manifest of every imported path.  It is distinct
+from graph candidate artifacts and does not enable ranking by itself.
 
 ## Verification artifacts
 

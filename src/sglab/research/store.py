@@ -1172,6 +1172,7 @@ class ResearchStore:
         terminal_reason: str | None = None,
     ) -> None:
         normalized = usage or {}
+        completed_campaign_id: str | None = None
         bounded_validation_issues = None
         validation_issue_count = None
         if validation_issues is not None:
@@ -1201,6 +1202,7 @@ class ResearchStore:
             ).fetchone()
             if row is None:
                 raise RuntimeError("turn completion references an unknown row")
+            completed_campaign_id = str(row["campaign_id"])
             if (
                 row["turn_id"] is not None
                 and turn_id is not None
@@ -1307,6 +1309,19 @@ class ResearchStore:
                     turn_record_id,
                 ),
             )
+        # Capsules are a non-authoritative projection.  A projection failure
+        # must never change the durable turn result or turn completion
+        # semantics; the normal run/status migration will retry it.
+        if completed_campaign_id is not None:
+            try:
+                from .artifacts import migrate_workspace_artifacts
+
+                migrate_workspace_artifacts(
+                    self.path.parent,
+                    campaign_id=completed_campaign_id,
+                )
+            except (OSError, ValueError, sqlite3.Error):
+                pass
 
     def commit_decision_batch(
         self,

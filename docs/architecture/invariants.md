@@ -30,6 +30,8 @@ This is the authoritative engineering-invariant matrix.
 | Repair context remains bounded | Director repair builder | context budget tests | fail before inference |
 | No model tools/shell/file execution | App Server contract + output validation | tool-attempt tests | fail closed |
 | Auth content never enters public artifacts | auth/report/manifests | scans and runtime audits | abort/report failure |
+| Artifact projections never replace authority | capsule/index migration | artifact capsule/idempotence tests | SQLite/raw records remain authoritative; unavailable fields are explicit |
+| Imported AI-program archive is byte-preserving | Mutation Forge import manifest/champion proof | archive identity, manifest, and secret scans | missing/changed/extra/unsafe archive path is reported; no silent omission |
 | Byte-quota error requires true inequality | resource accounting | quota tests | separate failure domain |
 | Symlink targets are not followed | `lstat` accounting/policy | wrapper/escape/race tests | policy fail closed |
 | Worker child is reaped by owner | dashboard process registry, lane-manager shutdown | reaper and queue-closure tests | stale process state corrected |

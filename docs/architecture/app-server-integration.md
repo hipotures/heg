@@ -44,6 +44,22 @@ The client persists:
 
 The row exists as soon as an authoritative turn ID is known.
 
+## Readable turn capsules
+
+After a turn is durably recorded, HEG projects a bounded operator capsule at
+`workspace/<experiment-id>/artifacts/director-turns/turn-<sequence>/`.  The
+capsule contains readable request/response Markdown, exact validation issues,
+usage, provenance, event summaries, and copies of the retained request,
+response, wire, and registry artifacts under `raw/`.  The project-level
+`artifacts/README.md` index links the capsules chronologically and points to
+the latest turn.  These files are projections only: SQLite and the original
+campaign artifacts remain authoritative, and a projection failure cannot alter
+turn completion or dispatch semantics.
+
+Startup, `sglab experiment run`, and experiment-aware status retry this
+idempotent projection without model calls.  Missing historical files are
+represented explicitly as unavailable markers rather than fabricated content.
+
 ## Timeout
 
 - persist known correlation;

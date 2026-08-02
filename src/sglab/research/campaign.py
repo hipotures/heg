@@ -592,6 +592,9 @@ def request_campaign_control(workspace: Path, action: str) -> dict[str, Any]:
 
 def campaign_status(workspace: Path, campaign_id: str | None = None) -> dict[str, Any]:
     root = workspace.resolve()
+    from .artifacts import artifact_paths
+
+    public_artifacts = artifact_paths(root)
     pointer = read_json(root / "active-research-campaign.json", default={})
     if not pointer:
         pointer = read_json(root / PREPARED_CAMPAIGN_POINTER, default={})
@@ -613,6 +616,7 @@ def campaign_status(workspace: Path, campaign_id: str | None = None) -> dict[str
             "auth_imported": auth_is_imported(root / ".sglab"),
             "proposal_ranking": None,
             "proposal_ranking_enabled": False,
+            **public_artifacts,
         }
     auth_data = (
         campaign_application_data(root, str(selected))
@@ -632,6 +636,7 @@ def campaign_status(workspace: Path, campaign_id: str | None = None) -> dict[str
                 "state": "NOT_FOUND",
                 "proposal_ranking": None,
                 "proposal_ranking_enabled": False,
+                **public_artifacts,
             }
         campaign_state = str(campaign["state"])
         campaign_columns = set(campaign.keys())
@@ -1116,6 +1121,7 @@ def campaign_status(workspace: Path, campaign_id: str | None = None) -> dict[str
                 "database_bytes": sqlite_size_bytes(database_path),
                 "disk_free_bytes": disk_free_bytes(root),
             },
+            **public_artifacts,
         }
     except sqlite3.OperationalError:
         return {
@@ -1125,6 +1131,7 @@ def campaign_status(workspace: Path, campaign_id: str | None = None) -> dict[str
             "auth_imported": auth_is_imported(auth_data),
             "proposal_ranking": None,
             "proposal_ranking_enabled": False,
+            **public_artifacts,
         }
     finally:
         connection.close()

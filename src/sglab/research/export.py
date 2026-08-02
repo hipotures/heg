@@ -76,6 +76,24 @@ def export_campaign(
             (campaign_id,),
         ).fetchone()
 
+        # Turn capsules live at the experiment workspace level rather than in
+        # the campaign's raw director directory.  Refresh the projection here
+        # (without model access) and include it in the reproducibility export
+        # so readable artifacts are not lost when an operator exports a run.
+        workspace_root = (
+            root.parent.parent
+            if root.parent.name == "research-campaigns"
+            else None
+        )
+        artifact_projection: dict[str, Any] | None = None
+        if workspace_root is not None:
+            from .artifacts import migrate_workspace_artifacts
+
+            artifact_projection = migrate_workspace_artifacts(
+                workspace_root,
+                campaign_id=campaign_id,
+            )
+
         for path in sorted(root.rglob("*")):
             if not path.is_file() or path.is_symlink():
                 continue
@@ -95,6 +113,20 @@ def export_campaign(
             files.append((relative.as_posix(), payload))
             if len(files) > maximum_files:
                 raise RuntimeError("campaign export file-count limit exceeded")
+
+        if workspace_root is not None:
+            workspace_artifacts = workspace_root / "artifacts"
+            for path in sorted(workspace_artifacts.rglob("*")):
+                if not path.is_file() or path.is_symlink():
+                    continue
+                relative = Path("artifacts") / path.relative_to(workspace_artifacts)
+                payload = path.read_bytes()
+                total += len(payload)
+                if total > maximum_input_bytes:
+                    raise RuntimeError("campaign export input byte limit exceeded")
+                files.append((relative.as_posix(), payload))
+                if len(files) > maximum_files:
+                    raise RuntimeError("campaign export file-count limit exceeded")
 
         manifest = {
             "schema_version": "1.0",
@@ -124,6 +156,14 @@ def export_campaign(
                 for name, payload in files
             ],
             "authentication_included": False,
+            "artifact_index": (
+                "artifacts/README.md" if artifact_projection is not None else None
+            ),
+            "latest_turn_capsule": (
+                artifact_projection.get("latest_turn_capsule")
+                if artifact_projection is not None
+                else None
+            ),
         }
         manifest_bytes = (
             json.dumps(
