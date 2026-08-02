@@ -29,9 +29,11 @@ This is the authoritative engineering-invariant matrix.
 | Hypothesis existing operations use submitted IDs | schema/validator | hypothesis contract tests | structural/semantic invalid |
 | Hypothesis evidence uses registry IDs, not prose | schema/prompt/validator | repair-context tests | invalid response |
 | Repair context remains bounded | Director repair builder | context budget tests | fail before inference |
+| Director prompt history is bounded | model projection/section budgets, host alias registries, SnapshotBuilder transport compaction | synthetic history and paused-overflow recovery checks | omit aggregates with counts; fail closed only with a section-level report; never serialize full registries into the model prompt |
 | No model tools/shell/file execution | App Server contract + output validation | tool-attempt tests | fail closed |
 | Auth content never enters public artifacts | auth/report/manifests | scans and runtime audits | abort/report failure |
 | Artifact projections never replace authority | capsule/index migration | artifact capsule/idempotence tests | SQLite/raw records remain authoritative; unavailable fields are explicit |
+| Source and scientific artifacts are append-only | candidate archive, content-addressed transport retention, workspace manifest | source-index and non-destructive migration checks | successful disposable transport may rotate/compress; sources, candidates, verifier certificates, decisions, usage, failures, and raw diagnostics are never pruned |
 | Imported AI-program archive is byte-preserving | Mutation Forge import manifest/champion proof | archive identity, manifest, and secret scans | missing/changed/extra/unsafe archive path is reported; no silent omission |
 | Byte-quota error requires true inequality | resource accounting | quota tests | separate failure domain |
 | Symlink targets are not followed | `lstat` accounting/policy | wrapper/escape/race tests | policy fail closed |

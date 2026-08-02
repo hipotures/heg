@@ -114,18 +114,11 @@ class CandidateArchive:
         )
 
     def _prune(self) -> None:
-        for relative in self.store.prune_campaign_candidates(
-            self.campaign_id, self.maximum_candidates
-        ):
-            path = (self.campaign_dir / relative).resolve()
-            try:
-                path.relative_to(self.artifact_dir)
-            except ValueError:
-                raise RuntimeError("candidate artifact escaped archive") from None
-            try:
-                path.unlink()
-            except FileNotFoundError:
-                pass
+        # Candidate graph/source artifacts are scientific evidence.  They are
+        # intentionally append-only even when the in-memory frontier is
+        # bounded; retention limits may affect which IDs are projected into a
+        # Director prompt, never whether a retained candidate can be replayed.
+        return
 
 
 def _atomic_write(path: Path, payload: bytes) -> None:

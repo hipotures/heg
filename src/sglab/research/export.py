@@ -164,6 +164,21 @@ def export_campaign(
                 if artifact_projection is not None
                 else None
             ),
+            "artifact_manifest": (
+                artifact_projection.get("artifact_manifest")
+                if artifact_projection is not None
+                else None
+            ),
+            "source_index": (
+                "artifacts/source-index.json"
+                if artifact_projection is not None
+                else None
+            ),
+            "artifact_inventory": (
+                artifact_projection.get("artifact_inventory")
+                if artifact_projection is not None
+                else None
+            ),
         }
         manifest_bytes = (
             json.dumps(

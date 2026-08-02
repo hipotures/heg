@@ -8,6 +8,7 @@ from typing import Any
 import hashlib
 import json
 import os
+import gzip
 
 from .app_server_client import (
     AppServerClient,
@@ -274,6 +275,7 @@ class ActiveDirector:
             self.audit_dir / "responses",
             self.audit_dir / "wire",
             self.audit_dir / "evidence-registries",
+            self.audit_dir / "raw-objects",
         ):
             child.mkdir(parents=True, exist_ok=True, mode=0o700)
             child.chmod(0o700)
@@ -647,16 +649,17 @@ class ActiveDirector:
             context_report["client_limit_compaction_failure_recovered"] = (
                 client_compaction_recovered_limit is not None
             )
-        registry_bytes = canonical_json(
-            prepared_state.evidence_registry, max_bytes=4 * 1024 * 1024
+        # These are private host-side registries, not model input.  Keep the
+        # complete index for exact alias/target validation even when a long
+        # campaign history exceeds the prompt transport limit.
+        registry_bytes = _canonical_json_unbounded(
+            prepared_state.evidence_registry
         )
-        advisory_registry_bytes = canonical_json(
-            prepared_state.advisory_target_registry,
-            max_bytes=4 * 1024 * 1024,
+        advisory_registry_bytes = _canonical_json_unbounded(
+            prepared_state.advisory_target_registry
         )
-        executable_registry_bytes = canonical_json(
-            prepared_state.executable_target_registry,
-            max_bytes=4 * 1024 * 1024,
+        executable_registry_bytes = _canonical_json_unbounded(
+            prepared_state.executable_target_registry
         )
         action_space_bytes = canonical_json(
             prepared_state.state["allowed_action_space"],
@@ -743,7 +746,9 @@ class ActiveDirector:
                 {"measurement_only": True, "executed": False}
             )
         request_bytes = canonical_json(request_payload, max_bytes=1024 * 1024)
-        _write_private(self.campaign_dir / request_relative, request_bytes + b"\n")
+        self._write_transport_artifact(
+            self.campaign_dir / request_relative, request_bytes + b"\n"
+        )
         prior_turn_count = int(
             self.store.connection.execute(
                 """
@@ -799,13 +804,15 @@ class ActiveDirector:
             if not isinstance(result.parsed, dict):
                 raise RuntimeError("Director structured result is not an object")
             response_bytes = canonical_json(result.parsed, max_bytes=128 * 1024)
-            _write_private(
+            self._write_transport_artifact(
                 self.campaign_dir / response_relative,
                 response_bytes + b"\n",
             )
             take_wire = getattr(self.client, "take_wire_bytes", None)
             wire = take_wire() if callable(take_wire) else self.client.wire_bytes
-            _write_private(self.campaign_dir / wire_relative, wire)
+            self._write_transport_artifact(
+                self.campaign_dir / wire_relative, wire
+            )
             self._prune_wire_artifacts()
             resolved_decision, alias_issues = resolve_decision_aliases(
                 result.parsed,
@@ -842,11 +849,14 @@ class ActiveDirector:
                 ),
                 lifecycle_status="completed",
             )
+            if validation.accepted:
+                self._prune_successful_transport_artifacts()
         except BaseException as error:
             take_wire = getattr(self.client, "take_wire_bytes", None)
             wire = take_wire() if callable(take_wire) else self.client.wire_bytes
-            _write_private(self.campaign_dir / wire_relative, wire)
-            self._prune_wire_artifacts()
+            self._write_transport_artifact(
+                self.campaign_dir / wire_relative, wire
+            )
             self.store.complete_turn(
                 turn_record_id,
                 turn_id=None,
@@ -986,13 +996,157 @@ class ActiveDirector:
                 self.store.close_session(self.session_record_id, state="closed")
 
     def _prune_wire_artifacts(self, maximum: int = 64) -> None:
-        paths = sorted(
-            (self.audit_dir / "wire").glob("*.jsonl"),
-            key=lambda path: path.stat().st_mtime_ns,
-            reverse=True,
-        )
-        for path in paths[maximum:]:
+        """Rotate only successful transport aliases; retain diagnostics.
+
+        Invalid, failed, interrupted, timed-out, and repair turns are
+        evidence and are never removed by this rolling-window helper.  Files
+        not yet represented in SQLite retain the historical bounded behavior
+        used by operators' cleanup/doctor checks.
+        """
+
+        paths = list((self.audit_dir / "wire").glob("*.jsonl"))
+        if not paths:
+            return
+        protected: set[Path] = set()
+        successful: list[tuple[Path, str]] = []
+        try:
+            rows = self.store.connection.execute(
+                """
+                SELECT wire_log_artifact_ref, status, lifecycle_status,
+                       completed_at, rowid
+                FROM app_server_turns WHERE campaign_id=?
+                ORDER BY COALESCE(completed_at, started_at, ''), rowid
+                """,
+                (self.campaign_id,),
+            ).fetchall()
+        except Exception:
+            rows = ()
+        known: set[Path] = set()
+        for row in rows:
+            reference = row["wire_log_artifact_ref"]
+            if not isinstance(reference, str):
+                continue
+            path = (self.campaign_dir / reference).resolve()
+            try:
+                path.relative_to(self.audit_dir.resolve())
+            except ValueError:
+                continue
+            known.add(path)
+            if str(row["status"] or "") == "completed_valid":
+                successful.append((path, str(row["completed_at"] or "")))
+            else:
+                protected.add(path)
+        successful.sort(key=lambda item: item[1], reverse=True)
+        protected.update(path for path, _ in successful[:maximum])
+        unknown = [path for path in paths if path not in known]
+        unknown.sort(key=lambda path: path.stat().st_mtime_ns, reverse=True)
+        # Keep the legacy maximum for uncommitted files; committed diagnostic
+        # files are protected above regardless of age.
+        protected.update(unknown[:maximum])
+        for path in paths:
+            if path in protected:
+                continue
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+
+    def _write_transport_artifact(self, path: Path, payload: bytes) -> str:
+        """Store one content-addressed raw object and hard-link its reference."""
+
+        digest = hashlib.sha256(payload).hexdigest()
+        object_path = self.audit_dir / "raw-objects" / digest
+        if not object_path.is_file():
+            _write_private(object_path, payload)
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        path.parent.chmod(0o700)
+        if path.is_file():
+            try:
+                if path.read_bytes() == payload:
+                    return digest
+            except OSError:
+                pass
             path.unlink()
+        try:
+            os.link(object_path, path)
+            path.chmod(0o600)
+        except OSError:
+            _write_private(path, payload)
+        return digest
+
+    def _prune_successful_transport_artifacts(self, maximum: int = 64) -> None:
+        """Drop old successful aliases while keeping the content store safe."""
+
+        try:
+            rows = self.store.connection.execute(
+                """
+                SELECT request_artifact_ref, response_artifact_ref,
+                       wire_log_artifact_ref, request_sha256,
+                       response_sha256, wire_log_sha256, status,
+                       completed_at, rowid
+                FROM app_server_turns WHERE campaign_id=?
+                ORDER BY COALESCE(completed_at, started_at, '') DESC, rowid DESC
+                """,
+                (self.campaign_id,),
+            ).fetchall()
+        except Exception:
+            return
+        successful = [row for row in rows if str(row["status"] or "") == "completed_valid"]
+        keep = {
+            str(row["rowid"])
+            for row in successful[:maximum]
+        }
+        for row in successful[maximum:]:
+            if str(row["rowid"]) in keep:
+                continue
+            for field, digest_field in (
+                ("request_artifact_ref", "request_sha256"),
+                ("response_artifact_ref", "response_sha256"),
+                ("wire_log_artifact_ref", "wire_log_sha256"),
+            ):
+                reference = row[field]
+                if not isinstance(reference, str):
+                    continue
+                path = (self.campaign_dir / reference).resolve()
+                try:
+                    path.relative_to(self.audit_dir.resolve())
+                except ValueError:
+                    continue
+                try:
+                    payload_digest = (
+                        hashlib.sha256(path.read_bytes()).hexdigest()
+                        if path.is_file()
+                        else None
+                    )
+                    path.unlink()
+                except FileNotFoundError:
+                    payload_digest = None
+                digest = payload_digest or row[digest_field]
+                if isinstance(digest, str) and len(digest) == 64:
+                    object_path = self.audit_dir / "raw-objects" / digest
+                    try:
+                        if (
+                            field == "wire_log_artifact_ref"
+                            and object_path.is_file()
+                        ):
+                            compressed = object_path.with_name(
+                                object_path.name + ".jsonl.gz"
+                            )
+                            if not compressed.is_file():
+                                _write_private(
+                                    compressed,
+                                    gzip.compress(
+                                        object_path.read_bytes(), mtime=0
+                                    ),
+                                )
+                        if object_path.is_file() and object_path.stat().st_nlink <= 1:
+                            object_path.unlink()
+                    except OSError:
+                        pass
+                    continue
+                # A legacy row can have no usable digest; the alias has still
+                # been removed, while the content-addressed object remains
+                # safely orphaned for a later manifest/doctor pass.
 
     def _rollover_brief(self, parent_thread_id: str) -> dict[str, Any]:
         campaign = self.store.campaign(self.campaign_id)
@@ -1086,6 +1240,15 @@ def _json_object(value: str) -> dict[str, Any]:
     except json.JSONDecodeError:
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def _canonical_json_unbounded(value: Any) -> bytes:
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("ascii")
 
 
 def _write_private(path: Path, payload: bytes) -> None:

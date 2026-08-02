@@ -13,6 +13,8 @@ workspace/
 ├── results.sqlite3
 ├── artifacts/
 │   ├── README.md
+│   ├── workspace-artifact-manifest.json
+│   ├── source-index.json
 │   └── director-turns/turn-<sequence>/
 │       ├── README.md
 │       ├── request.json / request.md
@@ -79,10 +81,27 @@ May include:
 The operator-facing projection for every retained App Server turn is a
 `artifacts/director-turns/turn-<sequence>/` capsule.  SQLite rows and the
 original campaign request/response/wire files remain authoritative; the
-capsule copies bounded raw records and adds readable Markdown plus exact
-validation paths/messages.  `artifacts/README.md` indexes capsules
+capsule references one raw object under `raw/` (content-addressed/hard-linked
+when possible) and adds readable Markdown plus exact validation
+paths/messages.  Capsule-level JSON files are compact reference envelopes,
+not duplicate transport payloads.  `artifacts/README.md` indexes capsules
 chronologically and links the latest turn and the imported proposal-ranking
 archive.
+
+`workspace-artifact-manifest.json` is a non-destructive migration inventory.
+It records every durable non-credential artifact path, byte size, allocated
+size, SHA-256, and class (`source`, `scientific`, `transport`, `projection`,
+`logs`, or `other`), plus apparent, allocated, deduplicated allocated, and
+duplicate allocated totals.  Existing files are never removed by the first
+pass.
+Source/program files, candidate graphs, verifier certificates, decisions,
+usage, failures, and scientific memory are append-only evidence; only model
+projection lists may be bounded.
+
+`source-index.json` directly maps each discovered program/source ID to its
+source path, byte identity, and adjacent metadata path.  It is a projection
+index only; source bytes remain first-class files and are never represented
+solely by SQLite or JSON metadata.
 
 The repository-level
 `artifacts/proposal-ranking/mutation_forge_stage4r_v1/` directory is a

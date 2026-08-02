@@ -1319,6 +1319,7 @@ class ResearchStore:
                 migrate_workspace_artifacts(
                     self.path.parent,
                     campaign_id=completed_campaign_id,
+                    inventory=False,
                 )
             except (OSError, ValueError, sqlite3.Error):
                 pass
@@ -2818,33 +2819,19 @@ class ResearchStore:
     def prune_campaign_candidates(
         self, campaign_id: str, maximum: int
     ) -> list[str]:
+        """Legacy compatibility hook; candidate evidence is append-only.
+
+        The in-memory Director projection may cap visible candidates, but
+        deleting a graph/source row or its artifact would make scientific
+        replay and verifier provenance non-reproducible.  Keep this method so
+        older callers remain source-compatible while making retention a
+        no-op.
+        """
+
         if maximum < 1:
             raise ValueError("candidate maximum must be positive")
-        with self.transaction() as database:
-            rows = database.execute(
-                """
-                SELECT candidate_id, artifact_ref FROM campaign_candidates
-                WHERE campaign_id=? AND state='retained'
-                  AND candidate_id NOT IN (
-                    SELECT candidate_id FROM campaign_verification_jobs
-                    WHERE campaign_id=? AND state IN ('queued','running')
-                  )
-                  AND candidate_id NOT IN (
-                    SELECT candidate_id FROM campaign_candidate_pins
-                    WHERE campaign_id=? AND state='active'
-                      AND candidate_id IS NOT NULL
-                  )
-                ORDER BY created_at DESC, rowid DESC
-                LIMIT -1 OFFSET ?
-                """,
-                (campaign_id, campaign_id, campaign_id, maximum),
-            ).fetchall()
-            if rows:
-                database.executemany(
-                    "DELETE FROM campaign_candidates WHERE candidate_id=?",
-                    ((row["candidate_id"],) for row in rows),
-                )
-            return [str(row["artifact_ref"]) for row in rows]
+        del campaign_id
+        return []
 
     def campaign_candidate(self, candidate_id: str) -> dict[str, Any]:
         row = self.connection.execute(

@@ -33,7 +33,10 @@ MAX_GLOBAL_RECORD_SUMMARIES = 8
 MAX_FINAL_BEST_ANCESTORS = 8
 EVIDENCE_REGISTRY_VERSION = "1.0"
 REFERENCE_REGISTRY_VERSION = "2.0"
-REFERENCE_SOURCE_MAX_BYTES = 4 * 1024 * 1024
+# Reference registries are private host-side indexes.  They may legitimately
+# be larger than the model projection when a campaign has a long history; the
+# hard 256 KiB boundary applies to the prompt, not to this durable index.
+REFERENCE_SOURCE_MAX_BYTES = 64 * 1024 * 1024
 ACTIVE_LANE_STATES = frozenset(
     {"starting", "running", "paused", "stopping"}
 )
@@ -207,8 +210,19 @@ def prepare_director_state_v2(
     """Build and deterministically compact model-facing scientific state."""
 
     pre, state = _director_state_before_total_compaction(snapshot)
-    authoritative_state = json.loads(json.dumps(state))
+    # Keep the complete host-side continuity ledger available for exact alias
+    # and target validation.  Do not pass it through ``canonical_json`` here:
+    # a campaign's durable history is intentionally allowed to exceed the
+    # prompt transport bound.
+    authoritative_state = _clone_json(state)
     ancestry = state["ancestry"]
+    # Take the cheap structural path before any iterative memory compactor.
+    # The latter intentionally preserves rich history and can otherwise
+    # serialize once per removed record (quadratic for a 10k-row legacy
+    # projection).  Only the transport copy is reduced; registries below use
+    # ``authoritative_state``.
+    if _json_size(state) > hard_limit_bytes:
+        _bound_state_targets_for_transport(state)
     while _json_size(state) > hard_limit_bytes:
         if ancestry["final_best_accepted_ancestors"]:
             ancestry["final_best_accepted_ancestors"].pop(0)
@@ -229,7 +243,16 @@ def prepare_director_state_v2(
         except ScientificStateOverflow:
             pass
     if _json_size(state) > hard_limit_bytes:
-        _bound_state_targets_for_transport(state)
+        # Scientific memory normally reaches this point already compacted.
+        # A paused historical campaign or an older schema may nevertheless
+        # contain an unexpectedly large extension field.  The transport copy
+        # can be reduced without touching the authoritative snapshot or its
+        # private registries; exact validation still uses those registries.
+        state = _shrink_model_projection(
+            _bound_model_projection(state),
+            max_bytes=max(1024, hard_limit_bytes),
+        )
+        ancestry = state.get("ancestry", {})
     within_state_limits = (
         _json_size(state) <= hard_limit_bytes
         and _json_size(ancestry) <= ANCESTRY_MAX_BYTES
@@ -249,6 +272,7 @@ def prepare_director_state_v2(
             },
             "pre_compaction": _measure_state(pre),
             "post_compaction": _measure_state(state),
+            "section_report": _state_section_report(state),
             "compaction_applied": True,
             "within_state_limits": False,
         }
@@ -267,28 +291,25 @@ def prepare_director_state_v2(
         },
         "pre_compaction": _measure_state(pre),
         "post_compaction": _measure_state(state),
-        "compaction_applied": canonical_json(
-            pre, max_bytes=4 * 1024 * 1024
-        )
-        != payload,
+        "compaction_applied": _canonical_json_unbounded(pre) != payload,
         "within_state_limits": within_state_limits,
     }
     registries = build_reference_registries(authoritative_state)
     model_state, alias_registry = _model_alias_projection(
-        authoritative_state, registries
+        authoritative_state,
+        registries,
+        max_bytes=max(1024, hard_limit_bytes),
     )
-    alias_bytes = canonical_json(alias_registry, max_bytes=128 * 1024)
+    alias_bytes = _canonical_json_unbounded(alias_registry)
     evidence_registry = registries["evidence_ids"]
     advisory_registry = registries["advisory_target_ids"]
     executable_registry = registries["executable_target_ids"]
-    evidence_bytes = canonical_json(
-        evidence_registry, max_bytes=REFERENCE_SOURCE_MAX_BYTES
-    )
-    advisory_bytes = canonical_json(
-        advisory_registry, max_bytes=REFERENCE_SOURCE_MAX_BYTES
-    )
-    executable_bytes = canonical_json(
-        executable_registry, max_bytes=REFERENCE_SOURCE_MAX_BYTES
+    evidence_bytes = _canonical_json_unbounded(evidence_registry)
+    advisory_bytes = _canonical_json_unbounded(advisory_registry)
+    executable_bytes = _canonical_json_unbounded(executable_registry)
+    model_bytes = _canonical_json_unbounded(model_state)
+    report["model_projection"] = _model_projection_report(
+        model_state, model_bytes=len(model_bytes)
     )
     return PreparedDirectorState(
         state=state,
@@ -308,9 +329,7 @@ def prepare_director_state_v2(
             executable_bytes
         ).hexdigest(),
         applicable_action_space_sha256=hashlib.sha256(
-            canonical_json(
-                state["allowed_action_space"], max_bytes=128 * 1024
-            )
+            _canonical_json_unbounded(state["allowed_action_space"])
         ).hexdigest(),
     )
 
@@ -353,10 +372,15 @@ def _bound_state_targets_for_transport(state: dict[str, Any]) -> None:
         ("hypothesis_ledger", MODEL_ALIAS_LIMITS["hypothesis"]),
         ("exact_verifier_outcomes", 8),
         ("validation_feedback", MODEL_ALIAS_LIMITS["action"]),
+        ("explored_regions", MODEL_ALIAS_LIMITS["outcome"]),
+        ("unresolved_scientific_questions", MODEL_ALIAS_LIMITS["outcome"]),
     ):
         values = continuity.get(key)
         if isinstance(values, list) and len(values) > limit:
             continuity[key] = values[:limit]
+    outcomes = state.get("previous_outcomes")
+    if isinstance(outcomes, list) and len(outcomes) > MAX_OUTCOMES - 1:
+        state["previous_outcomes"] = outcomes[: MAX_OUTCOMES - 1]
     artifacts = state.get("artifact_references")
     if isinstance(artifacts, list) and len(artifacts) > 8:
         state["artifact_references"] = artifacts[:8]
@@ -481,6 +505,8 @@ def model_alias_ids(
 def _model_alias_projection(
     state: dict[str, Any],
     registries: dict[str, dict[str, Any]],
+    *,
+    max_bytes: int = DIRECTOR_STATE_MAX_BYTES,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Build a bounded model projection and its private durable-ID registry.
 
@@ -490,9 +516,10 @@ def _model_alias_projection(
     Director turn boundary.
     """
 
-    raw = json.loads(
-        canonical_json(state, max_bytes=REFERENCE_SOURCE_MAX_BYTES)
-    )
+    # ``state`` is already the immutable host-side copy made by
+    # ``prepare_director_state_v2``.  Read it in place; cloning a 10k-candidate
+    # continuity ledger here would multiply peak memory without adding safety.
+    raw = state
     continuity = raw.get("continuity")
     continuity = continuity if isinstance(continuity, dict) else {}
     action_space = raw.get("allowed_action_space")
@@ -939,6 +966,16 @@ def _model_alias_projection(
         for item in raw.get("artifact_references", [])[:8]
         if isinstance(item, dict)
     ]
+    # Sanitising preserves semantics and removes durable IDs, but it is not a
+    # byte bound by itself: a historical assessment, unknown continuity key,
+    # or large operator map could still be copied wholesale.  Apply a second,
+    # deterministic section-level projection before the model prompt is built.
+    model = _bound_model_projection(model)
+    model = _shrink_model_projection(model, max_bytes=max_bytes)
+    model_action_space = model.get("allowed_action_space")
+    if not isinstance(model_action_space, dict):
+        model_action_space = {}
+        model["allowed_action_space"] = model_action_space
     registry = {
         "schema_version": MODEL_ALIAS_VERSION,
         "role": "model_aliases",
@@ -949,18 +986,236 @@ def _model_alias_projection(
     return model, registry
 
 
+_MODEL_LIST_LIMITS = {
+    "actions": 32,
+    "hypothesis_updates": 16,
+    "previous_outcomes": 2,
+    "global_record_summaries": MAX_GLOBAL_RECORD_SUMMARIES,
+    "final_best_accepted_ancestors": MAX_FINAL_BEST_ANCESTORS,
+    "candidate_ledger": MODEL_ALIAS_LIMITS["candidate"],
+    "lane_and_checkpoint_ledger": MODEL_ALIAS_LIMITS["lane"],
+    "exact_verifier_outcomes": 8,
+    "validation_feedback": MODEL_ALIAS_LIMITS["action"],
+    "explored_regions": MODEL_ALIAS_LIMITS["outcome"],
+    "unresolved_scientific_questions": MODEL_ALIAS_LIMITS["outcome"],
+    "artifact_references": 8,
+    "active_executable_lane_ids": MODEL_ALIAS_LIMITS["lane"],
+    "candidate_target_ids": MODEL_ALIAS_LIMITS["candidate"],
+    "diagnostic_subject_ids": MODEL_ALIAS_LIMITS["evidence"],
+    "checkpoint_target_ids": MODEL_ALIAS_LIMITS["checkpoint"],
+    "hypothesis_ids": MODEL_ALIAS_LIMITS["hypothesis"],
+    "evidence_ids": MODEL_ALIAS_LIMITS["evidence"],
+}
+_MODEL_STRING_LIMITS = {
+    "statement": 2_000,
+    "campaign_assessment": 4_000,
+    "expected_signal": 1_000,
+    "message": 2_000,
+    "error": 2_000,
+    "reason": 1_500,
+}
+_MODEL_DEFAULT_LIST_LIMIT = 32
+_MODEL_DEFAULT_DICT_LIMIT = 64
+
+
+def _bound_model_projection(value: Any, *, key: str = "") -> Any:
+    """Bound every model-facing branch without touching host-side state.
+
+    Known scientific sections retain their documented limits.  Unknown
+    extension fields are still carried when small, but are deterministically
+    capped so a newly added continuity field cannot make prompt size scale
+    with history.  The omitted-count summaries already present in the action
+    space remain the authority for target lists.
+    """
+
+    if isinstance(value, str):
+        limit = _MODEL_STRING_LIMITS.get(key, 4_000)
+        return value if len(value) <= limit else value[:limit] + "\n[bounded]"
+    if isinstance(value, list):
+        limit = _MODEL_LIST_LIMITS.get(key, _MODEL_DEFAULT_LIST_LIMIT)
+        return [
+            _bound_model_projection(item, key=key)
+            for item in value[:limit]
+        ]
+    if isinstance(value, dict):
+        # Keep required/semantic fields first, then stable lexical order for
+        # extension fields.  This makes compaction reproducible across runs.
+        preferred = [
+            "schema_version",
+            "source_snapshot_id",
+            "target",
+            "campaign_budget",
+            "allowed_action_space",
+            "best_ever_result",
+            "latest_batch_outcome",
+            "previous_outcomes",
+            "plateau",
+            "operator_aggregates",
+            "stage_timing_percentages",
+            "exact_verifier",
+            "parameter_effects",
+            "previous_hypothesis",
+            "ancestry",
+            "artifact_references",
+            "continuity",
+        ]
+        keys = [name for name in preferred if name in value]
+        keys.extend(sorted(name for name in value if name not in keys))
+        limit = _MODEL_DEFAULT_DICT_LIMIT if key not in {
+            "allowed_action_space",
+            "campaign_budget",
+            "target",
+            "continuity",
+            "ancestry",
+        } else 128
+        result: dict[str, Any] = {}
+        for name in keys[:limit]:
+            result[str(name)] = _bound_model_projection(value[name], key=str(name))
+        return result
+    return value
+
+
+def _model_projection_report(
+    model: dict[str, Any], *, model_bytes: int
+) -> dict[str, Any]:
+    sections: dict[str, int] = {}
+    for key, value in sorted(model.items()):
+        sections[key] = len(_canonical_json_unbounded(value))
+    omitted = (
+        model.get("allowed_action_space", {}).get("omitted_target_counts", {})
+        if isinstance(model.get("allowed_action_space"), dict)
+        else {}
+    )
+    return {
+        "model_state_bytes": model_bytes,
+        "section_bytes": sections,
+        "section_byte_budget": DIRECTOR_STATE_MAX_BYTES,
+        "omitted_target_counts": dict(omitted) if isinstance(omitted, dict) else {},
+    }
+
+
+def _state_section_report(state: dict[str, Any]) -> dict[str, int]:
+    return {
+        str(key): len(_canonical_json_unbounded(value))
+        for key, value in sorted(state.items())
+    }
+
+
+def _shrink_model_projection(
+    model: dict[str, Any], *, max_bytes: int
+) -> dict[str, Any]:
+    """Remove only optional model detail until a hard section budget fits."""
+
+    removable_lists = (
+        ("continuity", "validation_feedback"),
+        ("continuity", "explored_regions"),
+        ("continuity", "unresolved_scientific_questions"),
+        ("continuity", "candidate_ledger"),
+        ("continuity", "lane_and_checkpoint_ledger"),
+        ("continuity", "exact_verifier_outcomes"),
+        ("previous_outcomes",),
+        ("ancestry", "final_best_accepted_ancestors"),
+        ("ancestry", "global_record_summaries"),
+        ("artifact_references",),
+    )
+    removable_strings = (
+        ("continuity", "latest_valid_assessment", "statement"),
+        ("previous_hypothesis", "expected_signal"),
+        ("best_ever_result", "certification_status"),
+    )
+
+    def get_path(path: tuple[str, ...]) -> Any:
+        node: Any = model
+        for part in path:
+            if not isinstance(node, dict):
+                return None
+            node = node.get(part)
+        return node
+
+    def fits() -> bool:
+        return len(_canonical_json_unbounded(model)) <= max_bytes
+
+    while not fits():
+        changed = False
+        for path in removable_lists:
+            node = get_path(path)
+            if isinstance(node, list) and node:
+                node.pop()
+                changed = True
+                break
+        if changed:
+            continue
+        for path in removable_strings:
+            node = get_path(path)
+            if isinstance(node, str) and node:
+                parent: Any = model
+                for part in path[:-1]:
+                    if not isinstance(parent, dict):
+                        parent = None
+                        break
+                    parent = parent.get(part)
+                if isinstance(parent, dict):
+                    parent[path[-1]] = ""
+                    changed = True
+                    break
+        if changed:
+            continue
+        # A malformed extension field must not turn expected historical
+        # growth into a terminal ValueError.  Preserve target/budget/action
+        # semantics and collapse only non-essential detail.
+        for key in ("artifact_references", "parameter_effects", "operator_aggregates"):
+            if key in model and model[key] not in ({}, [], None):
+                model[key] = {} if isinstance(model[key], dict) else []
+                changed = True
+                break
+        if changed:
+            continue
+        minimal = {
+            "schema_version": model.get("schema_version", DIRECTOR_STATE_VERSION),
+            "source_snapshot_id": model.get("source_snapshot_id", "unavailable"),
+            "target": model.get("target", {}),
+            "campaign_budget": model.get("campaign_budget", {}),
+            "allowed_action_space": model.get("allowed_action_space", {}),
+            "best_ever_result": None,
+            "latest_batch_outcome": None,
+            "previous_outcomes": [],
+            "plateau": None,
+            "operator_aggregates": {},
+            "stage_timing_percentages": {},
+            "exact_verifier": model.get("exact_verifier"),
+            "parameter_effects": {},
+            "previous_hypothesis": None,
+            "ancestry": {
+                "global_record_summaries": [],
+                "final_best_accepted_ancestors": [],
+            },
+            "artifact_references": [],
+            "continuity": {
+                "exact_verifier_status_counts": (
+                    model.get("continuity", {}).get(
+                        "exact_verifier_status_counts", {}
+                    )
+                    if isinstance(model.get("continuity"), dict)
+                    else {}
+                ),
+            },
+        }
+        model.clear()
+        model.update(_bound_model_projection(minimal))
+        break
+    return model
+
+
 def build_reference_registries(
     director_state_v2: dict[str, Any],
 ) -> dict[str, dict[str, Any]]:
     """Build separate evidence, advisory and executable reference roles."""
 
-    state = json.loads(
-        canonical_json(
-            director_state_v2, max_bytes=REFERENCE_SOURCE_MAX_BYTES
-        )
-    )
+    # Registry construction is read-only.  Avoid a second full JSON clone for
+    # long histories; callers retain the authoritative object separately.
+    state = director_state_v2
     state_sha256 = hashlib.sha256(
-        canonical_json(state, max_bytes=REFERENCE_SOURCE_MAX_BYTES)
+        _canonical_json_unbounded(state)
     ).hexdigest()
     references: dict[str, dict[str, Any]] = {}
 
@@ -1842,7 +2097,23 @@ def duplicated_key_estimate(value: Any) -> dict[str, int]:
 
 
 def _json_size(value: Any) -> int:
-    return len(canonical_json(value, max_bytes=4 * 1024 * 1024))
+    # Size checks must remain meaningful even when a historical continuity
+    # ledger is larger than the transport bound.  The caller decides whether
+    # the resulting value is safe to send; this helper only measures it.
+    return len(_canonical_json_unbounded(value))
+
+
+def _canonical_json_unbounded(value: Any) -> bytes:
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("ascii")
+
+
+def _clone_json(value: Any) -> Any:
+    return json.loads(_canonical_json_unbounded(value))
 
 
 def _unbounded_json_sha256(value: Any) -> str:

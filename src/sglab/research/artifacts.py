@@ -21,9 +21,11 @@ from ..state import atomic_write_json
 
 
 CAPSULE_SCHEMA_VERSION = "1.0"
+WORKSPACE_MANIFEST_SCHEMA_VERSION = "1.0"
 MAX_RAW_ARTIFACT_BYTES = 16 * 1024 * 1024
 MAX_MARKDOWN_BYTES = 128 * 1024
 MAX_EVENT_RECORDS = 4096
+MAX_INDEX_TURNS = 128
 _TURN_DIRECTORY = re.compile(r"^turn-(\d{4,})$")
 
 
@@ -33,6 +35,154 @@ def _sha256_file(path: Path) -> str:
         while chunk := handle.read(1024 * 1024):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _artifact_class(relative: Path) -> str:
+    parts = set(relative.parts)
+    name = relative.name.lower()
+    if "source" in parts or "sources" in parts or name.endswith(".py"):
+        return "source"
+    if parts.intersection({"candidates", "verifications", "checkpoints", "lane-checkpoints", "snapshots", "scientific-memory"}):
+        return "scientific"
+    if "wire" in parts or "raw-objects" in parts or name.endswith((".jsonl", ".jsonl.gz", ".stderr")):
+        return "transport"
+    if "director-turns" in parts or "artifacts" in parts:
+        return "projection"
+    if "logs" in parts or name.endswith(".log"):
+        return "logs"
+    return "other"
+
+
+def write_workspace_artifact_manifest(workspace: Path) -> dict[str, Any]:
+    """Record a non-destructive, byte/hash inventory of durable artifacts.
+
+    The manifest deliberately excludes SQLite/WAL files, private `.sglab`
+    homes, and credential material.  It never removes or rewrites an existing
+    source/scientific/transport artifact; it is a migration and status aid.
+    """
+
+    workspace = workspace.resolve()
+    root = workspace / "artifacts"
+    root.mkdir(parents=True, exist_ok=True)
+    manifest_path = root / "workspace-artifact-manifest.json"
+    excluded_names = {"auth.json", "auth.json.importing"}
+    files: list[dict[str, Any]] = []
+    source_entries: list[dict[str, Any]] = []
+    by_class: dict[str, dict[str, int]] = {}
+    unique_allocated: dict[tuple[int, int], int] = {}
+    for path in sorted(workspace.rglob("*")):
+        if not path.is_file() or path.is_symlink():
+            continue
+        relative = path.relative_to(workspace)
+        if relative in {
+            manifest_path.relative_to(workspace),
+            (root / "source-index.json").relative_to(workspace),
+        }:
+            continue
+        if relative.parts and relative.parts[0] == ".sglab":
+            continue
+        if relative.name in excluded_names:
+            continue
+        if relative.name in {"results.sqlite3", "results.sqlite3-wal", "results.sqlite3-shm"}:
+            continue
+        try:
+            metadata = path.stat()
+            size = int(metadata.st_size)
+            allocated = int(metadata.st_blocks) * 512
+            digest = _sha256_file(path)
+        except OSError:
+            continue
+        category = _artifact_class(relative)
+        entry = {
+            "path": relative.as_posix(),
+            "bytes": size,
+            "allocated_bytes": allocated,
+            "sha256": digest,
+            "artifact_class": category,
+        }
+        files.append(entry)
+        unique_allocated.setdefault(
+            (int(metadata.st_dev), int(metadata.st_ino)), allocated
+        )
+        if category == "source":
+            source_entries.append(
+                {
+                    "program_id": path.stem,
+                    "source_path": relative.as_posix(),
+                    "source_sha256": digest,
+                    "source_bytes": size,
+                    "metadata_path": (
+                        relative.with_suffix(".json").as_posix()
+                        if (workspace / relative.with_suffix(".json")).is_file()
+                        else None
+                    ),
+                }
+            )
+        aggregate = by_class.setdefault(category, {"files": 0, "bytes": 0, "allocated_bytes": 0})
+        aggregate["files"] += 1
+        aggregate["bytes"] += size
+        aggregate["allocated_bytes"] += allocated
+    source_index_path = root / "source-index.json"
+    source_index = {
+        "schema_version": "1.0",
+        "experiment_id": _experiment_id(workspace),
+        "entries": sorted(source_entries, key=lambda item: (item["program_id"], item["source_path"])),
+    }
+    _write_json(source_index_path, source_index)
+    source_index_size = source_index_path.stat().st_size
+    source_index_digest = _sha256_file(source_index_path)
+    source_index_relative = source_index_path.relative_to(workspace)
+    files.append(
+        {
+            "path": source_index_relative.as_posix(),
+            "bytes": source_index_size,
+            "allocated_bytes": int(source_index_path.stat().st_blocks) * 512,
+            "sha256": source_index_digest,
+            "artifact_class": "projection",
+        }
+    )
+    projection_aggregate = by_class.setdefault("projection", {"files": 0, "bytes": 0, "allocated_bytes": 0})
+    projection_aggregate["files"] += 1
+    projection_aggregate["bytes"] += source_index_size
+    source_index_metadata = source_index_path.stat()
+    source_index_allocated = int(source_index_metadata.st_blocks) * 512
+    projection_aggregate["allocated_bytes"] += source_index_allocated
+    unique_allocated.setdefault(
+        (int(source_index_metadata.st_dev), int(source_index_metadata.st_ino)),
+        source_index_allocated,
+    )
+    files.sort(key=lambda item: item["path"])
+    manifest = {
+        "schema_version": WORKSPACE_MANIFEST_SCHEMA_VERSION,
+        "experiment_id": _experiment_id(workspace),
+        "first_pass_non_destructive": True,
+        "credential_files_excluded": True,
+        "files": files,
+        "file_count": len(files),
+        "bytes_by_class": by_class,
+        "apparent_bytes": sum(item["bytes"] for item in files),
+        "allocated_bytes": sum(item["allocated_bytes"] for item in files),
+        "deduplicated_allocated_bytes": sum(unique_allocated.values()),
+        "duplicate_allocated_bytes": max(
+            0,
+            sum(item["allocated_bytes"] for item in files)
+            - sum(unique_allocated.values()),
+        ),
+        "source_index": "artifacts/source-index.json",
+    }
+    _write_json(manifest_path, manifest)
+    return {
+        "schema_version": WORKSPACE_MANIFEST_SCHEMA_VERSION,
+        "manifest": str(manifest_path.relative_to(workspace)),
+        "file_count": len(files),
+        "bytes_by_class": by_class,
+        "apparent_bytes": manifest["apparent_bytes"],
+        "allocated_bytes": manifest["allocated_bytes"],
+        "deduplicated_allocated_bytes": manifest[
+            "deduplicated_allocated_bytes"
+        ],
+        "duplicate_allocated_bytes": manifest["duplicate_allocated_bytes"],
+    }
 
 
 def _write_bytes(path: Path, payload: bytes) -> None:
@@ -118,14 +268,64 @@ def _copy_or_mark(source: Path | None, target: Path, reference: str | None) -> d
         }
         _write_json(target, marker)
         return marker
-    _write_bytes(target, source.read_bytes())
+    # Keep a single physical raw object whenever source and projection share a
+    # filesystem.  The readable capsule still exposes the stable target path,
+    # while hard-links avoid multiplying request/response/wire bytes.  A
+    # normal atomic copy remains the safe fallback for cross-device exports.
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        if target.is_file():
+            # Existing capsule bytes are retained during the first migration
+            # pass, even if the source has since changed.  Equivalence is
+            # recorded, but historical projection data is never overwritten.
+            existing_digest = _sha256_file(target)
+            linked = existing_digest == digest
+            return {
+                "available": True,
+                "source_reference": reference,
+                "source_bytes": size,
+                "source_sha256": digest,
+                "capsule_path": str(target),
+                "content_addressed": linked,
+                "preserved_existing": not linked,
+            }
+        if target.is_symlink():
+            return _unavailable(reference, "capsule target is a symlink")
+        os.link(source, target)
+        linked = True
+    except OSError:
+        if target.exists() or target.is_symlink():
+            return _unavailable(reference, "capsule target cannot be replaced")
+        _write_bytes(target, source.read_bytes())
+        linked = False
     return {
         "available": True,
         "source_reference": reference,
         "source_bytes": size,
         "source_sha256": digest,
         "capsule_path": str(target),
+        "content_addressed": linked,
     }
+
+
+def _reference_without_copy(source: Path | None, reference: str | None) -> dict[str, Any]:
+    """Describe a successful raw source without retaining another payload."""
+
+    if source is None or not source.is_file():
+        return _unavailable(reference, "source artifact is unavailable")
+    try:
+        metadata = source.stat()
+        return {
+            "available": True,
+            "source_reference": reference,
+            "source_bytes": int(metadata.st_size),
+            "source_sha256": _sha256_file(source),
+            "capsule_path": None,
+            "content_addressed": False,
+            "raw_retention": "successful_transport_window_only",
+        }
+    except OSError:
+        return _unavailable(reference, "source artifact cannot be inspected")
 
 
 def _truncate(value: Any, limit: int = 12_000) -> str:
@@ -304,7 +504,10 @@ def _turn_request_markdown(
             "",
             "## Full committed prompt",
             "",
-            _truncate(prompt, 70_000),
+            _truncate(
+                prompt,
+                16_000 if str(row["status"] or "") == "completed_valid" else 70_000,
+            ),
             "",
             "## Request identity",
             "",
@@ -373,7 +576,10 @@ def _turn_response_markdown(
             "",
             "## Assessment",
             "",
-            _truncate(response.get("campaign_assessment", "Unavailable"), 12_000),
+            _truncate(
+                response.get("campaign_assessment", "Unavailable"),
+                8_000 if str(row["status"] or "") == "completed_valid" else 12_000,
+            ),
             "",
             "## Hypothesis updates",
             "",
@@ -558,12 +764,52 @@ def _project_turn(
         "wire_sha256": row["wire_log_sha256"],
         "raw_records_authoritative": True,
     }
-    _copy_or_mark(request_source, capsule / "request.json", request_ref)
-    _copy_or_mark(response_source, capsule / "response.json", response_ref)
     raw_dir = capsule / "raw"
-    _copy_or_mark(request_source, raw_dir / "request.json", request_ref)
-    _copy_or_mark(response_source, raw_dir / "response.json", response_ref)
-    _copy_or_mark(wire_source, raw_dir / "wire.jsonl", wire_ref)
+    retain_raw = str(row["status"] or "") != "completed_valid"
+    raw_request = (
+        _copy_or_mark(request_source, raw_dir / "request.json", request_ref)
+        if retain_raw
+        else _reference_without_copy(request_source, request_ref)
+    )
+    raw_response = (
+        _copy_or_mark(response_source, raw_dir / "response.json", response_ref)
+        if retain_raw
+        else _reference_without_copy(response_source, response_ref)
+    )
+    raw_wire = (
+        _copy_or_mark(wire_source, raw_dir / "wire.jsonl", wire_ref)
+        if retain_raw
+        else _reference_without_copy(wire_source, wire_ref)
+    )
+    # The capsule-level JSON files are compact references, not a second raw
+    # copy.  Historical capsules remain untouched; new migrations converge on
+    # one content-addressed/hard-linked raw object per payload.
+    if not (capsule / "request.json").exists():
+        _write_json(
+            capsule / "request.json",
+            {
+                "schema_version": CAPSULE_SCHEMA_VERSION,
+                "raw_reference": (
+                    "raw/request.json"
+                    if raw_request.get("capsule_path")
+                    else request_ref
+                ),
+                **raw_request,
+            },
+        )
+    if not (capsule / "response.json").exists():
+        _write_json(
+            capsule / "response.json",
+            {
+                "schema_version": CAPSULE_SCHEMA_VERSION,
+                "raw_reference": (
+                    "raw/response.json"
+                    if raw_response.get("capsule_path")
+                    else response_ref
+                ),
+                **raw_response,
+            },
+        )
     referenced: dict[str, dict[str, Any]] = {}
     _copy_referenced_artifacts(
         request=request,
@@ -578,6 +824,11 @@ def _project_turn(
         refs=referenced,
     )
     provenance["referenced_artifacts"] = referenced
+    provenance["raw_references"] = {
+        "request": raw_request,
+        "response": raw_response,
+        "wire": raw_wire,
+    }
     events = _event_projection(wire_source)
     _write_json(capsule / "validation.json", validation)
     _write_json(capsule / "usage.json", usage)
@@ -636,7 +887,7 @@ def _project_turn(
                 "- [provenance.json](provenance.json)",
                 "- [events.json](events.json)",
                 "",
-                "Raw request/response/wire records are copied under [raw/](raw/).",
+                "Raw request/response/wire records are referenced once under [raw/](raw/); capsule-level JSON files contain only metadata.",
                 "The SQLite row and original campaign artifacts remain authoritative.",
             ]
         )
@@ -726,12 +977,27 @@ def write_artifact_index(
         "",
         f"Total projected turns: **{projection.get('turn_count', 0)}**",
         "",
+        "- [Non-destructive workspace artifact manifest](workspace-artifact-manifest.json)",
+        "- [Source/program index](source-index.json)",
+        "- The manifest records path, size, allocated bytes, SHA-256, and artifact class; credential material and SQLite/WAL files are excluded.",
+        "",
     ]
     turns = projection.get("turns", [])
     if not isinstance(turns, list) or not turns:
         lines.append("No Director turns are retained yet.")
     else:
-        for turn in turns:
+        older_failed = [
+            turn for turn in turns[:-MAX_INDEX_TURNS]
+            if isinstance(turn, dict)
+            and str(turn.get("status") or "") != "completed_valid"
+        ]
+        indexed_turns = older_failed + turns[-MAX_INDEX_TURNS:]
+        if len(indexed_turns) < len(turns):
+            lines.append(
+                f"{len(turns) - len(indexed_turns)} successful turn entries are omitted from this bounded index; their readable capsules remain addressable by sequence."
+            )
+            lines.append("")
+        for turn in indexed_turns:
             if not isinstance(turn, dict):
                 continue
             directory = str(turn.get("directory", ""))
@@ -769,6 +1035,7 @@ def write_artifact_index(
             ),
             "",
             "Raw JSON/JSONL remains available in each capsule's `raw/` directory; these readable files are a bounded projection, not a replacement for the authoritative records.",
+            "The first migration pass is non-destructive: source, candidate, verifier, decision, usage, and failure artifacts are never pruned.",
         ]
     )
     path = root / "README.md"
@@ -780,8 +1047,13 @@ def migrate_workspace_artifacts(
     workspace: Path,
     *,
     campaign_id: str | None = None,
+    inventory: bool = True,
 ) -> dict[str, Any]:
-    """Idempotently project turns and refresh the workspace index."""
+    """Idempotently project turns and refresh the workspace index.
+
+    ``inventory=False`` is used on the hot turn-completion path; status,
+    export, and explicit migration calls retain the complete byte/hash scan.
+    """
 
     workspace = workspace.resolve()
     # The index is workspace-scoped and must never hide an older campaign's
@@ -791,7 +1063,16 @@ def migrate_workspace_artifacts(
     del campaign_id
     projection = project_director_turn_capsules(workspace)
     index = write_artifact_index(workspace, projection=projection)
+    inventory_report = (
+        write_workspace_artifact_manifest(workspace)
+        if inventory
+        else None
+    )
     projection["artifact_index"] = str(index.relative_to(workspace))
+    projection["artifact_manifest"] = (
+        inventory_report["manifest"] if inventory_report is not None else None
+    )
+    projection["artifact_inventory"] = inventory_report
     if isinstance(projection.get("latest"), dict):
         projection["latest_turn_capsule"] = str(
             Path(str(projection["latest"]["directory"]))
@@ -801,7 +1082,7 @@ def migrate_workspace_artifacts(
     return projection
 
 
-def artifact_paths(workspace: Path) -> dict[str, str | None]:
+def artifact_paths(workspace: Path) -> dict[str, Any]:
     """Return only stable public paths for CLI/API projections."""
 
     root = workspace.resolve() / "artifacts"
@@ -814,11 +1095,41 @@ def artifact_paths(workspace: Path) -> dict[str, str | None]:
         ]
         if directories:
             latest = max(directories, key=lambda path: int(_TURN_DIRECTORY.fullmatch(path.name).group(1)))
+    manifest = _read_json(root / "workspace-artifact-manifest.json")
+    inventory = (
+        {
+            "schema_version": manifest.get("schema_version"),
+            "file_count": manifest.get("file_count", 0),
+            "bytes_by_class": manifest.get("bytes_by_class", {}),
+            "apparent_bytes": manifest.get("apparent_bytes", 0),
+            "allocated_bytes": manifest.get("allocated_bytes", 0),
+            "deduplicated_allocated_bytes": manifest.get(
+                "deduplicated_allocated_bytes", 0
+            ),
+            "duplicate_allocated_bytes": manifest.get(
+                "duplicate_allocated_bytes", 0
+            ),
+            "manifest": "artifacts/workspace-artifact-manifest.json",
+        }
+        if isinstance(manifest, dict)
+        else None
+    )
     return {
         "artifact_index": "artifacts/README.md" if (root / "README.md").is_file() else None,
+        "artifact_manifest": (
+            "artifacts/workspace-artifact-manifest.json"
+            if (root / "workspace-artifact-manifest.json").is_file()
+            else None
+        ),
+        "source_index": (
+            "artifacts/source-index.json"
+            if (root / "source-index.json").is_file()
+            else None
+        ),
         "latest_turn_capsule": (
             str(latest.relative_to(workspace)) if latest is not None else None
         ),
+        "artifact_inventory": inventory,
     }
 
 

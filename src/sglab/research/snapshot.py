@@ -212,6 +212,7 @@ class SnapshotBuilder:
         continuity = snapshot.get("continuity")
         if isinstance(continuity, dict):
             continuity.pop("current_executable_checkpoint_ids", None)
+        _bound_snapshot_for_storage(snapshot)
         canonical_json(snapshot, max_bytes=MAX_SNAPSHOT_BYTES)
         relative = Path("snapshots") / f"{snapshot_id}.json"
         path = self.campaign_dir / relative
@@ -909,6 +910,96 @@ def _compact_observed_effect(
 
 def _parse_time(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
+
+
+def _bound_snapshot_for_storage(snapshot: dict[str, Any]) -> None:
+    """Keep the durable snapshot under the transport cap without losing authority.
+
+    SQLite ledgers, candidate snapshots, and the manager's exact executable
+    checkpoint set remain authoritative.  This JSON projection only needs a
+    bounded recent intervention window; older actions and rich telemetry are
+    still recoverable from those ledgers and their immutable artifacts.
+    """
+
+    recent_actions = snapshot.get("recent_actions")
+    if isinstance(recent_actions, list):
+        snapshot["recent_actions"] = recent_actions[:24]
+    hypotheses = snapshot.get("hypotheses")
+    if isinstance(hypotheses, list):
+        snapshot["hypotheses"] = hypotheses[:32]
+    evidence = snapshot.get("available_evidence_ids")
+    if isinstance(evidence, list):
+        snapshot["available_evidence_ids"] = evidence[:256]
+    lanes = snapshot.get("lanes")
+    if isinstance(lanes, list) and len(lanes) > 32:
+        snapshot["lanes"] = lanes[:32]
+    continuity = snapshot.get("continuity")
+    if isinstance(continuity, dict):
+        for key, limit in (
+            ("candidate_ledger", 64),
+            ("hypothesis_ledger", 64),
+            ("exact_verifier_outcomes", 32),
+            ("lane_and_checkpoint_ledger", 64),
+            ("validation_feedback", 8),
+            ("explored_regions", 32),
+            ("unresolved_scientific_questions", 32),
+        ):
+            value = continuity.get(key)
+            if isinstance(value, list) and len(value) > limit:
+                continuity[key] = value[:limit]
+
+    def encoded_size() -> int:
+        return len(
+            json.dumps(
+                snapshot,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+            ).encode("ascii")
+        )
+
+    # If an older schema supplied unusually rich action details, reduce the
+    # oldest history first.  Current lane/checkpoint identities are not in
+    # this removal list.
+    while encoded_size() > MAX_SNAPSHOT_BYTES:
+        changed = False
+        for key in (
+            "recent_actions",
+            "hypotheses",
+            "available_evidence_ids",
+        ):
+            value = snapshot.get(key)
+            if isinstance(value, list) and value:
+                value.pop()
+                changed = True
+                break
+        if changed:
+            continue
+        if isinstance(continuity, dict):
+            for key in (
+                "validation_feedback",
+                "explored_regions",
+                "unresolved_scientific_questions",
+                "candidate_ledger",
+                "lane_and_checkpoint_ledger",
+            ):
+                value = continuity.get(key)
+                if isinstance(value, list) and value:
+                    value.pop()
+                    changed = True
+                    break
+        if changed:
+            continue
+        # A single malformed extension field should not make an expected
+        # history overflow terminal.  Preserve the scientific target,
+        # budget, active lanes, and exact verifier/checkpoint authority.
+        for key in ("implemented_director_controls",):
+            if key in snapshot and snapshot[key] not in ({}, [], None):
+                snapshot[key] = {} if isinstance(snapshot[key], dict) else []
+                changed = True
+                break
+        if not changed:
+            break
 
 
 def _memory_available_bytes() -> int:

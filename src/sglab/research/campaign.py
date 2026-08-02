@@ -1120,6 +1120,7 @@ def campaign_status(workspace: Path, campaign_id: str | None = None) -> dict[str
                 "coordinator_rss_bytes": current_rss_bytes(pid) if pid > 0 else 0,
                 "database_bytes": sqlite_size_bytes(database_path),
                 "disk_free_bytes": disk_free_bytes(root),
+                "artifact_inventory": public_artifacts.get("artifact_inventory"),
             },
             **public_artifacts,
         }

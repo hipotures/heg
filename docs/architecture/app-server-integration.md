@@ -49,8 +49,11 @@ The row exists as soon as an authoritative turn ID is known.
 After a turn is durably recorded, HEG projects a bounded operator capsule at
 `workspace/<experiment-id>/artifacts/director-turns/turn-<sequence>/`.  The
 capsule contains readable request/response Markdown, exact validation issues,
-usage, provenance, event summaries, and copies of the retained request,
-response, wire, and registry artifacts under `raw/`.  The project-level
+usage, provenance, event summaries, and references to the retained request,
+response, wire, and registry artifacts under `raw/`.  Raw transport is stored
+once through a content-addressed host object (with hard-linked compatibility
+paths); capsule-level JSON files contain metadata rather than a second raw
+payload.  The project-level
 `artifacts/README.md` index links the capsules chronologically and points to
 the latest turn.  These files are projections only: SQLite and the original
 campaign artifacts remain authoritative, and a projection failure cannot alter
@@ -79,6 +82,17 @@ scientific-memory state, not conversation history.
 The host targets 15,000 estimated client-owned tokens through deterministic
 scientific-state compaction. The independent fail-closed hard gate is 32,000
 estimated tokens and is enforced before `turn/start`.
+
+The model receives a bounded projection, never the complete candidate,
+checkpoint, verifier, action, event, or turn registries.  Current target and
+budget, active-lane telemetry, relevant candidates/checkpoints, verifier
+status counts, hypotheses, and recent interventions are retained with
+per-section byte measurements and omitted-count summaries.  Host-side alias
+registries retain exact durable IDs for validation.  Deterministic further
+compaction is applied for legacy or paused histories; expected historical
+growth does not produce a terminal JSON-size error.  A workspace artifact
+manifest records path, size, allocation, SHA-256, and artifact class without
+deleting source, candidate, verifier, decision, usage, or failure evidence.
 
 ## Platform instructions
 

@@ -2,6 +2,31 @@
 
 Last implementation audit: **2026-08-01**.
 
+## Issue #21 — bounded Director prompts and source-first retention
+
+Director prompt construction now separates the complete host-side continuity
+and validation registries from a deterministic, section-bounded model
+projection.  Target aliases remain exact and host-resolved; the model receives
+only current target/budget, active-lane telemetry, relevant candidate and
+checkpoint summaries, verifier counts, hypotheses, and recent interventions,
+with omitted-count and section-byte reports.  Legacy histories are copied and
+compacted without passing through the 256 KiB prompt serializer, so expected
+candidate/checkpoint/turn growth cannot cause a terminal JSON-size error.
+
+Director request, response, and wire payloads use a content-addressed raw
+object with compatibility hard-links.  Failed, invalid, repair, interrupted,
+and timed-out diagnostics are protected from rolling retention; only
+successful transport aliases are eligible for a bounded window.  Candidate
+and source artifacts remain append-only.  Capsules reference one raw object
+instead of copying the same payload twice, and each workspace migration emits
+the non-destructive `artifacts/workspace-artifact-manifest.json` with paths,
+sizes, allocation, hashes, and artifact classes.  Credential homes and active
+SQLite/WAL files are excluded from that public inventory.  Existing
+`heg-ranked-001` files and scientific records are preserved in place.
+`artifacts/source-index.json` gives direct program/source-ID to source-path
+and SHA-256 mappings for generated Python candidates discovered in a
+workspace.
+
 The operator shortcut now handles a repaired `paused_fault` safely: it passes
 an explicit recovery acknowledgement only when the repository commit differs
 from the failed attempt and refuses repeated blind retries under unchanged
