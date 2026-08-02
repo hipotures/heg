@@ -248,13 +248,21 @@ def _unavailable(reference: str | None, reason: str) -> dict[str, Any]:
 def _copy_or_mark(source: Path | None, target: Path, reference: str | None) -> dict[str, Any]:
     if source is None or not source.is_file():
         marker = _unavailable(reference, "source artifact is unavailable")
-        _write_json(target, marker)
+        if not target.exists():
+            _write_json(target, marker)
+        else:
+            marker["capsule_path"] = str(target)
+            marker["preserved_existing"] = True
         return marker
     try:
         size = source.stat().st_size
     except OSError:
         marker = _unavailable(reference, "source artifact cannot be inspected")
-        _write_json(target, marker)
+        if not target.exists():
+            _write_json(target, marker)
+        else:
+            marker["capsule_path"] = str(target)
+            marker["preserved_existing"] = True
         return marker
     digest = _sha256_file(source)
     if size > MAX_RAW_ARTIFACT_BYTES:
