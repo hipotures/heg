@@ -841,6 +841,16 @@ def _model_alias_projection(
         and item.get("hypothesis_id") in raw_hypotheses
         and alias_for("hypothesis", item.get("hypothesis_id")) is not None
     ][: MODEL_ALIAS_LIMITS["hypothesis"]]
+    for key, limit in (
+        ("validation_feedback", MODEL_ALIAS_LIMITS["action"]),
+        ("explored_regions", MODEL_ALIAS_LIMITS["outcome"]),
+        ("unresolved_scientific_questions", MODEL_ALIAS_LIMITS["outcome"]),
+    ):
+        values = continuity.get(key)
+        if isinstance(values, list):
+            model_continuity[key] = [
+                sanitize(item) for item in values[:limit]
+            ]
     model_continuity["lane_and_checkpoint_ledger"] = [
         sanitize(item)
         for item in lane_ledger
