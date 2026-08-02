@@ -948,6 +948,11 @@ def _bound_snapshot_for_storage(snapshot: dict[str, Any]) -> None:
             if isinstance(value, list) and len(value) > limit:
                 continuity[key] = value[:limit]
 
+    # Leave room for the durable trailing newline and small serializer
+    # evolution.  The final canonical serializer still enforces the hard
+    # transport limit, but this projection should converge below it first.
+    storage_limit = max(1024, MAX_SNAPSHOT_BYTES - 4096)
+
     def encoded_size() -> int:
         return len(
             json.dumps(
@@ -961,7 +966,7 @@ def _bound_snapshot_for_storage(snapshot: dict[str, Any]) -> None:
     # If an older schema supplied unusually rich action details, reduce the
     # oldest history first.  Current lane/checkpoint identities are not in
     # this removal list.
-    while encoded_size() > MAX_SNAPSHOT_BYTES:
+    while encoded_size() > storage_limit:
         changed = False
         for key in (
             "recent_actions",
@@ -990,6 +995,48 @@ def _bound_snapshot_for_storage(snapshot: dict[str, Any]) -> None:
                     break
         if changed:
             continue
+        projection = snapshot.get("scientific_memory_projection")
+        if isinstance(projection, dict):
+            # These fields are advisory history; current executable IDs,
+            # exact-verifier facts, and the allowed action space remain.
+            for key in (
+                "previous_outcomes",
+                "operator_aggregates",
+                "parameter_effects",
+                "stage_timing_percentages",
+                "artifact_references",
+                "latest_batch_outcome",
+                "plateau",
+                "previous_hypothesis",
+            ):
+                if key in projection and projection[key] not in (
+                    {},
+                    [],
+                    None,
+                ):
+                    projection[key] = (
+                        {} if isinstance(projection[key], dict) else []
+                    )
+                    changed = True
+                    break
+            if changed:
+                continue
+            projection_continuity = projection.get("continuity")
+            if isinstance(projection_continuity, dict):
+                for key in (
+                    "validation_feedback",
+                    "explored_regions",
+                    "unresolved_scientific_questions",
+                    "candidate_ledger",
+                    "lane_and_checkpoint_ledger",
+                ):
+                    value = projection_continuity.get(key)
+                    if isinstance(value, list) and value:
+                        value.pop()
+                        changed = True
+                        break
+                if changed:
+                    continue
         # A single malformed extension field should not make an expected
         # history overflow terminal.  Preserve the scientific target,
         # budget, active lanes, and exact verifier/checkpoint authority.

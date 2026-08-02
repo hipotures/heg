@@ -1243,7 +1243,7 @@ class PolicyWorker:
         self.profile = profile
         self.process: subprocess.Popen[bytes] | None = None
         self.tmp: tempfile.TemporaryDirectory[str] | None = None
-        self.calls = 0; self.failures = 0; self.orphans = 0; self.elapsed_ns = 0; self._started = 0.0; self._failed = False
+        self.calls = 0; self.failures = 0; self.orphans = 0; self.restarts = 0; self.elapsed_ns = 0; self._started = 0.0; self._failed = False
         self._last_serialization_ns = 0
         self.start()
 
@@ -1301,9 +1301,38 @@ class PolicyWorker:
         if not isinstance(value, dict): raise BridgeError("policy worker response is malformed")
         return value
 
+    def _renew_before_wall_limit(self) -> None:
+        """Renew a healthy worker before its bounded lifetime expires.
+
+        The worker lifetime is an isolation limit, not a campaign lifetime.
+        Ranked lanes can legitimately outlive one worker, so a clean identity
+        handshake renews the process between proposal batches.  A renewal
+        failure propagates as a bridge error; it never falls back to an
+        unranked operator or in-process execution path.
+        """
+        if self._failed or self.process is None or self.process.poll() is not None:
+            return
+        remaining = self.limits.total_wall_seconds - (
+            time.monotonic() - self._started
+        )
+        guard = max(
+            0.25,
+            min(5.0, float(self.limits.per_call_wall_seconds) * 4.0),
+        )
+        if remaining > guard:
+            return
+        self._terminate()
+        if self.tmp is not None:
+            self.tmp.cleanup()
+            self.tmp = None
+        self._failed = False
+        self.restarts += 1
+        self.start()
+
     def call(self, context: Mapping[str, Any], proposal: Mapping[str, Any]) -> int | float:
         if self._failed or self.process is None or self.process.poll() is not None: raise BridgeError("failed policy worker cannot be reused")
-        if time.monotonic() - self._started > self.limits.total_wall_seconds: self._failed = True; self._terminate(); raise BridgeError("policy worker total wall limit exceeded")
+        self._renew_before_wall_limit()
+        if self._failed or self.process is None or self.process.poll() is not None: raise BridgeError("failed policy worker cannot be reused")
         copy_started = time.perf_counter_ns()
         ctx = validate_context(dict(context)); prop = validate_proposal(dict(proposal), lengths=ctx["forbidden_lengths"])
         copy_elapsed = time.perf_counter_ns() - copy_started
@@ -1357,10 +1386,9 @@ class PolicyWorker:
             raise BridgeError("failed policy worker cannot be reused")
         if not proposals or len(proposals) > 64:
             raise BridgeError("policy batch is outside the bounded contract")
-        if time.monotonic() - self._started > self.limits.total_wall_seconds:
-            self._failed = True
-            self._terminate()
-            raise BridgeError("policy worker total wall limit exceeded")
+        self._renew_before_wall_limit()
+        if self._failed or self.process is None or self.process.poll() is not None:
+            raise BridgeError("failed policy worker cannot be reused")
         copy_started = time.perf_counter_ns()
         if prevalidated:
             ctx = context if isinstance(context, dict) else dict(context)
@@ -1438,7 +1466,7 @@ class PolicyWorker:
         self.process = None
 
     def telemetry(self) -> dict[str, Any]:
-        return {"protocol_version": RUNTIME_PROTOCOL_VERSION, "batch_protocol_version": BATCH_PROTOCOL_VERSION, "calls": self.calls, "failures": self.failures, "elapsed_ns": self.elapsed_ns, "orphan_count": self.orphans, "usable": self.process is not None and self.process.poll() is None}
+        return {"protocol_version": RUNTIME_PROTOCOL_VERSION, "batch_protocol_version": BATCH_PROTOCOL_VERSION, "calls": self.calls, "failures": self.failures, "elapsed_ns": self.elapsed_ns, "orphan_count": self.orphans, "restart_count": self.restarts, "usable": self.process is not None and self.process.poll() is None}
 
     def close(self) -> None:
         if self.process is None: return
@@ -1816,6 +1844,14 @@ class HegPolicyBridge:
         if self.profile is not None:
             worker = self.worker.telemetry()
             self.profile.worker_orphans = int(worker.get("orphan_count", 0))
+        else:
+            worker = self.worker.telemetry()
+        self.telemetry.worker_restart_count = int(
+            worker.get("restart_count", 0)
+        )
+        self.telemetry.worker_orphan_count = int(
+            worker.get("orphan_count", 0)
+        )
         return self.telemetry.as_dict()
 
     def invalidate_graph_cache(self) -> None:

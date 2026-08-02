@@ -215,8 +215,11 @@ micro-batch and records no per-proposal history.
 
 Ranking identity is stored in the checkpoint and an additive lane identity
 ledger. Resume requires an exact identity match and cannot silently activate or
-deactivate the capability. A ranking worker failure terminates the lane
-fail-closed; no random/operator fallback is attempted.
+deactivate the capability. The isolated policy worker has a bounded
+per-process wall lifetime; the host renews a healthy worker between proposal
+batches before that lifetime expires and repeats the exact identity handshake.
+A protocol error, timeout, malformed response, crash, or renewal failure
+terminates the lane fail-closed; no random/operator fallback is attempted.
 
 The performance-frozen implementation keeps the same policy bytes, host
 limits, pool size, selector weights, retry/matching limits, lane RNG contract,

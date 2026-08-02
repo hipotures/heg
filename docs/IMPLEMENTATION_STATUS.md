@@ -33,6 +33,12 @@ from the failed attempt and refuses repeated blind retries under unchanged
 code. Director ranking guidance also states that `random_restart` must omit
 `proposal_ranking` entirely, while validation remains fail-closed.
 
+Long-running ranked lanes now renew a healthy isolated policy worker between
+proposal batches before its bounded per-process wall lifetime expires. The
+renewal repeats the frozen identity handshake and never falls back to an
+unranked or in-process policy; protocol, timeout, crash, or renewal failures
+remain fail-closed.
+
 The model-facing Director schema now discriminates `start_lane` parameters by
 algorithm. Ranked mutation branches require the reviewed catalog ID only when
 the immutable plan enables it, and `random_restart` has no ranking field or

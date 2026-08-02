@@ -47,7 +47,7 @@ This is the authoritative engineering-invariant matrix.
 | Reviewed proposal ranking is opt-in and catalog-bound | lane/catalog validation | proposal-ranking seam tests | reject unknown/patch activation |
 | Campaign ranking authorization is plan-bound | prepare/start CLI, plan fingerprint, Director validation | issue-17 activation tests | reject disabled/changed/unknown values before dispatch |
 | Random restart remains unranked | Director validation and lane validator | issue-17 activation tests | reject ranker on random_restart |
-| Proposal worker cannot choose a fallback | host bridge/worker boundary | red-team and process tests | lane fails closed and worker group is reaped |
+| Proposal worker cannot choose a fallback | host bridge/worker boundary and bounded worker renewal | red-team and process tests | healthy workers renew before their per-process wall limit; failures still close the lane and reap the worker group |
 | Policy cannot certify or score | proposal bridge/M4 broker | scorer/M4 isolation tests | selected plan is the only scored plan; M4 remains sole authority |
 | Proposal-ranking checkpoint identity is exact | checkpoint/recovery | checkpoint/resume tests | resume rejected on any identity drift |
 | Proposal-ranking optimization preserves the frozen contract | host pool/worker/profile boundary | batch parity, replay, profile and performance-matrix gates | any hash, RNG, limit, schema, scorer, M4, or lane-state drift fails closed |
