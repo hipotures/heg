@@ -1986,7 +1986,7 @@ def import_campaign_snapshot_fixture(
 ) -> dict[str, Any]:
     """Create an isolated live-comparison workspace from one scientific snapshot."""
 
-    from .research.context import prepare_director_state_v2
+    from .research.context import model_alias_ids, prepare_director_state_v2
     from .research.context_screen import build_context_screen_prompt
     from .research.director import base_instructions
     from .research.protocol import director_decision_schema
@@ -2078,18 +2078,18 @@ def import_campaign_snapshot_fixture(
             raise ValueError("source snapshot artifact has an unexpected shape")
 
         prepared = prepare_director_state_v2(snapshot)
-        state = prepared.state
+        state = prepared.model_state
         materials = {
             "prompt": build_context_screen_prompt(snapshot),
             "output_schema": director_decision_schema(
                 state["allowed_action_space"],
-                existing_hypothesis_ids=evidence_registry_ids(
-                    prepared.evidence_registry,
-                    kinds=frozenset({"hypothesis"}),
+                existing_hypothesis_ids=model_alias_ids(
+                    prepared.alias_registry, kind="hypothesis"
                 ),
-                submitted_evidence_ids=evidence_registry_ids(
-                    prepared.evidence_registry
+                submitted_evidence_ids=model_alias_ids(
+                    prepared.alias_registry, kind="evidence"
                 ),
+                snapshot_alias=prepared.alias_registry.get("snapshot_alias"),
             ),
             "applicable_action_space": state["allowed_action_space"],
             "evidence_registry": prepared.evidence_registry,

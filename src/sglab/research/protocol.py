@@ -446,6 +446,7 @@ def director_decision_schema(
     existing_hypothesis_ids: Any = (),
     submitted_evidence_ids: Any | None = None,
     action_id_prefix: str | None = None,
+    snapshot_alias: str | None = None,
 ) -> dict[str, Any]:
     """Return the structured schema for the submitted applicable actions."""
 
@@ -795,6 +796,9 @@ def director_decision_schema(
         raise ValueError(
             "applicable action space produced no schema-supported actions"
         )
+    snapshot_schema: dict[str, Any] = {"type": "string"}
+    if snapshot_alias:
+        snapshot_schema["const"] = snapshot_alias
     schema = {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "title": "SglabDirectorDecisionBatchV1",
@@ -810,7 +814,7 @@ def director_decision_schema(
         ],
         "properties": {
             "schema_version": {"type": "string", "const": "1.0"},
-            "snapshot_id": {"type": "string"},
+            "snapshot_id": snapshot_schema,
             "campaign_assessment": {
                 "type": "string",
                 "minLength": 1,

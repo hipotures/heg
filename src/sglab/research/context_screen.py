@@ -17,6 +17,7 @@ from .context import (
     DirectorContextMode,
     complete_context_size_report,
     evidence_registry_ids,
+    model_alias_ids,
     prepare_director_state_v2,
 )
 from .director import ActiveDirector, base_instructions
@@ -42,11 +43,10 @@ SAFE_ITEM_TYPES = {"userMessage", "reasoning", "agentMessage"}
 
 def build_context_screen_prompt(snapshot: dict[str, Any]) -> str:
     prepared = prepare_director_state_v2(snapshot)
-    state = prepared.state
+    state = prepared.model_state
     applicable = state["allowed_action_space"]
-    hypothesis_ids = evidence_registry_ids(
-        prepared.evidence_registry,
-        kinds=frozenset({"hypothesis"}),
+    hypothesis_ids = model_alias_ids(
+        prepared.alias_registry, kind="hypothesis"
     )
     payload = {
         "objective": (
@@ -77,11 +77,11 @@ def build_context_screen_prompt(snapshot: dict[str, Any]) -> str:
         "applicable_action_description": {
             "actions": applicable["actions"],
             "why_applicable": applicable["action_applicability"],
-            "active_executable_lane_ids": applicable[
+            "active_executable_lane_aliases": applicable[
                 "active_executable_lane_ids"
             ],
-            "historical_lane_ids_are_evidence_not_execution_targets": (
-                applicable["historical_lane_ids"]
+            "historical_lane_count": applicable.get(
+                "historical_lane_count", 0
             ),
         },
         "hypothesis_update_contract": hypothesis_update_contract(
@@ -113,14 +113,14 @@ def prepare_context_screen_phase_a(
         snapshot = states[state_label]
         prepared = prepare_director_state_v2(snapshot)
         schema = director_decision_schema(
-            prepared.state["allowed_action_space"],
-            existing_hypothesis_ids=evidence_registry_ids(
-                prepared.evidence_registry,
-                kinds=frozenset({"hypothesis"}),
+            prepared.model_state["allowed_action_space"],
+            existing_hypothesis_ids=model_alias_ids(
+                prepared.alias_registry, kind="hypothesis"
             ),
-            submitted_evidence_ids=evidence_registry_ids(
-                prepared.evidence_registry
+            submitted_evidence_ids=model_alias_ids(
+                prepared.alias_registry, kind="evidence"
             ),
+            snapshot_alias=prepared.alias_registry.get("snapshot_alias"),
         )
         schema_bytes = canonical_json(schema, max_bytes=1024 * 1024)
         prompt = build_context_screen_prompt(snapshot)
@@ -1014,14 +1014,14 @@ def _measurement_turn(
     prompt = build_context_screen_prompt(snapshot)
     prompt_bytes = prompt.encode("ascii")
     output_schema = director_decision_schema(
-        prepared.state["allowed_action_space"],
-        existing_hypothesis_ids=evidence_registry_ids(
-            prepared.evidence_registry,
-            kinds=frozenset({"hypothesis"}),
+        prepared.model_state["allowed_action_space"],
+        existing_hypothesis_ids=model_alias_ids(
+            prepared.alias_registry, kind="hypothesis"
         ),
-        submitted_evidence_ids=evidence_registry_ids(
-            prepared.evidence_registry
+        submitted_evidence_ids=model_alias_ids(
+            prepared.alias_registry, kind="evidence"
         ),
+        snapshot_alias=prepared.alias_registry.get("snapshot_alias"),
     )
     schema_bytes = canonical_json(output_schema, max_bytes=1024 * 1024)
     action = (
@@ -1192,14 +1192,14 @@ def _incomplete_measurement_turn(
         prepared.state, max_bytes=DIRECTOR_STATE_MAX_BYTES
     )
     output_schema = director_decision_schema(
-        prepared.state["allowed_action_space"],
-        existing_hypothesis_ids=evidence_registry_ids(
-            prepared.evidence_registry,
-            kinds=frozenset({"hypothesis"}),
+        prepared.model_state["allowed_action_space"],
+        existing_hypothesis_ids=model_alias_ids(
+            prepared.alias_registry, kind="hypothesis"
         ),
-        submitted_evidence_ids=evidence_registry_ids(
-            prepared.evidence_registry
+        submitted_evidence_ids=model_alias_ids(
+            prepared.alias_registry, kind="evidence"
         ),
+        snapshot_alias=prepared.alias_registry.get("snapshot_alias"),
     )
     schema_bytes = canonical_json(output_schema, max_bytes=1024 * 1024)
     request_path = campaign_dir / str(row["request_artifact_ref"])

@@ -26,6 +26,7 @@ from .context import (
     PreparedDirectorState,
     complete_context_size_report,
     evidence_registry_ids,
+    model_alias_ids,
     prepare_director_state_v2,
 )
 from .protocol import (
@@ -37,7 +38,11 @@ from .protocol import (
     hypothesis_update_contract,
 )
 from .store import ResearchStore, new_id
-from .validation import DecisionContext, validate_decision
+from .validation import (
+    DecisionContext,
+    resolve_decision_aliases,
+    validate_decision,
+)
 
 
 CLIENT_CONTEXT_COMPACTION_HEADROOM_BYTES = 1024
@@ -90,15 +95,13 @@ def build_director_prompt(snapshot: dict[str, Any]) -> str:
         else None
     )
     prepared = prepare_director_state_v2(snapshot)
-    director_state = prepared.state
+    director_state = prepared.model_state
     applicable = director_state["allowed_action_space"]
-    hypothesis_ids = evidence_registry_ids(
-        prepared.evidence_registry,
-        kinds=frozenset({"hypothesis"}),
+    hypothesis_ids = model_alias_ids(
+        prepared.alias_registry, kind="hypothesis"
     )
     identity_contract = _prompt_action_identity_contract(
         snapshot,
-        str(snapshot["snapshot_id"]),
     )
     payload = {
         "objective": (
@@ -106,7 +109,7 @@ def build_director_prompt(snapshot: dict[str, Any]) -> str:
             "Search may change while this turn is processed; target explicit "
             "lane versions from this committed snapshot."
         ),
-        "immutable_target": target,
+        "immutable_target": director_state.get("target", {}),
         "acceptance_control": acceptance_control,
         "applicable_action_description": {
             "source": "director_state_v2.allowed_action_space",
@@ -135,6 +138,27 @@ def build_director_prompt(snapshot: dict[str, Any]) -> str:
             "instruction": (
                 "Use only the listed actions and current executable target "
                 "IDs. Historical IDs are evidence, not execution targets."
+            ),
+        },
+        "target_alias_contract": {
+            "schema_version": prepared.alias_registry.get(
+                "schema_version", "1.0"
+            ),
+            "roles": {
+                "snapshot": "S#",
+                "lane": "L#",
+                "candidate": "C#",
+                "checkpoint": "K#",
+                "hypothesis": "H#",
+                "evidence": "E#",
+            },
+            "mapping": (
+                "Aliases are valid only for this committed turn. The host "
+                "resolves them before durable validation; do not invent or "
+                "reuse durable IDs."
+            ),
+            "omitted_target_counts": dict(
+                prepared.alias_registry.get("omitted_target_counts", {})
             ),
         },
         "proposal_ranking_contract": director_state[
@@ -167,12 +191,11 @@ def build_director_prompt(snapshot: dict[str, Any]) -> str:
 
 def _prompt_action_identity_contract(
     snapshot: dict[str, Any],
-    snapshot_id: str,
 ) -> dict[str, Any]:
-    """Keep collision guidance without repeating durable action IDs."""
+    """Keep collision guidance without repeating durable IDs in the prompt."""
 
     contract = action_identity_contract(
-        snapshot_id,
+        "model-turn",
         recent_reserved_action_ids=(
             item.get("action_id")
             for item in snapshot.get("recent_actions", [])
@@ -180,6 +203,7 @@ def _prompt_action_identity_contract(
         ),
     )
     reserved = contract.pop("recent_reserved_action_ids", [])
+    contract["recommended_prefix"] = "action-"
     contract["recent_reserved_action_id_count"] = len(reserved)
     contract["collision_authority"] = (
         "durable workspace validation; reserved IDs are intentionally "
@@ -455,6 +479,11 @@ class ActiveDirector:
             / "executable-target-registries"
             / f"{turn_record_id}.json"
         )
+        alias_registry_relative = (
+            Path("director")
+            / "alias-registries"
+            / f"{turn_record_id}.json"
+        )
         action_space_relative = (
             Path("director")
             / "applicable-action-spaces"
@@ -481,7 +510,7 @@ class ActiveDirector:
                 raise
         parsed_prompt = _json_object(prompt)
         supplied_state = parsed_prompt.get("director_state_v2")
-        if supplied_state != prepared_state.state:
+        if supplied_state != prepared_state.model_state:
             raise RuntimeError(
                 "prompt DirectorStateV2 does not match the committed snapshot"
             )
@@ -490,7 +519,7 @@ class ActiveDirector:
         client_compaction_recovered_limit: int | None = None
         client_compaction_failure: str | None = None
         while True:
-            parsed_prompt["director_state_v2"] = prepared_state.state
+            parsed_prompt["director_state_v2"] = prepared_state.model_state
             prompt = canonical_json(
                 parsed_prompt, max_bytes=MAX_SNAPSHOT_BYTES
             ).decode("ascii")
@@ -525,12 +554,17 @@ class ActiveDirector:
                 ),
             )
             output_schema = director_decision_schema(
-                prepared_state.state["allowed_action_space"],
-                existing_hypothesis_ids=validation_context.hypothesis_ids,
-                submitted_evidence_ids=validation_context.evidence_ids,
-                action_id_prefix=action_identity_contract(
-                    snapshot_id
-                )["recommended_prefix"],
+                prepared_state.model_state["allowed_action_space"],
+                existing_hypothesis_ids=model_alias_ids(
+                    prepared_state.alias_registry, kind="hypothesis"
+                ),
+                submitted_evidence_ids=model_alias_ids(
+                    prepared_state.alias_registry, kind="evidence"
+                ),
+                action_id_prefix="action-",
+                snapshot_alias=prepared_state.alias_registry.get(
+                    "snapshot_alias"
+                ),
             )
             context_report = complete_context_size_report(
                 prepared_state,
@@ -614,18 +648,22 @@ class ActiveDirector:
                 client_compaction_recovered_limit is not None
             )
         registry_bytes = canonical_json(
-            prepared_state.evidence_registry, max_bytes=128 * 1024
+            prepared_state.evidence_registry, max_bytes=4 * 1024 * 1024
         )
         advisory_registry_bytes = canonical_json(
             prepared_state.advisory_target_registry,
-            max_bytes=128 * 1024,
+            max_bytes=4 * 1024 * 1024,
         )
         executable_registry_bytes = canonical_json(
             prepared_state.executable_target_registry,
-            max_bytes=128 * 1024,
+            max_bytes=4 * 1024 * 1024,
         )
         action_space_bytes = canonical_json(
             prepared_state.state["allowed_action_space"],
+            max_bytes=128 * 1024,
+        )
+        alias_registry_bytes = canonical_json(
+            prepared_state.alias_registry,
             max_bytes=128 * 1024,
         )
         _write_private(
@@ -643,6 +681,10 @@ class ActiveDirector:
         _write_private(
             self.campaign_dir / action_space_relative,
             action_space_bytes + b"\n",
+        )
+        _write_private(
+            self.campaign_dir / alias_registry_relative,
+            alias_registry_bytes + b"\n",
         )
         context_bytes = canonical_json(
             context_report, max_bytes=128 * 1024
@@ -675,6 +717,8 @@ class ActiveDirector:
             "evidence_registry_sha256": (
                 prepared_state.evidence_registry_sha256
             ),
+            "alias_registry_artifact_ref": str(alias_registry_relative),
+            "alias_registry_sha256": prepared_state.alias_registry_sha256,
             "advisory_target_registry_artifact_ref": str(
                 advisory_registry_relative
             ),
@@ -763,9 +807,19 @@ class ActiveDirector:
             wire = take_wire() if callable(take_wire) else self.client.wire_bytes
             _write_private(self.campaign_dir / wire_relative, wire)
             self._prune_wire_artifacts()
-            validation = validate_decision(
-                result.parsed, validation_context
+            resolved_decision, alias_issues = resolve_decision_aliases(
+                result.parsed,
+                prepared_state.alias_registry,
             )
+            validation = validate_decision(
+                resolved_decision, validation_context
+            )
+            if alias_issues:
+                validation = DecisionValidation(
+                    False,
+                    (*alias_issues, *validation.issues),
+                    None,
+                )
             validation_detail = _validation_detail(validation)
             self.store.complete_turn(
                 turn_record_id,
@@ -818,14 +872,12 @@ class ActiveDirector:
                     "the response from the submitted state and validation "
                     "errors."
                 ),
-                "director_state_v2": prepared_state.state,
-                "invalid_response_sha256": hashlib.sha256(
-                    response_bytes
-                ).hexdigest(),
+                "director_state_v2": prepared_state.model_state,
+                "invalid_response_artifact": "stored-artifact",
+                "invalid_response_recorded": True,
                 "validation_errors": _validation_issue_payload(validation),
                 "action_identity_contract": _prompt_action_identity_contract(
                     snapshot,
-                    snapshot_id,
                 ),
             }
             repair_prompt = canonical_json(

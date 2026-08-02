@@ -8,6 +8,7 @@ This is the authoritative engineering-invariant matrix.
 | Invalid decision never executes | schema/semantic validator | invalid/replan/passive-fault tests | persist; LLM permits one repair, invalid passive output faults immediately |
 | Zero-lane bootstrap is constructive | snapshot action-space projection, Director prompt/schema | issue-19 zero-lane bootstrap regression | expose `start_lane` when capacity exists; omit candidate/lane-target actions |
 | Validation diagnostics remain durable | app-server turn store/status projection | issue-19 repair persistence regression | retain bounded `{path,message}` issues for both invalid turns |
+| Model targets never expose durable IDs | Director alias projection/request artifacts/host resolver | issue-19 alias and prompt-bound checks | submit bounded per-turn aliases; resolve and role-check them before durable validation; unknown/stale aliases fail closed |
 | M4 alone certifies success | verification broker/terminal event | two-verifier gates | unknown/reject; no success |
 | Accepted candidate target is pinned | candidate store/action transaction | pin/pruning tests | reject action transaction |
 | M4 consumes immutable snapshot | verification job input | candidate snapshot tests | no mutable-row lookup |

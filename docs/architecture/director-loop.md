@@ -53,6 +53,15 @@ The action space carries compact target-ID lists. Evidence, advisory, and
 executable registries derive their roles from those lists; the prompt does not
 repeat a verbose object for every reference.
 
+Before rendering, the host projects these targets to deterministic per-turn
+semantic aliases (`S1` for the snapshot, `L*` for lanes, `C*` for candidates,
+`K*` for checkpoints, `H*` for hypotheses, and `E*` for evidence). The bounded
+alias-to-durable-ID registry is persisted as a private request artifact and is
+never included in the model prompt. Alias resolution happens before durable
+validation; unknown, stale, or role-mismatched aliases fail closed. Current
+snapshot continuity is authoritative over a stale scientific-memory
+projection, so a fresh zero-lane snapshot cannot resurrect old targets.
+
 For a fresh campaign with no active lanes and available lane capacity, the
 committed action space is constructive: it includes `start_lane` (and may
 include the lane-independent `set_review_trigger`). Candidate-dependent

@@ -33,6 +33,13 @@ compact lane-lifecycle map. Reference registries deterministically recover
 status and evidence/advisory/executable roles from these values. A duplicated
 per-reference object list is not part of the model-facing contract.
 
+The model-facing lists use deterministic per-turn aliases rather than durable
+IDs: `S*` snapshots, `L*` lanes, `C*` candidates, `K*` checkpoints, `H*`
+hypotheses, and `E*` evidence. The host persists the bounded alias registry in
+`director/alias-registries/` and resolves aliases before semantic validation;
+the mapping is not sent to the model. Alias roles are checked explicitly, and
+unknown or stale aliases are rejected with a bounded validation issue.
+
 When the immutable campaign plan enables proposal ranking, the action space
 also carries the exact reviewed `mutation_forge_stage4r_v1` contract. New
 simulated-annealing and ILS/ILS-tabu starts must name that ID; `random_restart`
@@ -152,7 +159,8 @@ One invalid result may produce a repair request containing:
 
 - same scientific state;
 - validation errors;
-- invalid-response SHA-256;
+- an opaque reference to the recorded invalid response (its SHA-256 remains
+  in the private artifact/store record, not in the model prompt);
 - no duplicated full rejected response.
 
 The repair must keep the same snapshot ID.

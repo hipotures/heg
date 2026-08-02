@@ -33,6 +33,7 @@ from .protocol import (
 )
 
 IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+MODEL_ALIAS = re.compile(r"^[SCLKHEOA][1-9][0-9]*$")
 COMMON_ACTION_FIELDS = {
     "action_id",
     "type",
@@ -111,6 +112,228 @@ class DecisionContext:
         except ValueError as error:
             raise ValueError(str(error)) from error
         object.__setattr__(self, "proposal_ranking_catalog_id", normalized)
+
+
+def resolve_decision_aliases(
+    value: Any,
+    alias_registry: dict[str, Any],
+) -> tuple[Any, tuple[ValidationIssue, ...]]:
+    """Resolve model-facing per-turn aliases before durable validation.
+
+    The model only receives aliases such as ``C1`` and ``L1``.  Durable IDs
+    are intentionally kept in a private, persisted registry and are restored
+    here at the host boundary.  Alias errors are returned separately so the
+    caller can persist the exact path and message alongside normal semantic
+    validation failures.
+    """
+
+    resolved = copy.deepcopy(value)
+    issues: list[ValidationIssue] = []
+    if not isinstance(resolved, dict):
+        return resolved, (ValidationIssue("$", "must be an object"),)
+    entries = alias_registry.get("aliases", [])
+    lookup: dict[str, tuple[str, str]] = {}
+    if isinstance(entries, list):
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            alias = entry.get("alias")
+            durable_id = entry.get("durable_id")
+            kind = entry.get("kind")
+            if (
+                isinstance(alias, str)
+                and isinstance(durable_id, str)
+                and isinstance(kind, str)
+            ):
+                lookup[alias] = (durable_id, kind)
+    def raw_durable(value: str) -> bool:
+        return value.startswith(
+            (
+                "candidate-",
+                "checkpoint-",
+                "lane-",
+                "hyp-",
+                "snapshot-",
+                "campaign-",
+                "execution-attempt-",
+                "thread-",
+                "app-turn-",
+                "decision-batch-",
+            )
+        ) or (
+            len(value) == 64
+            and all(character in "0123456789abcdef" for character in value)
+        )
+
+    def resolve(
+        raw: Any,
+        path: str,
+        expected_kinds: frozenset[str],
+        *,
+        required: bool = True,
+    ) -> Any:
+        if raw is None and not required:
+            return raw
+        if not isinstance(raw, str):
+            return raw
+        mapped = lookup.get(raw)
+        if mapped is not None:
+            durable_id, kind = mapped
+            if kind not in expected_kinds:
+                issues.append(
+                    ValidationIssue(
+                        path,
+                        f"alias {raw} has role {kind}, expected "
+                        f"{','.join(sorted(expected_kinds))}",
+                    )
+                )
+                return raw
+            return durable_id
+        if MODEL_ALIAS.fullmatch(raw):
+            issues.append(
+                ValidationIssue(path, f"unknown or stale alias {raw}")
+            )
+        elif raw_durable(raw):
+            issues.append(
+                ValidationIssue(
+                    path,
+                    "raw durable ID is not accepted; use a per-turn alias",
+                )
+            )
+        return raw
+
+    resolved["snapshot_id"] = resolve(
+        resolved.get("snapshot_id"),
+        "$.snapshot_id",
+        frozenset({"snapshot"}),
+    )
+    updates = resolved.get("hypothesis_updates")
+    if isinstance(updates, list):
+        for index, update in enumerate(updates):
+            if not isinstance(update, dict):
+                continue
+            path = f"$.hypothesis_updates[{index}]"
+            operation = update.get("operation")
+            if operation == HYPOTHESIS_CREATE_OPERATION:
+                hypothesis_id = update.get("hypothesis_id")
+                if isinstance(hypothesis_id, str) and MODEL_ALIAS.fullmatch(
+                    hypothesis_id
+                ):
+                    issues.append(
+                        ValidationIssue(
+                            f"{path}.hypothesis_id",
+                            "aliases cannot be used to create a hypothesis",
+                        )
+                    )
+            else:
+                update["hypothesis_id"] = resolve(
+                    update.get("hypothesis_id"),
+                    f"{path}.hypothesis_id",
+                    frozenset({"hypothesis"}),
+                )
+            for field in ("evidence_for", "evidence_against"):
+                values = update.get(field)
+                if isinstance(values, list):
+                    update[field] = [
+                        resolve(
+                            item,
+                            f"{path}.{field}[{item_index}]",
+                            frozenset({"evidence"}),
+                        )
+                        for item_index, item in enumerate(values)
+                    ]
+
+    actions = resolved.get("actions")
+    if isinstance(actions, list):
+        for index, action in enumerate(actions):
+            if not isinstance(action, dict):
+                continue
+            path = f"$.actions[{index}]"
+            for field in ("hypothesis_ids", "evidence_ids"):
+                values = action.get(field)
+                if not isinstance(values, list):
+                    continue
+                kind = "hypothesis" if field == "hypothesis_ids" else "evidence"
+                action[field] = [
+                    resolve(
+                        item,
+                        f"{path}.{field}[{item_index}]",
+                        frozenset({kind}),
+                    )
+                    for item_index, item in enumerate(values)
+                ]
+            action_type = action.get("type")
+            if action_type in {
+                "patch_lane",
+                "fork_lane",
+                "restart_lane",
+                "stop_lane",
+            }:
+                action["lane_id"] = resolve(
+                    action.get("lane_id"),
+                    f"{path}.lane_id",
+                    frozenset({"lane"}),
+                )
+            elif action_type == "reallocate_resources":
+                allocations = action.get("allocations")
+                if isinstance(allocations, list):
+                    for allocation_index, allocation in enumerate(allocations):
+                        if isinstance(allocation, dict):
+                            allocation["lane_id"] = resolve(
+                                allocation.get("lane_id"),
+                                f"{path}.allocations[{allocation_index}].lane_id",
+                                frozenset({"lane"}),
+                            )
+            if action_type == "fork_lane":
+                action["checkpoint_id"] = resolve(
+                    action.get("checkpoint_id"),
+                    f"{path}.checkpoint_id",
+                    frozenset({"checkpoint"}),
+                )
+            elif action_type == "restart_lane":
+                spec = action.get("restart_spec")
+                if isinstance(spec, dict):
+                    spec["checkpoint_id"] = resolve(
+                        spec.get("checkpoint_id"),
+                        f"{path}.restart_spec.checkpoint_id",
+                        frozenset({"checkpoint"}),
+                        required=False,
+                    )
+                    spec["candidate_id"] = resolve(
+                        spec.get("candidate_id"),
+                        f"{path}.restart_spec.candidate_id",
+                        frozenset({"candidate"}),
+                        required=False,
+                    )
+            elif action_type == "promote_candidate":
+                action["candidate_id"] = resolve(
+                    action.get("candidate_id"),
+                    f"{path}.candidate_id",
+                    frozenset({"candidate"}),
+                )
+            elif action_type == "schedule_verification":
+                values = action.get("candidate_ids")
+                if isinstance(values, list):
+                    action["candidate_ids"] = [
+                        resolve(
+                            item,
+                            f"{path}.candidate_ids[{item_index}]",
+                            frozenset({"candidate"}),
+                        )
+                        for item_index, item in enumerate(values)
+                    ]
+            elif action_type == "request_diagnostic":
+                values = action.get("subject_ids")
+                if isinstance(values, list):
+                    action["subject_ids"] = [
+                        resolve(
+                            item,
+                            f"{path}.subject_ids[{item_index}]",
+                            frozenset({"lane", "candidate"}),
+                        )
+                        for item_index, item in enumerate(values)
+                    ]
+    return resolved, tuple(issues)
 
 
 class _Issues:

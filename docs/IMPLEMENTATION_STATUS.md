@@ -29,6 +29,15 @@ without a paid model turn. The existing experiment identity and workspace
 remain unchanged; no scoring, verifier authority, or ranking policy bytes were
 changed.
 
+The model-facing projection assigns deterministic per-turn `S1`, `L1`, `C1`,
+`K1`, `H1`, and `E1` aliases. A bounded private alias registry is persisted
+with each Director request; the host resolves aliases before durable
+validation, while unknown, stale, and role-mismatched aliases fail closed.
+Current snapshot continuity overrides stale scientific-memory target lists, and
+the model receives only bounded candidate/checkpoint subsets with omitted-count
+summaries and verifier status counts. Durable IDs remain in SQLite and private
+artifacts, never in the model prompt.
+
 ## Issue #20 — AI candidate archive and Director turn capsules
 
 The exact Mutation Forge Stage 4R recovery archive is now imported under

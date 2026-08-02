@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from enum import StrEnum
 from math import ceil
@@ -32,9 +33,20 @@ MAX_GLOBAL_RECORD_SUMMARIES = 8
 MAX_FINAL_BEST_ANCESTORS = 8
 EVIDENCE_REGISTRY_VERSION = "1.0"
 REFERENCE_REGISTRY_VERSION = "2.0"
+REFERENCE_SOURCE_MAX_BYTES = 4 * 1024 * 1024
 ACTIVE_LANE_STATES = frozenset(
     {"starting", "running", "paused", "stopping"}
 )
+MODEL_ALIAS_VERSION = "1.0"
+MODEL_ALIAS_LIMITS = {
+    "lane": 16,
+    "candidate": 16,
+    "checkpoint": 16,
+    "hypothesis": 16,
+    "evidence": 32,
+    "outcome": 16,
+    "action": 16,
+}
 
 
 class DirectorContextMode(StrEnum):
@@ -58,6 +70,9 @@ class DirectorContextBudgetExceeded(RuntimeError):
 @dataclass(frozen=True, slots=True)
 class PreparedDirectorState:
     state: dict[str, Any]
+    model_state: dict[str, Any]
+    alias_registry: dict[str, Any]
+    alias_registry_sha256: str
     pre_compaction: dict[str, Any]
     size_report: dict[str, Any]
     evidence_registry: dict[str, Any]
@@ -192,6 +207,7 @@ def prepare_director_state_v2(
     """Build and deterministically compact model-facing scientific state."""
 
     pre, state = _director_state_before_total_compaction(snapshot)
+    authoritative_state = json.loads(json.dumps(state))
     ancestry = state["ancestry"]
     while _json_size(state) > hard_limit_bytes:
         if ancestry["final_best_accepted_ancestors"]:
@@ -212,6 +228,8 @@ def prepare_director_state_v2(
             ).project(state)
         except ScientificStateOverflow:
             pass
+    if _json_size(state) > hard_limit_bytes:
+        _bound_state_targets_for_transport(state)
     within_state_limits = (
         _json_size(state) <= hard_limit_bytes
         and _json_size(ancestry) <= ANCESTRY_MAX_BYTES
@@ -255,21 +273,28 @@ def prepare_director_state_v2(
         != payload,
         "within_state_limits": within_state_limits,
     }
-    registries = build_reference_registries(state)
+    registries = build_reference_registries(authoritative_state)
+    model_state, alias_registry = _model_alias_projection(
+        authoritative_state, registries
+    )
+    alias_bytes = canonical_json(alias_registry, max_bytes=128 * 1024)
     evidence_registry = registries["evidence_ids"]
     advisory_registry = registries["advisory_target_ids"]
     executable_registry = registries["executable_target_ids"]
     evidence_bytes = canonical_json(
-        evidence_registry, max_bytes=128 * 1024
+        evidence_registry, max_bytes=REFERENCE_SOURCE_MAX_BYTES
     )
     advisory_bytes = canonical_json(
-        advisory_registry, max_bytes=128 * 1024
+        advisory_registry, max_bytes=REFERENCE_SOURCE_MAX_BYTES
     )
     executable_bytes = canonical_json(
-        executable_registry, max_bytes=128 * 1024
+        executable_registry, max_bytes=REFERENCE_SOURCE_MAX_BYTES
     )
     return PreparedDirectorState(
         state=state,
+        model_state=model_state,
+        alias_registry=alias_registry,
+        alias_registry_sha256=hashlib.sha256(alias_bytes).hexdigest(),
         pre_compaction=pre,
         size_report=report,
         evidence_registry=evidence_registry,
@@ -290,6 +315,53 @@ def prepare_director_state_v2(
     )
 
 
+def _bound_state_targets_for_transport(state: dict[str, Any]) -> None:
+    """Keep the durable prompt-side state bounded after registry growth.
+
+    Full target identity remains in the committed snapshot and the private
+    reference/alias artifacts.  This transport copy only needs enough IDs to
+    describe the current bounded model projection; validation uses the
+    authoritative registries built before this reduction.
+    """
+
+    action_space = state.get("allowed_action_space")
+    if isinstance(action_space, dict):
+        for key, limit in (
+            ("active_executable_lane_ids", MODEL_ALIAS_LIMITS["lane"]),
+            ("candidate_target_ids", MODEL_ALIAS_LIMITS["candidate"]),
+            ("diagnostic_subject_ids", MODEL_ALIAS_LIMITS["evidence"]),
+            ("checkpoint_target_ids", MODEL_ALIAS_LIMITS["checkpoint"]),
+            ("historical_lane_ids", MODEL_ALIAS_LIMITS["lane"]),
+        ):
+            values = action_space.get(key)
+            if isinstance(values, list) and len(values) > limit:
+                action_space[key] = values[:limit]
+        for key in ("active_lane_versions", "lane_lifecycle_states"):
+            values = action_space.get(key)
+            if isinstance(values, dict) and len(values) > MODEL_ALIAS_LIMITS["lane"]:
+                action_space[key] = dict(
+                    list(sorted(values.items()))[: MODEL_ALIAS_LIMITS["lane"]]
+                )
+    continuity = state.get("continuity")
+    if not isinstance(continuity, dict):
+        return
+    for key, limit in (
+        ("current_executable_candidate_ids", MODEL_ALIAS_LIMITS["candidate"]),
+        ("current_executable_checkpoint_ids", MODEL_ALIAS_LIMITS["checkpoint"]),
+        ("candidate_ledger", MODEL_ALIAS_LIMITS["candidate"]),
+        ("lane_and_checkpoint_ledger", MODEL_ALIAS_LIMITS["lane"]),
+        ("hypothesis_ledger", MODEL_ALIAS_LIMITS["hypothesis"]),
+        ("exact_verifier_outcomes", 8),
+        ("validation_feedback", MODEL_ALIAS_LIMITS["action"]),
+    ):
+        values = continuity.get(key)
+        if isinstance(values, list) and len(values) > limit:
+            continuity[key] = values[:limit]
+    artifacts = state.get("artifact_references")
+    if isinstance(artifacts, list) and len(artifacts) > 8:
+        state["artifact_references"] = artifacts[:8]
+
+
 def director_state_v2_memory_input(
     snapshot: dict[str, Any],
 ) -> dict[str, Any]:
@@ -306,6 +378,49 @@ def _director_state_before_total_compaction(
     if isinstance(projected, dict):
         pre = json.loads(json.dumps(projected))
         state = json.loads(json.dumps(projected))
+        # The scientific-memory projection is a bounded model summary, not
+        # the authority for current executable targets.  Overlay the
+        # explicitly persisted continuity fields from this committed
+        # snapshot so a stale projection cannot resurrect lanes or candidates
+        # in a fresh zero-lane campaign.
+        snapshot_continuity = snapshot.get("continuity")
+        if isinstance(snapshot_continuity, dict):
+            state_continuity = state.get("continuity")
+            if not isinstance(state_continuity, dict):
+                state_continuity = {}
+                state["continuity"] = state_continuity
+            for key in (
+                "current_executable_candidate_ids",
+                "current_executable_checkpoint_ids",
+                "candidate_ledger",
+                "lane_and_checkpoint_ledger",
+                "exact_verifier_outcomes",
+                "hypothesis_ledger",
+            ):
+                if key in snapshot_continuity:
+                    state_continuity[key] = json.loads(
+                        json.dumps(snapshot_continuity[key])
+                    )
+        # A newly committed campaign can legitimately have an old memory
+        # projection from a prior failed attempt.  When the authoritative
+        # snapshot has no lanes and no recent actions, clear projected
+        # outcome/best-result summaries as well; otherwise the model would be
+        # told to continue a portfolio that does not exist.
+        if (
+            isinstance(snapshot.get("lanes"), list)
+            and not snapshot["lanes"]
+            and isinstance(snapshot.get("recent_actions"), list)
+            and not snapshot["recent_actions"]
+        ):
+            state["best_ever_result"] = None
+            state["latest_batch_outcome"] = None
+            state["previous_outcomes"] = []
+            state["plateau"] = None
+            state["operator_aggregates"] = {}
+            state["stage_timing_percentages"] = {}
+            state["exact_verifier"] = None
+            state["parameter_effects"] = {}
+            state["previous_hypothesis"] = None
     else:
         pre = _unbounded_state(snapshot)
         state = json.loads(json.dumps(pre))
@@ -346,6 +461,484 @@ def build_evidence_registry(
     return build_reference_registries(director_state_v2)["evidence_ids"]
 
 
+def model_alias_ids(
+    registry: dict[str, Any], *, kind: str | None = None
+) -> frozenset[str]:
+    """Return only short aliases exposed to the model for one role/kind."""
+
+    values: set[str] = set()
+    for entry in registry.get("aliases", []):
+        if not isinstance(entry, dict):
+            continue
+        if kind is not None and entry.get("kind") != kind:
+            continue
+        alias = entry.get("alias")
+        if isinstance(alias, str) and alias:
+            values.add(alias)
+    return frozenset(values)
+
+
+def _model_alias_projection(
+    state: dict[str, Any],
+    registries: dict[str, dict[str, Any]],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Build a bounded model projection and its private durable-ID registry.
+
+    The durable state remains unchanged for host validation.  This projection
+    deliberately exposes only semantic summaries and short per-turn aliases;
+    the alias-to-durable mapping is written to a private artifact by the
+    Director turn boundary.
+    """
+
+    raw = json.loads(
+        canonical_json(state, max_bytes=REFERENCE_SOURCE_MAX_BYTES)
+    )
+    continuity = raw.get("continuity")
+    continuity = continuity if isinstance(continuity, dict) else {}
+    action_space = raw.get("allowed_action_space")
+    action_space = action_space if isinstance(action_space, dict) else {}
+    prefixes = {
+        "snapshot": "S",
+        "lane": "L",
+        "candidate": "C",
+        "checkpoint": "K",
+        "hypothesis": "H",
+        "evidence": "E",
+        "outcome": "O",
+        "action": "A",
+    }
+    counters: Counter[str] = Counter()
+    durable_to_alias: dict[tuple[str, str], str] = {}
+    aliases: list[dict[str, str]] = []
+
+    def add(kind: str, value: Any) -> str | None:
+        if not isinstance(value, str) or not value:
+            return None
+        key = (kind, value)
+        existing = durable_to_alias.get(key)
+        if existing is not None:
+            return existing
+        limit = MODEL_ALIAS_LIMITS.get(kind, 16)
+        if counters[kind] >= limit:
+            return None
+        counters[kind] += 1
+        alias = f"{prefixes.get(kind, 'R')}{counters[kind]}"
+        durable_to_alias[key] = alias
+        aliases.append(
+            {"alias": alias, "durable_id": value, "kind": kind}
+        )
+        return alias
+
+    snapshot_alias = add("snapshot", raw.get("source_snapshot_id"))
+
+    lane_states = action_space.get("lane_lifecycle_states", {})
+    lane_states = lane_states if isinstance(lane_states, dict) else {}
+    active_lane_ids = sorted(
+        {
+            str(value)
+            for value in action_space.get("active_executable_lane_ids", [])
+            if isinstance(value, str) and value
+        }
+    )
+    active_lane_ids = active_lane_ids[: MODEL_ALIAS_LIMITS["lane"]]
+    for value in active_lane_ids:
+        add("lane", value)
+
+    candidate_rows = {
+        str(item.get("candidate_id")): item
+        for item in continuity.get("candidate_ledger", [])
+        if isinstance(item, dict)
+        and isinstance(item.get("candidate_id"), str)
+    }
+    raw_candidate_ids = {
+        str(value)
+        for value in (
+            list(action_space.get("candidate_target_ids", []))
+            + list(continuity.get("current_executable_candidate_ids", []))
+        )
+        if isinstance(value, str) and value
+    }
+    explicit_candidate_targets = (
+        "current_executable_candidate_ids" in continuity
+        or "candidate_target_ids" in action_space
+    )
+    best_result = raw.get("best_ever_result")
+    if isinstance(best_result, dict) and isinstance(
+        best_result.get("candidate_id"), str
+    ) and (
+        not explicit_candidate_targets
+        or str(best_result["candidate_id"]) in raw_candidate_ids
+    ):
+        raw_candidate_ids.add(str(best_result["candidate_id"]))
+    verifier_candidates = {
+        str(item.get("candidate_id"))
+        for item in continuity.get("exact_verifier_outcomes", [])
+        if isinstance(item, dict)
+        and isinstance(item.get("candidate_id"), str)
+        and item.get("certification_status") not in {
+            "INVALID_CANDIDATE",
+            "rejected",
+        }
+    }
+    if not explicit_candidate_targets:
+        raw_candidate_ids.update(verifier_candidates)
+    else:
+        raw_candidate_ids.update(
+            value for value in verifier_candidates if value in raw_candidate_ids
+        )
+
+    def candidate_key(value: str) -> tuple[Any, ...]:
+        item = candidate_rows.get(value, {})
+        status = str(item.get("state") or "")
+        status_rank = {"promoted": 0, "retained": 1}.get(status, 2)
+        score = item.get("score")
+        ordering = (
+            tuple(score.get("ordering_key", []))
+            if isinstance(score, dict)
+            else (10**18,)
+        )
+        return (status_rank, ordering, value)
+
+    ordered_candidates = sorted(raw_candidate_ids, key=candidate_key)
+    selected_candidate_ids: list[str] = []
+    priority_candidates: list[str] = []
+    if isinstance(best_result, dict) and isinstance(
+        best_result.get("candidate_id"), str
+    ):
+        best_candidate_id = str(best_result["candidate_id"])
+        if best_candidate_id in raw_candidate_ids:
+            priority_candidates.append(best_candidate_id)
+    priority_candidates.extend(
+        value for value in sorted(verifier_candidates) if value in raw_candidate_ids
+    )
+    priority_candidates.extend(ordered_candidates)
+    for value in priority_candidates:
+        if not isinstance(value, str) or value in selected_candidate_ids:
+            continue
+        if len(selected_candidate_ids) >= MODEL_ALIAS_LIMITS["candidate"]:
+            break
+        selected_candidate_ids.append(value)
+        add("candidate", value)
+
+    raw_checkpoint_ids = {
+        str(value)
+        for value in (
+            list(action_space.get("checkpoint_target_ids", []))
+            + list(continuity.get("current_executable_checkpoint_ids", []))
+        )
+        if isinstance(value, str) and value
+    }
+    lane_ledger = continuity.get("lane_and_checkpoint_ledger", [])
+    checkpoint_priority: list[str] = []
+    if isinstance(lane_ledger, list):
+        for lane_id in active_lane_ids:
+            lane_checkpoints = [
+                item
+                for item in lane_ledger
+                if isinstance(item, dict)
+                and item.get("lane_id") == lane_id
+                and isinstance(item.get("checkpoint_id"), str)
+                and item.get("checkpoint_id")
+            ]
+            lane_checkpoints.sort(
+                key=lambda item: (
+                    -(
+                        float(item.get("telemetry_high_water", 0))
+                        if isinstance(
+                            item.get("telemetry_high_water"), (int, float)
+                        )
+                        else 0.0
+                    ),
+                    str(item.get("checkpoint_id")),
+                )
+            )
+            for item in lane_checkpoints[:2]:
+                checkpoint_priority.append(str(item["checkpoint_id"]))
+                raw_checkpoint_ids.add(str(item["checkpoint_id"]))
+    checkpoint_priority.extend(
+        value for value in sorted(raw_checkpoint_ids) if value not in checkpoint_priority
+    )
+    for value in checkpoint_priority[: MODEL_ALIAS_LIMITS["checkpoint"]]:
+        add("checkpoint", value)
+
+    raw_hypotheses = [
+        str(item.get("hypothesis_id"))
+        for item in continuity.get("hypothesis_ledger", [])
+        if isinstance(item, dict)
+        and isinstance(item.get("hypothesis_id"), str)
+    ]
+    for value in sorted(set(raw_hypotheses))[: MODEL_ALIAS_LIMITS["hypothesis"]]:
+        add("hypothesis", value)
+
+    for node in (raw.get("previous_outcomes", []), raw.get("artifact_references", [])):
+        if not isinstance(node, list):
+            continue
+        for item in node:
+            if not isinstance(item, dict):
+                continue
+            action_id = item.get("action_id")
+            batch_id = item.get("decision_batch_id")
+            if isinstance(action_id, str):
+                add("action", action_id)
+            if isinstance(batch_id, str):
+                add("outcome", batch_id)
+
+    selected_target_ids = (
+        set(active_lane_ids)
+        | set(selected_candidate_ids)
+        | raw_checkpoint_ids
+        | set(raw_hypotheses)
+    )
+    evidence_refs = registries.get("evidence_ids", {}).get("references", [])
+    evidence_candidates: list[str] = []
+    for reference in evidence_refs:
+        if not isinstance(reference, dict):
+            continue
+        identifier = reference.get("id")
+        kinds = set(reference.get("object_kinds", []))
+        if not isinstance(identifier, str) or not identifier:
+            continue
+        relevant = identifier in selected_target_ids or bool(
+            kinds.intersection({"hypothesis", "verification", "outcome"})
+        )
+        if not relevant and identifier.startswith("candidate-summary:"):
+            relevant = identifier.removeprefix("candidate-summary:") in set(
+                selected_candidate_ids
+            )
+        if relevant:
+            evidence_candidates.append(identifier)
+    for value in sorted(set(evidence_candidates))[: MODEL_ALIAS_LIMITS["evidence"]]:
+        add("evidence", value)
+
+    def alias_for(kind: str, value: Any) -> str | None:
+        if not isinstance(value, str) or not value:
+            return None
+        return durable_to_alias.get((kind, value))
+
+    id_keys = {
+        "source_snapshot_id": "snapshot",
+        "snapshot_id": "snapshot",
+        "lane_id": "lane",
+        "parent_lane_id": "lane",
+        "candidate_id": "candidate",
+        "best_candidate_identifier": "candidate",
+        "parent_candidate_id": "candidate",
+        "checkpoint_id": "checkpoint",
+        "checkpoint_ref": "checkpoint",
+        "decision_batch_id": "outcome",
+        "metric_window_id": "outcome",
+        "outcome_id": "outcome",
+        "action_id": "action",
+        "hypothesis_id": "hypothesis",
+        "evidence_id": "evidence",
+        "lane_ref": "lane",
+        "candidate_ref": "candidate",
+    }
+    list_keys = {
+        "candidate_ids": "candidate",
+        "current_executable_candidate_ids": "candidate",
+        "checkpoint_ids": "checkpoint",
+        "current_executable_checkpoint_ids": "checkpoint",
+        "hypothesis_ids": "hypothesis",
+        "evidence_ids": "evidence",
+    }
+
+    def looks_durable(value: str) -> bool:
+        return value.startswith(
+            (
+                "candidate-",
+                "checkpoint-",
+                "lane-",
+                "hyp-",
+                "action-",
+                "decision-batch-",
+                "app-turn-",
+                "execution-attempt-",
+                "campaign-",
+                "snapshot-",
+                "thread-",
+            )
+        ) or (len(value) == 64 and all(c in "0123456789abcdef" for c in value))
+
+    def sanitize(value: Any, key: str = "") -> Any:
+        if key in {"sha256", "artifact_sha256", "definition_sha256"} or key.endswith(
+            "_sha256"
+        ):
+            return "bound"
+        if key in {"artifact_ref", "certification_artifact_ref"}:
+            return "stored-artifact"
+        if key in {"thread_id", "attempt_id", "campaign_id"}:
+            return "current"
+        if key in id_keys:
+            return alias_for(id_keys[key], value) or "unavailable"
+        if key == "id" and isinstance(value, str):
+            for kind in (
+                "evidence",
+                "candidate",
+                "checkpoint",
+                "lane",
+                "hypothesis",
+                "outcome",
+                "action",
+            ):
+                alias = alias_for(kind, value)
+                if alias is not None:
+                    return alias
+            if looks_durable(value) or value.startswith(
+                ("candidate-summary:", "checkpoint-summary:")
+            ):
+                return "opaque"
+        if key in list_keys and isinstance(value, list):
+            kind = list_keys[key]
+            return [
+                alias
+                for item in value
+                if (alias := alias_for(kind, item)) is not None
+            ]
+        if isinstance(value, dict):
+            result: dict[str, Any] = {}
+            for child_key, child in value.items():
+                if child_key in {"active_lane_versions", "lane_lifecycle_states"} and isinstance(child, dict):
+                    result[child_key] = {
+                        alias: sanitize(item, child_key)
+                        for durable, item in child.items()
+                        if (alias := alias_for("lane", durable)) is not None
+                    }
+                    continue
+                result[child_key] = sanitize(child, str(child_key))
+            return result
+        if isinstance(value, list):
+            return [sanitize(item, key) for item in value]
+        if isinstance(value, str):
+            if looks_durable(value):
+                return "opaque"
+            return value
+        return value
+
+    model = sanitize(raw)
+    if not isinstance(model, dict):
+        model = {}
+    if snapshot_alias is not None:
+        model["source_snapshot_id"] = snapshot_alias
+    target = model.get("target")
+    if isinstance(target, dict):
+        target["definition_sha256"] = "bound"
+
+    model_continuity = model.get("continuity")
+    if not isinstance(model_continuity, dict):
+        model_continuity = {}
+        model["continuity"] = model_continuity
+    model_continuity["candidate_ledger"] = [
+        sanitize(item)
+        for item in continuity.get("candidate_ledger", [])
+        if isinstance(item, dict)
+        and item.get("candidate_id") in selected_candidate_ids
+    ][: MODEL_ALIAS_LIMITS["candidate"]]
+    model_continuity["hypothesis_ledger"] = [
+        sanitize(item)
+        for item in continuity.get("hypothesis_ledger", [])
+        if isinstance(item, dict)
+        and item.get("hypothesis_id") in raw_hypotheses
+        and alias_for("hypothesis", item.get("hypothesis_id")) is not None
+    ][: MODEL_ALIAS_LIMITS["hypothesis"]]
+    model_continuity["lane_and_checkpoint_ledger"] = [
+        sanitize(item)
+        for item in lane_ledger
+        if isinstance(item, dict)
+        and item.get("lane_id") in active_lane_ids
+    ][: MODEL_ALIAS_LIMITS["lane"]]
+    verifier_items = [
+        item
+        for item in continuity.get("exact_verifier_outcomes", [])
+        if isinstance(item, dict)
+        and item.get("candidate_id") in selected_candidate_ids
+    ][:8]
+    model_continuity["exact_verifier_outcomes"] = [
+        sanitize(item) for item in verifier_items
+    ]
+    model_continuity["exact_verifier_status_counts"] = dict(
+        Counter(
+            str(item.get("certification_status") or item.get("state") or "unknown")
+            for item in continuity.get("exact_verifier_outcomes", [])
+            if isinstance(item, dict)
+        )
+    )
+    model_continuity["current_executable_candidate_ids"] = [
+        alias
+        for value in selected_candidate_ids
+        if (alias := alias_for("candidate", value)) is not None
+    ]
+    model_continuity["current_executable_checkpoint_ids"] = [
+        alias
+        for value in checkpoint_priority[: MODEL_ALIAS_LIMITS["checkpoint"]]
+        if (alias := alias_for("checkpoint", value)) is not None
+    ]
+
+    model_action_space = model.get("allowed_action_space")
+    if not isinstance(model_action_space, dict):
+        model_action_space = {}
+        model["allowed_action_space"] = model_action_space
+    model_action_space["active_executable_lane_ids"] = [
+        alias
+        for value in active_lane_ids
+        if (alias := alias_for("lane", value)) is not None
+    ]
+    model_action_space["active_lane_versions"] = {
+        alias: int(version)
+        for value, version in action_space.get("active_lane_versions", {}).items()
+        if isinstance(version, int)
+        and (alias := alias_for("lane", value)) is not None
+    }
+    model_action_space["candidate_target_ids"] = [
+        alias
+        for value in selected_candidate_ids
+        if (alias := alias_for("candidate", value)) is not None
+    ]
+    model_action_space["diagnostic_subject_ids"] = [
+        alias
+        for value in sorted(
+            set(active_lane_ids) | set(selected_candidate_ids)
+        )
+        if (alias := alias_for("lane", value) or alias_for("candidate", value))
+        is not None
+    ]
+    model_action_space["checkpoint_target_ids"] = [
+        alias
+        for value in checkpoint_priority[: MODEL_ALIAS_LIMITS["checkpoint"]]
+        if (alias := alias_for("checkpoint", value)) is not None
+    ]
+    historical = action_space.get("historical_lane_ids", [])
+    model_action_space.pop("historical_lane_ids", None)
+    model_action_space["historical_lane_count"] = (
+        len(historical) if isinstance(historical, list) else 0
+    )
+    model_action_space["lane_lifecycle_states"] = {
+        alias: lane_states.get(value, "unknown")
+        for value in active_lane_ids
+        if (alias := alias_for("lane", value)) is not None
+    }
+    model_action_space["omitted_target_counts"] = {
+        "lanes": max(0, len(action_space.get("active_executable_lane_ids", [])) - len(active_lane_ids)),
+        "candidates": max(0, len(raw_candidate_ids) - len(selected_candidate_ids)),
+        "checkpoints": max(0, len(raw_checkpoint_ids) - min(len(raw_checkpoint_ids), MODEL_ALIAS_LIMITS["checkpoint"])),
+        "evidence": max(0, len(evidence_refs) - len(evidence_candidates)),
+    }
+
+    model["artifact_references"] = [
+        sanitize(item)
+        for item in raw.get("artifact_references", [])[:8]
+        if isinstance(item, dict)
+    ]
+    registry = {
+        "schema_version": MODEL_ALIAS_VERSION,
+        "role": "model_aliases",
+        "snapshot_alias": snapshot_alias,
+        "aliases": aliases,
+        "omitted_target_counts": model_action_space["omitted_target_counts"],
+    }
+    return model, registry
+
+
 def build_reference_registries(
     director_state_v2: dict[str, Any],
 ) -> dict[str, dict[str, Any]]:
@@ -353,11 +946,11 @@ def build_reference_registries(
 
     state = json.loads(
         canonical_json(
-            director_state_v2, max_bytes=DIRECTOR_STATE_MAX_BYTES
+            director_state_v2, max_bytes=REFERENCE_SOURCE_MAX_BYTES
         )
     )
     state_sha256 = hashlib.sha256(
-        canonical_json(state, max_bytes=DIRECTOR_STATE_MAX_BYTES)
+        canonical_json(state, max_bytes=REFERENCE_SOURCE_MAX_BYTES)
     ).hexdigest()
     references: dict[str, dict[str, Any]] = {}
 
