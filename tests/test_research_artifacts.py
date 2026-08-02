@@ -201,6 +201,9 @@ class DirectorCapsuleTests(unittest.TestCase):
             self.assertEqual(first["turn_count"], 12)
             self.assertTrue((workspace / "artifacts/README.md").is_file())
             capsule = workspace / "artifacts/director-turns/turn-0001"
+            readme = (capsule / "README.md").read_text()
+            self.assertIn("test scientific objective", readme)
+            self.assertIn("start_lane", readme)
             self.assertIn("test scientific objective", (capsule / "request.md").read_text())
             self.assertIn("lane-1", (capsule / "response.md").read_text())
             validation = json.loads((capsule / "validation.json").read_text())

@@ -201,6 +201,47 @@ def _validation_payload(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
+def _turn_prompt_payload(request: Any) -> dict[str, Any]:
+    if not isinstance(request, dict) or not isinstance(request.get("prompt"), str):
+        return {}
+    try:
+        payload = json.loads(str(request["prompt"]))
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _turn_objective(request: Any) -> str:
+    payload = _turn_prompt_payload(request)
+    return _truncate(payload.get("objective") or "Unavailable", 4000)
+
+
+def _turn_available_actions(request: Any) -> str:
+    payload = _turn_prompt_payload(request)
+    applicable = payload.get("applicable_action_description")
+    actions = applicable.get("actions", []) if isinstance(applicable, dict) else []
+    names = [
+        str(action.get("type", action.get("action_type", "unknown")))
+        for action in actions[:64]
+        if isinstance(action, dict)
+    ]
+    return _truncate(names, 6000)
+
+
+def _turn_validation_summary(validation: dict[str, Any]) -> str:
+    issues = validation.get("issues", [])
+    if not isinstance(issues, list) or not issues:
+        return f"{validation.get('status', 'unknown')} (none)"
+    return _truncate(
+        [
+            f"{issue.get('path', '')}: {issue.get('message', '')}"
+            for issue in issues
+            if isinstance(issue, dict)
+        ],
+        6000,
+    )
+
+
 def _turn_request_markdown(
     *,
     experiment_id: str,
@@ -576,6 +617,13 @@ def _project_turn(
                 f"Director model: `{row['model'] or 'unavailable'}`",
                 f"Reasoning effort: `{row['effort'] or 'unavailable'}`",
                 f"Started: `{row['started_at']}`; completed: `{row['completed_at'] or 'in progress'}`",
+                "",
+                f"Scientific objective: `{_turn_objective(request)}`",
+                f"Available actions: `{_turn_available_actions(request)}`",
+                f"Executable targets: `{request.get('executable_target_registry_artifact_ref') if isinstance(request, dict) else 'unavailable'}`",
+                f"Assessment: `{_truncate(response.get('campaign_assessment', 'Unavailable'), 4000) if isinstance(response, dict) else 'Unavailable'}`",
+                f"Validation issues: `{_turn_validation_summary(validation)}`",
+                f"Wall seconds: `{usage.get('wall_seconds') if usage.get('wall_seconds') is not None else 'unavailable'}`",
                 "",
                 "The request capsule contains the committed scientific task, state summary, available actions, and executable-target references.",
                 "The response capsule contains the assessment, hypotheses, actions, targets, parameters, and next review.",
