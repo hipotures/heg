@@ -203,6 +203,15 @@ class SnapshotBuilder:
             ],
             "creation_trigger": creation_trigger,
         }
+        # The bounded scientific-memory projection is the durable copy used
+        # to reconstruct the Director state and its exact executable target
+        # registry.  The top-level continuity ledger would otherwise repeat
+        # the full executable checkpoint-ID list byte-for-byte.  Remove only
+        # that duplicate after projection; the complete IDs remain in the
+        # projection, SQLite ledgers, and registry artifacts.
+        continuity = snapshot.get("continuity")
+        if isinstance(continuity, dict):
+            continuity.pop("current_executable_checkpoint_ids", None)
         canonical_json(snapshot, max_bytes=MAX_SNAPSHOT_BYTES)
         relative = Path("snapshots") / f"{snapshot_id}.json"
         path = self.campaign_dir / relative

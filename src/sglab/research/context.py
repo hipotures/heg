@@ -722,6 +722,29 @@ def _unbounded_state(snapshot: dict[str, Any]) -> dict[str, Any]:
         ),
         "continuity": dict(snapshot.get("continuity") or {}),
     }
+    # Older persisted snapshots and compact snapshots may keep the exact
+    # executable checkpoint IDs only in the bounded scientific-memory
+    # projection.  Rehydrate that field before deriving the action space so
+    # fork-target validation remains exact and fail-closed.
+    continuity = state["continuity"]
+    if (
+        isinstance(continuity, dict)
+        and "current_executable_checkpoint_ids" not in continuity
+    ):
+        projection = snapshot.get("scientific_memory_projection")
+        projected_continuity = (
+            projection.get("continuity")
+            if isinstance(projection, dict)
+            else None
+        )
+        if isinstance(projected_continuity, dict):
+            ids = projected_continuity.get(
+                "current_executable_checkpoint_ids"
+            )
+            if isinstance(ids, list):
+                continuity["current_executable_checkpoint_ids"] = list(
+                    ids
+                )
     state["allowed_action_space"] = _applicable_action_space(
         snapshot, state, catalog
     )
