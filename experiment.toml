@@ -1,0 +1,10 @@
+[experiment]
+id = "heg-ranked-001"
+time_limit = "1h"
+
+[director]
+mode = "llm"
+codex_home = "~/.codex"
+
+[search]
+proposal_ranking = "mutation_forge_stage4r_v1"
