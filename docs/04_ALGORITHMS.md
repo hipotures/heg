@@ -48,13 +48,13 @@ forbidden length. It creates no candidate record, event, log entry or
 persistence write. The counters are serialized once at the micro-batch
 boundary and can be disabled independently of search instrumentation.
 
-The optional persistent C++17 scorer implements the same bounded iterative
-count traversal behind a versioned binary protocol. Python remains the
-correctness oracle: shadow mode compares every result, production C++ mode
-recounts every proposed global record and periodically samples ordinary
-evaluations. Worker failure falls back to Python and cannot imply that a cycle
-is absent. This helper is a heuristic ranking accelerator, not either M4
-verifier.
+The mandatory persistent C++17 scorer implements the bounded iterative count
+traversal behind a versioned binary protocol. Every production heuristic score
+uses that worker. A protocol error, timeout, malformed response, or crash
+permits one restart; a repeated failure terminates the lane. No Python
+heuristic scorer, shadow mode, or runtime scoring fallback exists. The
+independent Python reference enumerator remains part of exact M4 verification
+and diagnostics only; it is never a heuristic-scoring substitute.
 
 ## Iterated local search
 

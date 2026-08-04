@@ -1,6 +1,15 @@
 # Implementation Status
 
-Last implementation audit: **2026-08-01**.
+Last implementation audit: **2026-08-04**.
+
+## Mandatory C++ scorer contract re-audit
+
+Production scoring paths in campaign lanes and the legacy runner use only the
+persistent C++ worker. A bounded failure permits one restart; a repeated
+failure raises `ScoreWorkerError` and terminates the lane. The repository has
+no Python heuristic-scoring fallback. Python cycle enumeration remains
+independent M4 verification and diagnostic code, never a production scoring
+substitute.
 
 ## Issue #21 — bounded Director prompts and source-first retention
 
@@ -562,11 +571,11 @@ random-restart throughput 33.4%. Profiling overhead remained below 2%. See
 
 ## Persistent scorer, conservative cutoff and fast duplicate key
 
-Erdős–Gyárfás lanes can now use one bounded persistent C++17 count-only
-worker. Compact adjacency bitsets replace per-candidate process startup;
-worker timeout, crash, malformed output or parity mismatch retries once and
-then falls back to Python. Shadow mode checks every graph. C++ mode checks
-every proposed global record plus periodic samples, and M4 remains unchanged.
+The superseded ADR 0009 rollout allowed Erdős–Gyárfás lanes to use one bounded
+persistent C++17 count-only worker. At that milestone, worker timeout, crash,
+malformed output, or parity mismatch retried once and then fell back to
+Python; shadow mode audited results. ADR 0013 later removed the Python scorer,
+shadow mode, backend selection, and runtime fallback. M4 remained unchanged.
 
 ILS/tabu scoring can stop when a monotone partial score is already dominated.
 A deterministic mutation-delta key removes full graph6/SHA-256 construction
