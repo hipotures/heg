@@ -357,6 +357,37 @@ pub fn lns_destroy_and_repair_u64(
     scratch: &mut DfsScratch,
     node_cap: u32,
 ) -> LnsStepOutcome {
+    lns_destroy_and_repair_u64_ex(
+        graph,
+        edges,
+        heat,
+        cur_c16,
+        cur_c16,
+        k,
+        mode,
+        allow_sideways,
+        None,
+        rng,
+        scratch,
+        node_cap,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn lns_destroy_and_repair_u64_ex(
+    graph: &BitGraph64,
+    edges: &[Edge],
+    heat: &[u32],
+    cur_c16: u32,
+    accept_cap: u32,
+    k: usize,
+    mode: GraphMode,
+    allow_sideways: bool,
+    bipartite_mask: Option<u64>,
+    rng: &mut Rng,
+    scratch: &mut DfsScratch,
+    node_cap: u32,
+) -> LnsStepOutcome {
     let k = k.clamp(3, 8);
     let m = edges.len();
     if m < k {
@@ -480,6 +511,11 @@ pub fn lns_destroy_and_repair_u64(
             if a == b {
                 continue;
             }
+            if let Some(bmask) = bipartite_mask {
+                if ((bmask >> ports[a]) & 1) == ((bmask >> ports[b]) & 1) {
+                    continue;
+                }
+            }
             if g_rest.has_edge(ports[a], ports[b]) {
                 continue;
             }
@@ -519,7 +555,7 @@ pub fn lns_destroy_and_repair_u64(
         cur: &mut BitGraph64,
         unmatched: u16,
     ) {
-        if ctx.bnb_nodes >= ctx.node_cap {
+        if ctx.bnb_nodes >= ctx.node_cap || ctx.best_c16 == 0 {
             return;
         }
         ctx.bnb_nodes += 1;
@@ -599,7 +635,7 @@ pub fn lns_destroy_and_repair_u64(
         mode,
         orig_key,
         allow_sideways,
-        best_c16: cur_c16,
+        best_c16: accept_cap.max(cur_c16),
         best_graph: None,
         leaves_tested: 0,
         bnb_nodes: 0,
@@ -633,6 +669,82 @@ pub struct LnsPolishSummary {
 /// Workers share the global champion `(best_c16, best_graph)` via a lightweight
 /// mutex synchronized every 24 LNS steps, while using local tabu hashes on
 /// sideways moves to traverse flat C4=C8=0 valleys toward lower exact C16.
+fn bipartition_mask_u64(g: &BitGraph64) -> Option<u64> {
+    let mut color = [-1i8; 64];
+    let mut q = [0usize; 64];
+    for s in 0..g.n {
+        if color[s] != -1 {
+            continue;
+        }
+        color[s] = 0;
+        let mut qh = 0usize;
+        let mut qt = 1usize;
+        q[0] = s;
+        while qh < qt {
+            let u = q[qh];
+            qh += 1;
+            let cu = color[u];
+            let mut bits = g.rows[u];
+            while bits != 0 {
+                let v = bits.trailing_zeros() as usize;
+                bits &= bits - 1;
+                if color[v] == -1 {
+                    color[v] = 1 - cu;
+                    q[qt] = v;
+                    qt += 1;
+                } else if color[v] == cu {
+                    return None;
+                }
+            }
+        }
+    }
+    let mut mask = 0u64;
+    for u in 0..g.n {
+        if color[u] == 1 {
+            mask |= 1u64 << u;
+        }
+    }
+    Some(mask)
+}
+
+fn bipartition_mask_u128(g: &BitGraph) -> Option<u128> {
+    let mut color = [-1i8; MAX_ORDER];
+    let mut q = [0usize; MAX_ORDER];
+    for s in 0..g.n {
+        if color[s] != -1 {
+            continue;
+        }
+        color[s] = 0;
+        let mut qh = 0usize;
+        let mut qt = 1usize;
+        q[0] = s;
+        while qh < qt {
+            let u = q[qh];
+            qh += 1;
+            let cu = color[u];
+            let mut bits = g.rows[u];
+            while bits != 0 {
+                let v = bits.trailing_zeros() as usize;
+                bits &= bits - 1;
+                if color[v] == -1 {
+                    color[v] = 1 - cu;
+                    q[qt] = v;
+                    qt += 1;
+                } else if color[v] == cu {
+                    return None;
+                }
+            }
+        }
+    }
+    let mut mask = 0u128;
+    for u in 0..g.n {
+        if color[u] == 1 {
+            mask |= 1u128 << u;
+        }
+    }
+    Some(mask)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn run_parallel_lns_polish(
     initial: BitGraph64,
@@ -644,25 +756,35 @@ pub fn run_parallel_lns_polish(
     base_seed: u64,
     allow_sideways: bool,
     node_cap: u32,
+    rrt_slack: u32,
+    preserve_bipartite: bool,
 ) -> LnsPolishSummary {
     let started = Instant::now();
     let mut init_scratch = DfsScratch::new();
     let init_c16 = count_c16_mitm_u64(&initial.rows, initial.n, u32::MAX, 0, &mut init_scratch)
         .map(|r| r.count)
         .unwrap_or(u32::MAX);
+    let bip_mask = if preserve_bipartite {
+        bipartition_mask_u64(&initial)
+    } else {
+        None
+    };
 
     let shared_best = Mutex::new((init_c16, initial));
+    let found_zero = AtomicBool::new(init_c16 == 0);
     let n_workers = workers.max(1);
 
     let stats: Vec<(u64, u64, u64, u64)> = thread::scope(|scope| {
         let handles: Vec<_> = (0..n_workers)
             .map(|w_idx| {
                 let shared_ref = &shared_best;
+                let zero_ref = &found_zero;
                 scope.spawn(move || {
                     let mut rng = Rng::new(base_seed.wrapping_add((w_idx as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15)));
                     let mut scratch = DfsScratch::new();
                     let mut cur_g = initial;
                     let mut cur_c16 = init_c16;
+                    let mut global_best_c16 = init_c16;
                     let mut edges = Vec::with_capacity(cur_g.n * 3);
                     let mut heat = Vec::with_capacity(cur_g.n * 3);
                     cur_g.collect_edges(&mut edges);
@@ -671,14 +793,28 @@ pub fn run_parallel_lns_polish(
                     let mut visited: HashSet<u64> = HashSet::with_capacity(2048);
                     visited.insert(cur_g.zobrist_key64());
 
+                    // Diversify worker RRT slacks: 25% pure greedy, 25% half-slack, 50% full slack
+                    let my_slack = if rrt_slack == 0 {
+                        0
+                    } else {
+                        match w_idx % 4 {
+                            0 => 0,
+                            1 => (rrt_slack / 2).max(1),
+                            _ => rrt_slack,
+                        }
+                    };
+
                     let mut steps = 0u64;
                     let mut leaves = 0u64;
                     let mut imps = 0u64;
                     let mut side = 0u64;
                     let mut stagnant = 0u64;
 
-                    while started.elapsed().as_secs_f64() < wall_seconds {
+                    while started.elapsed().as_secs_f64() < wall_seconds
+                        && !zero_ref.load(Ordering::Relaxed)
+                    {
                         if cur_c16 == 0 {
+                            zero_ref.store(true, Ordering::Relaxed);
                             break;
                         }
                         steps += 1;
@@ -687,14 +823,21 @@ pub fn run_parallel_lns_polish(
                         } else {
                             k_min
                         };
-                        let outcome = lns_destroy_and_repair_u64(
+                        let accept_cap = if my_slack > 0 && stagnant >= 4 {
+                            global_best_c16.saturating_add(my_slack).max(cur_c16)
+                        } else {
+                            cur_c16
+                        };
+                        let outcome = lns_destroy_and_repair_u64_ex(
                             &cur_g,
                             &edges,
                             &heat,
                             cur_c16,
+                            accept_cap,
                             k,
                             mode,
-                            allow_sideways,
+                            allow_sideways || my_slack > 0,
+                            bip_mask,
                             &mut rng,
                             &mut scratch,
                             node_cap,
@@ -716,8 +859,17 @@ pub fn run_parallel_lns_polish(
                                 if cur_c16 < guard.0 {
                                     *guard = (cur_c16, cur_g);
                                 }
-                            } else if allow_sideways && rep_c16 == cur_c16 && !visited.contains(&rep_key) {
+                                global_best_c16 = guard.0;
+                                if cur_c16 == 0 {
+                                    zero_ref.store(true, Ordering::Relaxed);
+                                    break;
+                                }
+                            } else if (allow_sideways || my_slack > 0)
+                                && rep_c16 <= accept_cap
+                                && !visited.contains(&rep_key)
+                            {
                                 cur_g = rep_g;
+                                cur_c16 = rep_c16;
                                 cur_g.collect_edges(&mut edges);
                                 compute_c16_edge_heat_u64(&cur_g, &edges, &mut heat);
                                 visited.insert(rep_key);
@@ -735,9 +887,11 @@ pub fn run_parallel_lns_polish(
                         }
 
                         // Periodically pull global champion if another worker improved or we stagnated
-                        if (steps & 31) == 0 || stagnant >= 120 {
+                        let stag_limit = if my_slack > 0 { 240 } else { 120 };
+                        if (steps & 31) == 0 || stagnant >= stag_limit {
                             let (g_c16, g_graph) = *shared_ref.lock().unwrap();
-                            if g_c16 < cur_c16 || stagnant >= 120 {
+                            global_best_c16 = g_c16;
+                            if g_c16 < cur_c16 && my_slack == 0 || stagnant >= stag_limit {
                                 cur_g = g_graph;
                                 cur_c16 = g_c16;
                                 cur_g.collect_edges(&mut edges);
@@ -1076,7 +1230,7 @@ pub struct LnsStepOutcome128 {
     pub bnb_nodes: u32,
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(dead_code, clippy::too_many_arguments)]
 pub fn lns_destroy_and_repair_u128(
     graph: &BitGraph,
     edges: &[Edge],
@@ -1085,6 +1239,37 @@ pub fn lns_destroy_and_repair_u128(
     k: usize,
     mode: GraphMode,
     allow_sideways: bool,
+    rng: &mut Rng,
+    scratch: &mut DfsScratch,
+    node_cap: u32,
+) -> LnsStepOutcome128 {
+    lns_destroy_and_repair_u128_ex(
+        graph,
+        edges,
+        heat,
+        cur_c16,
+        cur_c16,
+        k,
+        mode,
+        allow_sideways,
+        None,
+        rng,
+        scratch,
+        node_cap,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn lns_destroy_and_repair_u128_ex(
+    graph: &BitGraph,
+    edges: &[Edge],
+    heat: &[u32],
+    cur_c16: u32,
+    accept_cap: u32,
+    k: usize,
+    mode: GraphMode,
+    allow_sideways: bool,
+    bipartite_mask: Option<u128>,
     rng: &mut Rng,
     scratch: &mut DfsScratch,
     node_cap: u32,
@@ -1204,6 +1389,11 @@ pub fn lns_destroy_and_repair_u128(
             if a == b {
                 continue;
             }
+            if let Some(bmask) = bipartite_mask {
+                if ((bmask >> ports[a]) & 1) == ((bmask >> ports[b]) & 1) {
+                    continue;
+                }
+            }
             if g_rest.has_edge(ports[a], ports[b]) {
                 continue;
             }
@@ -1320,7 +1510,7 @@ pub fn lns_destroy_and_repair_u128(
         mode,
         orig_key,
         allow_sideways,
-        best_c16: cur_c16,
+        best_c16: accept_cap.max(cur_c16),
         best_graph: None,
         leaves_tested: 0,
         bnb_nodes: 0,
@@ -1361,12 +1551,19 @@ pub fn run_parallel_lns_polish_u128(
     base_seed: u64,
     allow_sideways: bool,
     node_cap: u32,
+    rrt_slack: u32,
+    preserve_bipartite: bool,
 ) -> LnsPolishSummary128 {
     let started = Instant::now();
     let mut init_scratch = DfsScratch::new();
     let init_c16 = count_c16_mitm_u128(&initial.rows, initial.n, u32::MAX, 0, &mut init_scratch)
         .map(|r| r.count)
         .unwrap_or(u32::MAX);
+    let bip_mask = if preserve_bipartite {
+        bipartition_mask_u128(&initial)
+    } else {
+        None
+    };
 
     let shared_best = Mutex::new((init_c16, initial));
     let found_zero = AtomicBool::new(init_c16 == 0);
@@ -1384,6 +1581,7 @@ pub fn run_parallel_lns_polish_u128(
                     let mut scratch = DfsScratch::new();
                     let mut cur_g = initial;
                     let mut cur_c16 = init_c16;
+                    let mut global_best_c16 = init_c16;
                     let mut edges = Vec::with_capacity(cur_g.n * 3);
                     let mut heat = Vec::with_capacity(cur_g.n * 3);
                     cur_g.collect_edges(&mut edges);
@@ -1391,6 +1589,16 @@ pub fn run_parallel_lns_polish_u128(
 
                     let mut visited: HashSet<u128> = HashSet::with_capacity(2048);
                     visited.insert(cur_g.zobrist_key());
+
+                    let my_slack = if rrt_slack == 0 {
+                        0
+                    } else {
+                        match w_idx % 4 {
+                            0 => 0,
+                            1 => (rrt_slack / 2).max(1),
+                            _ => rrt_slack,
+                        }
+                    };
 
                     let mut steps = 0u64;
                     let mut leaves = 0u64;
@@ -1411,14 +1619,21 @@ pub fn run_parallel_lns_polish_u128(
                         } else {
                             k_min
                         };
-                        let outcome = lns_destroy_and_repair_u128(
+                        let accept_cap = if my_slack > 0 && stagnant >= 4 {
+                            global_best_c16.saturating_add(my_slack).max(cur_c16)
+                        } else {
+                            cur_c16
+                        };
+                        let outcome = lns_destroy_and_repair_u128_ex(
                             &cur_g,
                             &edges,
                             &heat,
                             cur_c16,
+                            accept_cap,
                             k,
                             mode,
-                            allow_sideways,
+                            allow_sideways || my_slack > 0,
+                            bip_mask,
                             &mut rng,
                             &mut scratch,
                             node_cap,
@@ -1440,15 +1655,17 @@ pub fn run_parallel_lns_polish_u128(
                                 if cur_c16 < guard.0 {
                                     *guard = (cur_c16, cur_g);
                                 }
+                                global_best_c16 = guard.0;
                                 if cur_c16 == 0 {
                                     zero_ref.store(true, Ordering::Relaxed);
                                     break;
                                 }
-                            } else if allow_sideways
-                                && rep_c16 == cur_c16
+                            } else if (allow_sideways || my_slack > 0)
+                                && rep_c16 <= accept_cap
                                 && !visited.contains(&rep_key)
                             {
                                 cur_g = rep_g;
+                                cur_c16 = rep_c16;
                                 cur_g.collect_edges(&mut edges);
                                 compute_c16_edge_heat_u128(&cur_g, &edges, &mut heat);
                                 visited.insert(rep_key);
@@ -1465,9 +1682,11 @@ pub fn run_parallel_lns_polish_u128(
                             stagnant += 1;
                         }
 
-                        if (steps & 31) == 0 || stagnant >= 120 {
+                        let stag_limit = if my_slack > 0 { 240 } else { 120 };
+                        if (steps & 31) == 0 || stagnant >= stag_limit {
                             let (g_c16, g_graph) = *shared_ref.lock().unwrap();
-                            if g_c16 < cur_c16 || stagnant >= 120 {
+                            global_best_c16 = g_c16;
+                            if g_c16 < cur_c16 && my_slack == 0 || stagnant >= stag_limit {
                                 cur_g = g_graph;
                                 cur_c16 = g_c16;
                                 cur_g.collect_edges(&mut edges);
@@ -1525,6 +1744,8 @@ mod tests {
             2026112609,
             true,
             15_000,
+            2,
+            false,
         );
         assert!(summary.total_steps > 0);
         assert!(summary.best_c16 <= summary.initial_c16);
@@ -1538,7 +1759,7 @@ mod tests {
         assert_eq!(sc.count_of(8), 0, "LNS must never introduce C8");
         assert_eq!(sc.count_of(16), summary.best_c16);
 
-        // Wave E u128 LNS check on n=70 Petersen + 10*H7
+        // Wave E/F u128 LNS-RRT check on n=70 Petersen + 10*H7
         let g70 = generate_h7_expansion_seed(&mut rng, 70, GraphMode::CubicFirst).unwrap();
         let s70 = run_parallel_lns_polish_u128(
             g70,
@@ -1550,6 +1771,8 @@ mod tests {
             2026112610,
             true,
             15_000,
+            2,
+            false,
         );
         assert!(s70.total_steps > 0);
         assert!(s70.best_c16 <= s70.initial_c16);
@@ -1558,5 +1781,28 @@ mod tests {
         assert_eq!(sc70.count_of(4), 0, "u128 LNS must never introduce C4");
         assert_eq!(sc70.count_of(8), 0, "u128 LNS must never introduce C8");
         assert_eq!(sc70.count_of(16), s70.best_c16);
+
+        // Wave F bipartite-preserving LNS check on Heawood (14, girth 6 -> C4=C8=0)
+        let mut h14 = BitGraph::empty(14);
+        for i in 0..7 {
+            for sh in [0usize, 1, 3] {
+                h14.add_edge(i, 7 + (i + sh) % 7);
+            }
+        }
+        let h14_64 = BitGraph64::from_graph(&h14);
+        let sbip = run_parallel_lns_polish(
+            h14_64,
+            GraphMode::CubicFirst,
+            3,
+            5,
+            0.1,
+            2,
+            2026112611,
+            true,
+            5_000,
+            0,
+            true,
+        );
+        assert!(bipartition_mask_u64(&sbip.best_graph).is_some(), "bipartite LNS must preserve bipartiteness");
     }
 }

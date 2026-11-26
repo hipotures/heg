@@ -537,6 +537,118 @@ impl FiniteGroup {
         Self::from_mul(if even_only { "a4" } else { "s4" }, mul)
     }
 
+    /// Alternating group A_5 (order 60): smallest non-abelian simple (hence non-nilpotent) group!
+    pub fn alt_5() -> Self {
+        let mut perms: Vec<[u8; 5]> = Vec::with_capacity(60);
+        for a in 0..5u8 {
+            for b in 0..5u8 {
+                if b == a { continue; }
+                for c in 0..5u8 {
+                    if c == a || c == b { continue; }
+                    for d in 0..5u8 {
+                        if d == a || d == b || d == c { continue; }
+                        let e = 10 - a - b - c - d;
+                        let p = [a, b, c, d, e];
+                        let mut invs = 0;
+                        for i in 0..5 {
+                            for j in (i + 1)..5 {
+                                if p[i] > p[j] {
+                                    invs += 1;
+                                }
+                            }
+                        }
+                        if invs % 2 == 0 {
+                            perms.push(p);
+                        }
+                    }
+                }
+            }
+        }
+        let id_pos = perms.iter().position(|&p| p == [0, 1, 2, 3, 4]).unwrap();
+        perms.swap(0, id_pos);
+        let n = perms.len();
+        let mut mul = vec![vec![0u8; n]; n];
+        for i in 0..n {
+            for j in 0..n {
+                let mut prod = [0u8; 5];
+                for x in 0..5 {
+                    prod[x] = perms[i][perms[j][x] as usize];
+                }
+                let k = perms.iter().position(|&p| p == prod).unwrap();
+                mul[i][j] = k as u8;
+            }
+        }
+        Self::from_mul("a5", mul)
+    }
+
+    /// SL(2, 3) (order 24, binary tetrahedral group): non-abelian, non-nilpotent!
+    pub fn sl2_3() -> Self {
+        let mut mats: Vec<[u8; 4]> = Vec::with_capacity(24);
+        for a in 0..3u8 {
+            for b in 0..3u8 {
+                for c in 0..3u8 {
+                    for d in 0..3u8 {
+                        let det = (a * d + 9 - b * c) % 3;
+                        if det == 1 {
+                            mats.push([a, b, c, d]);
+                        }
+                    }
+                }
+            }
+        }
+        let id_pos = mats.iter().position(|&m| m == [1, 0, 0, 1]).unwrap();
+        mats.swap(0, id_pos);
+        let n = mats.len();
+        let mut mul = vec![vec![0u8; n]; n];
+        for i in 0..n {
+            let [a1, b1, c1, d1] = mats[i];
+            for j in 0..n {
+                let [a2, b2, c2, d2] = mats[j];
+                let prod = [
+                    (a1 * a2 + b1 * c2) % 3,
+                    (a1 * b2 + b1 * d2) % 3,
+                    (c1 * a2 + d1 * c2) % 3,
+                    (c1 * b2 + d1 * d2) % 3,
+                ];
+                let k = mats.iter().position(|&m| m == prod).unwrap();
+                mul[i][j] = k as u8;
+            }
+        }
+        Self::from_mul("sl23", mul)
+    }
+
+    /// Frobenius group F_42 = Z_7 \rtimes Z_6 (order 42): non-abelian, non-nilpotent!
+    pub fn frobenius_42() -> Self {
+        let pow3 = [1usize, 3, 2, 6, 4, 5];
+        let mut mul = vec![vec![0u8; 42]; 42];
+        for i in 0..42 {
+            let (a1, b1) = (i / 6, i % 6);
+            for j in 0..42 {
+                let (a2, b2) = (j / 6, j % 6);
+                let a = (a1 + pow3[b1] * a2) % 7;
+                let b = (b1 + b2) % 6;
+                mul[i][j] = (6 * a + b) as u8;
+            }
+        }
+        Self::from_mul("f42", mul)
+    }
+
+    /// Direct product G x Z_k (non-nilpotent whenever G is non-nilpotent).
+    pub fn direct_product_cyclic(name: &'static str, g: &Self, k: usize) -> Self {
+        let ord = g.order * k;
+        let mut mul = vec![vec![0u8; ord]; ord];
+        for i in 0..ord {
+            let (g1, c1) = (i / k, i % k);
+            for j in 0..ord {
+                let (g2, c2) = (j / k, j % k);
+                let gp = g.mul[g1][g2] as usize;
+                let cp = (c1 + c2) % k;
+                mul[i][j] = (gp * k + cp) as u8;
+            }
+        }
+        Self::from_mul(name, mul)
+    }
+
     pub fn parse(name: &str) -> Result<Self, String> {
         match name {
             "d6" => Ok(Self::dihedral("d6", 6)),
@@ -546,9 +658,23 @@ impl FiniteGroup {
             "d10" => Ok(Self::dihedral("d10", 10)),
             "f20" => Ok(Self::frobenius_20()),
             "s4" => Ok(Self::sym_or_alt_4(false)),
+            "sl23" => Ok(Self::sl2_3()),
+            "a4c2" => Ok(Self::direct_product_cyclic("a4c2", &Self::sym_or_alt_4(true), 2)),
+            "s3c4" => Ok(Self::direct_product_cyclic("s3c4", &Self::dihedral("d3", 3), 4)),
+            "s3c6" => Ok(Self::direct_product_cyclic("s3c6", &Self::dihedral("d3", 3), 6)),
+            "d12" => Ok(Self::dihedral("d12", 12)),
             "d14" => Ok(Self::dihedral("d14", 14)),
             "d15" => Ok(Self::dihedral("d15", 15)),
-            _ => Err(format!("unsupported group: {name} (use d6,a4,d7,d9,d10,f20,s4,d14,d15)")),
+            "d18" => Ok(Self::dihedral("d18", 18)),
+            "d20" => Ok(Self::dihedral("d20", 20)),
+            "d21" => Ok(Self::dihedral("d21", 21)),
+            "f42" => Ok(Self::frobenius_42()),
+            "d24" => Ok(Self::dihedral("d24", 24)),
+            "d30" => Ok(Self::dihedral("d30", 30)),
+            "a5" => Ok(Self::alt_5()),
+            _ => Err(format!(
+                "unsupported group: {name} (use d6,a4,d7,d9,d10,f20,s4,sl23,a4c2,s3c4,s3c6,d12,d14,d15,d18,d20,d21,f42,d24,d30,a5)"
+            )),
         }
     }
 }
@@ -569,6 +695,15 @@ pub struct BipartiteCubicBase {
 impl BipartiteCubicBase {
     pub fn parse(name: &str) -> Result<Self, String> {
         match name {
+            // 2-vertex dipole theta2 (A={0}, B={1}, 3 parallel edges):
+            // Spanning tree (1): (0,1). Free edges (2): (0,1)#2, (0,1)#3.
+            "theta2" => Ok(Self {
+                name: "theta2",
+                n_verts: 2,
+                n_a: 1,
+                edges: vec![(0, 1), (0, 1), (0, 1)],
+                tree_edges: 1,
+            }),
             // 4-vertex bipartite 3-regular multigraph (A={0,1}, B={2,3}):
             // Spanning tree: (0,2), (1,2), (1,3). Free edges (3): (0,3), (0,2)#2, (1,3)#2.
             "theta4" => Ok(Self {
@@ -615,7 +750,22 @@ impl BipartiteCubicBase {
                 ],
                 tree_edges: 7,
             }),
-            _ => Err(format!("unsupported bipartite base: {name} (use theta4,k33,theta6,cube8)")),
+            // 10-vertex bipartite cubic Mobius ladder M_10 (A={0..4}, B={5..9}, 15 edges):
+            // Outer 10-cycle: 0-5-1-6-2-7-3-8-4-9-0; antipodal chords: (0,7),(1,8),(2,9),(3,5),(4,6).
+            // Spanning tree (9): outer path 0-5-1-6-2-7-3-8-4-9. Free (6).
+            "mobius10" => Ok(Self {
+                name: "mobius10",
+                n_verts: 10,
+                n_a: 5,
+                edges: vec![
+                    (0, 5), (1, 5), (1, 6), (2, 6), (2, 7), (3, 7), (3, 8), (4, 8), (4, 9),
+                    (0, 9), (0, 7), (1, 8), (2, 9), (3, 5), (4, 6),
+                ],
+                tree_edges: 9,
+            }),
+            _ => Err(format!(
+                "unsupported bipartite base: {name} (use theta2,theta4,k33,theta6,cube8,mobius10)"
+            )),
         }
     }
 

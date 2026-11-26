@@ -2,6 +2,7 @@ mod bank;
 mod cycles;
 mod exact_verify;
 mod graph;
+mod large_verify;
 mod lns;
 mod mutation;
 mod protocol;
@@ -643,6 +644,8 @@ fn cmd_lns_polish(args: &[String]) -> i32 {
     let mut seed = 20261126u64;
     let mut allow_sideways = true;
     let mut node_cap = 20_000u32;
+    let mut rrt_slack = 0u32;
+    let mut preserve_bipartite = false;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -688,6 +691,13 @@ fn cmd_lns_polish(args: &[String]) -> i32 {
                 i += 1;
                 node_cap = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(20_000);
             }
+            "--rrt-slack" => {
+                i += 1;
+                rrt_slack = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(0);
+            }
+            "--bipartite" => {
+                preserve_bipartite = true;
+            }
             "--no-sideways" => {
                 allow_sideways = false;
             }
@@ -721,15 +731,19 @@ fn cmd_lns_polish(args: &[String]) -> i32 {
             seed,
             allow_sideways,
             node_cap,
+            rrt_slack,
+            preserve_bipartite,
         );
         let best_g6 = escape_json_str(&summary.best_graph.to_graph6());
         println!(
-            "{{\"order\":{},\"mode\":\"{}\",\"k_min\":{},\"k_max\":{},\"workers\":{},\"wall_seconds\":{:.3},\"initial_c16\":{},\"best_c16\":{},\"total_steps\":{},\"total_leaves\":{},\"improvements\":{},\"sideways_moves\":{},\"best_graph6\":\"{}\"}}",
+            "{{\"order\":{},\"mode\":\"{}\",\"k_min\":{},\"k_max\":{},\"workers\":{},\"rrt_slack\":{},\"bipartite\":{},\"wall_seconds\":{:.3},\"initial_c16\":{},\"best_c16\":{},\"total_steps\":{},\"total_leaves\":{},\"improvements\":{},\"sideways_moves\":{},\"best_graph6\":\"{}\"}}",
             graph.n,
             mode.as_str(),
             k_min,
             k_max,
             workers,
+            rrt_slack,
+            preserve_bipartite,
             summary.wall_seconds,
             summary.initial_c16,
             summary.best_c16,
@@ -752,15 +766,19 @@ fn cmd_lns_polish(args: &[String]) -> i32 {
         seed,
         allow_sideways,
         node_cap,
+        rrt_slack,
+        preserve_bipartite,
     );
     let best_g6 = escape_json_str(&summary.best_graph.to_graph().to_graph6());
     println!(
-        "{{\"order\":{},\"mode\":\"{}\",\"k_min\":{},\"k_max\":{},\"workers\":{},\"wall_seconds\":{:.3},\"initial_c16\":{},\"best_c16\":{},\"total_steps\":{},\"total_leaves\":{},\"improvements\":{},\"sideways_moves\":{},\"best_graph6\":\"{}\"}}",
+        "{{\"order\":{},\"mode\":\"{}\",\"k_min\":{},\"k_max\":{},\"workers\":{},\"rrt_slack\":{},\"bipartite\":{},\"wall_seconds\":{:.3},\"initial_c16\":{},\"best_c16\":{},\"total_steps\":{},\"total_leaves\":{},\"improvements\":{},\"sideways_moves\":{},\"best_graph6\":\"{}\"}}",
         graph.n,
         mode.as_str(),
         k_min,
         k_max,
         workers,
+        rrt_slack,
+        preserve_bipartite,
         summary.wall_seconds,
         summary.initial_c16,
         summary.best_c16,
@@ -919,11 +937,87 @@ fn cmd_voltage_search(args: &[String]) -> i32 {
     0
 }
 
+fn cmd_verify_large(args: &[String]) -> i32 {
+    let mut g6 = String::new();
+    let mut g6_file = String::new();
+    let mut lengths = vec![4usize, 8, 16, 32];
+    let mut workers = 16usize;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--graph6" => {
+                i += 1;
+                g6 = args.get(i).cloned().unwrap_or_default();
+            }
+            "--graph6-file" => {
+                i += 1;
+                g6_file = args.get(i).cloned().unwrap_or_default();
+            }
+            "--lengths" => {
+                i += 1;
+                if let Some(s) = args.get(i) {
+                    lengths = s
+                        .split(',')
+                        .filter_map(|p| p.trim().parse::<usize>().ok())
+                        .collect();
+                }
+            }
+            "--workers" => {
+                i += 1;
+                workers = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(16);
+            }
+            "--json" => {}
+            other => {
+                eprintln!("unknown argument: {other}");
+                return 2;
+            }
+        }
+        i += 1;
+    }
+    if !g6_file.is_empty() {
+        g6 = match std::fs::read_to_string(&g6_file) {
+            Ok(s) => s.trim().to_string(),
+            Err(e) => {
+                eprintln!("failed to read {g6_file}: {e}");
+                return 2;
+            }
+        };
+    }
+    let graph = match crate::large_verify::LargeGraph::from_graph6(&g6) {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!("graph6 error: {e}");
+            return 2;
+        }
+    };
+    let summary = crate::large_verify::verify_large_graph(&graph, &lengths, workers);
+    let mut len_entries = Vec::new();
+    let mut ms_entries = Vec::new();
+    for (len, found, witness, ms) in &summary.results {
+        let status = if *found { "FOUND" } else { "ABSENT" };
+        len_entries.push(format!("\"{len}\":\"{status}\""));
+        ms_entries.push(format!("\"{len}\":{ms:.2}"));
+        let _ = witness;
+    }
+    println!(
+        "{{\"order\":{},\"size\":{},\"min_deg\":{},\"max_deg\":{},\"biconnected\":{},\"total_ms\":{:.2},\"lengths\":{{{}}},\"elapsed_ms_by_length\":{{{}}}}}",
+        summary.order,
+        summary.size,
+        summary.min_deg,
+        summary.max_deg,
+        summary.biconnected,
+        summary.total_ms,
+        len_entries.join(","),
+        ms_entries.join(","),
+    );
+    0
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
         eprintln!(
-            "usage: sglab-rust-engine --version | --serve | score | bench-score | search | verify-exact | lns-polish | voltage-search | bjorklund-c32"
+            "usage: sglab-rust-engine --version | --serve | score | bench-score | search | verify-exact | verify-large | lns-polish | voltage-search | bjorklund-c32"
         );
         process::exit(2);
     }
@@ -937,6 +1031,7 @@ fn main() {
         "bench-score" => cmd_bench_score(&args[2..]),
         "search" => cmd_search(&args[2..]),
         "verify-exact" => cmd_verify_exact(&args[2..]),
+        "verify-large" => cmd_verify_large(&args[2..]),
         "lns-polish" => cmd_lns_polish(&args[2..]),
         "voltage-search" => cmd_voltage_search(&args[2..]),
         "bjorklund-c32" => cmd_bjorklund_c32(&args[2..]),
