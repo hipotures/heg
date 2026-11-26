@@ -1,8 +1,14 @@
 import sys
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
-from sglab.resources import recommended_workers, run_bounded
+from sglab.resources import (
+    current_rss_bytes,
+    process_tree_rss_bytes,
+    recommended_workers,
+    run_bounded,
+)
 
 
 class ResourceSafetyTests(unittest.TestCase):
@@ -36,3 +42,12 @@ class ResourceSafetyTests(unittest.TestCase):
             output_limit_bytes=64,
         )
         self.assertEqual(missing.status, "TOOL_FAILURE")
+
+    def test_proc_rss_ignores_process_lookup_error_on_exiting_pid(self) -> None:
+        with patch.object(
+            Path,
+            "read_text",
+            side_effect=ProcessLookupError(3, "No such process"),
+        ):
+            self.assertEqual(current_rss_bytes(12345), 0)
+            self.assertEqual(process_tree_rss_bytes(12345), 0)

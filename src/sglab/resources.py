@@ -40,7 +40,7 @@ def current_rss_bytes(pid: int | None = None) -> int:
         for line in status.read_text(encoding="ascii").splitlines():
             if line.startswith("VmRSS:"):
                 return int(line.split()[1]) * 1024
-    except (FileNotFoundError, PermissionError, ValueError):
+    except (FileNotFoundError, PermissionError, ProcessLookupError, ValueError):
         return 0
     return 0
 
@@ -67,7 +67,7 @@ def process_tree_rss_bytes(pid: int) -> int:
                     encoding="ascii"
                 ).split()
             )
-        except (FileNotFoundError, PermissionError, ValueError):
+        except (FileNotFoundError, PermissionError, ProcessLookupError, ValueError):
             continue
     return total
 
