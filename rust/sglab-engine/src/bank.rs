@@ -479,6 +479,7 @@ impl CycleBank64 {
                         self.m,
                         &self.edge_id,
                         self.rng_seed,
+                        256,
                         &mut self.ham_seeds,
                         &mut self.ham_seed_count,
                         &mut self.c64,
@@ -704,7 +705,6 @@ fn refill_dfs_bank(
         dist_mask: &'a [u64; 65],
         adj_to_closing: u64,
         closing_set: u64,
-        start_v: u8,
         target: usize,
         path: [u8; 64],
         edge_id: &'a [[u8; 64]; 64],
@@ -717,16 +717,11 @@ fn refill_dfs_bank(
         start_node_cap: u64,
     }
 
-    fn dfs(
-        st: &mut HarvestState<'_>,
-        vertex: usize,
-        seen: u64,
-        depth: usize,
-        rem: usize,
-        edge_hash: u64,
-    ) {
+    fn dfs(st: &mut HarvestState<'_>, vertex: usize, seen: u64, depth: usize, rem: usize) {
         if rem == 3 {
             let mut u_bits = st.rows[vertex] & !seen & st.dist_mask[3];
+            let mut prefix_ready = false;
+            let mut base_hash = 0u64;
             while u_bits != 0 {
                 let u = u_bits.trailing_zeros() as usize;
                 u_bits &= u_bits - 1;
@@ -743,14 +738,29 @@ fn refill_dfs_bank(
                 if w_bits == 0 {
                     continue;
                 }
-                st.path[depth] = u as u8;
-                let hu = edge_hash ^ edge_mix64(vertex as u8, u as u8);
+                // Compute prefix hash lazily ONCE per productive rem==3 node (zero hash cost on
+                // all ~5,000 non-leaf internal DFS nodes!).
+                let mut hu = 0u64;
+                let mut hu_ready = false;
                 while w_bits != 0 {
                     let w = w_bits.trailing_zeros() as usize;
                     w_bits &= w_bits - 1;
                     let mut close_bits = st.rows[w] & closing_avail;
                     if close_bits == 0 {
                         continue;
+                    }
+                    if !prefix_ready {
+                        let mut h = 0u64;
+                        for i in 0..(depth - 1) {
+                            h ^= edge_mix64(st.path[i], st.path[i + 1]);
+                        }
+                        base_hash = h;
+                        prefix_ready = true;
+                    }
+                    if !hu_ready {
+                        st.path[depth] = u as u8;
+                        hu = base_hash ^ edge_mix64(vertex as u8, u as u8);
+                        hu_ready = true;
                     }
                     st.path[depth + 1] = w as u8;
                     let hw = hu ^ edge_mix64(u as u8, w as u8);
@@ -759,7 +769,7 @@ fn refill_dfs_bank(
                         close_bits &= close_bits - 1;
                         let cyc_hash = hw
                             ^ edge_mix64(w as u8, last as u8)
-                            ^ edge_mix64(last as u8, st.start_v);
+                            ^ edge_mix64(last as u8, st.path[0]);
                         if st.dedup.insert(cyc_hash) {
                             if let Some(slot) = st.bank.next_free_slot() {
                                 st.path[depth + 2] = last as u8;
@@ -799,8 +809,7 @@ fn refill_dfs_bank(
                 continue;
             }
             st.path[depth] = v as u8;
-            let nh = edge_hash ^ edge_mix64(vertex as u8, v as u8);
-            dfs(st, v, next_seen, depth + 1, next_rem, nh);
+            dfs(st, v, next_seen, depth + 1, next_rem);
             if st.nodes > st.start_node_cap
                 || st.bank.valid_count >= st.target_fill
                 || st.start_added >= st.start_cap
@@ -872,14 +881,12 @@ fn refill_dfs_bank(
         let mut path = [0u8; 64];
         path[0] = start as u8;
         path[1] = first as u8;
-        let init_hash = edge_mix64(start as u8, first as u8);
         let start_node_cap = (nodes + 1_200).min(node_budget);
         let mut st = HarvestState {
             rows,
             dist_mask: &dist_mask,
             adj_to_closing,
             closing_set,
-            start_v: start as u8,
             target,
             path,
             edge_id,
@@ -891,7 +898,7 @@ fn refill_dfs_bank(
             nodes,
             start_node_cap,
         };
-        dfs(&mut st, first, start_bit | first_bit, 2, max_r, init_hash);
+        dfs(&mut st, first, start_bit | first_bit, 2, max_r);
         nodes = st.nodes;
     }
 }
@@ -951,6 +958,7 @@ fn refill_posa_bank_64(
     m: usize,
     edge_id: &[[u8; 64]; 64],
     seed: u64,
+    max_walk_steps: usize,
     ham_seeds: &mut [[u8; 64]; 4],
     ham_seed_count: &mut usize,
     bank: &mut SingleLengthBank,
@@ -1133,18 +1141,20 @@ fn refill_posa_bank_64(
         let mut prev_tail: usize = usize::MAX;
         let mut head_close_mask: u64 = rows[path[0] as usize];
 
-        while total_rotations < max_total_rotations && since_found < 320 {
+        while total_rotations < max_total_rotations && since_found < 480 {
             let head = path[0] as usize;
             let tail = path[63] as usize;
             let is_closed = (head_close_mask & (1u64 << tail)) != 0;
-            let timed_out = !is_closed && basis_len > 0 && walk_steps >= 28;
+            let timed_out = !is_closed && basis_len > 0 && walk_steps >= max_walk_steps;
 
+            let mut just_found_new = false;
             if is_closed {
                 let cyc_hash = path_hash ^ edge_mix64(path[63], path[0]);
                 if dedup.insert(cyc_hash) {
                     if let Some(slot) = bank.next_free_slot() {
                         bank.insert_cycle(slot, &path, cyc_hash, edge_id);
                         since_found = 0;
+                        just_found_new = true;
                         let bidx = basis_cursor & 3;
                         basis_pool[bidx] = path;
                         basis_hashes[bidx] = cyc_hash;
@@ -1162,7 +1172,31 @@ fn refill_posa_bank_64(
             }
 
             if is_closed || timed_out {
-                let (src, base_cycle_hash) = if timed_out {
+                if just_found_new && is_cubic {
+                    // Fast zero-copy reverse reopen: swap head <-> tail on the same open edge
+                    // (path_hash unchanged!) and walk the opposite Thomason lollipop branch!
+                    reverse_suffix_with_pos(&mut path, &mut pos_of, 0);
+                    let new_tail = path[63] as usize;
+                    let new_head = path[0] as usize;
+                    head_close_mask = rows[new_head];
+                    let open_nbrs = rows[new_tail] & !((1u64 << path[62]) | (1u64 << new_head));
+                    if open_nbrs != 0 {
+                        let u_v = open_nbrs.trailing_zeros() as usize;
+                        let p = pos_of[u_v] as usize;
+                        if p > 0 && p < 63 {
+                            let u = path[p];
+                            let nxt = path[p + 1];
+                            path_hash ^= edge_mix64(u, nxt) ^ edge_mix64(u, new_tail as u8);
+                            prev_tail = new_tail;
+                            walk_steps = 1;
+                            reverse_suffix_with_pos(&mut path, &mut pos_of, p + 1);
+                            total_rotations += 1;
+                            since_found += 1;
+                            continue;
+                        }
+                    }
+                }
+                let (src, base_cycle_hash) = if timed_out || !is_closed {
                     let bidx = if basis_len == 4 {
                         (basis_cursor.wrapping_add(shift_cursor)) & 3
                     } else {
@@ -1407,25 +1441,28 @@ mod tests {
                     (cnt32 as f64) / (reps as f64),
                 );
             }
-            let mut t64 = 0u128;
-            let mut cnt64 = 0u32;
-            let reps = 100;
-            for r in 0..reps {
-                let g = BitGraph64::from_graph(&generate_seed(&mut rng, 64, GraphMode::CubicFirst).unwrap());
-                let mut edges = Vec::new();
-                g.collect_edges(&mut edges);
-                let mut bank = CycleBank64::new(r as u64);
-                bank.reset_for_graph(&edges);
-                let a = Instant::now();
-                refill_posa_bank_64(&g.rows, 64, 264, bank.m, &bank.edge_id, r as u64, &mut bank.ham_seeds, &mut bank.ham_seed_count, &mut bank.c64);
-                t64 += a.elapsed().as_nanos();
-                cnt64 += bank.c64.valid_count;
+            for &ws in &[16usize, 20, 28, 40, 64, 120] {
+                let mut rng2 = Rng::new(7777);
+                let mut t64 = 0u128;
+                let mut cnt64 = 0u32;
+                let reps = 80;
+                for r in 0..reps {
+                    let g = BitGraph64::from_graph(&generate_seed(&mut rng2, 64, GraphMode::CubicFirst).unwrap());
+                    let mut edges = Vec::new();
+                    g.collect_edges(&mut edges);
+                    let mut bank = CycleBank64::new(r as u64);
+                    bank.reset_for_graph(&edges);
+                    let a = Instant::now();
+                    refill_posa_bank_64(&g.rows, 64, 264, bank.m, &bank.edge_id, r as u64, ws, &mut bank.ham_seeds, &mut bank.ham_seed_count, &mut bank.c64);
+                    t64 += a.elapsed().as_nanos();
+                    cnt64 += bank.c64.valid_count;
+                }
+                println!(
+                    "DIRECT REFILL n=64 (walk_steps={ws:3}): C64={:.1}us (avg {:.0} cyc)",
+                    (t64 as f64) / (reps as f64) / 1000.0,
+                    (cnt64 as f64) / (reps as f64),
+                );
             }
-            println!(
-                "DIRECT REFILL n=64: C64={:.1}us (avg {:.0} cyc)",
-                (t64 as f64) / (reps as f64) / 1000.0,
-                (cnt64 as f64) / (reps as f64),
-            );
         }
 
         for &n in &[32usize, 50, 60, 64] {

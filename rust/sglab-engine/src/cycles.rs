@@ -1197,12 +1197,13 @@ fn posa_hamiltonian_fast_cert_u64(
         let mut have_cycle = false;
         let mut head_close_mask = rows[path[0] as usize];
 
-        while total_rotations < max_total_rotations && since_found < 280 {
+        while total_rotations < max_total_rotations && since_found < 480 {
             let head = path[0] as usize;
             let tail = path[order - 1] as usize;
             let is_closed = (head_close_mask & (1u64 << tail)) != 0;
-            let timed_out = !is_closed && have_cycle && walk_steps >= 28;
+            let timed_out = !is_closed && have_cycle && walk_steps >= 256;
 
+            let mut just_found_new = false;
             if is_closed {
                 let raw_h = path_hash ^ edge_mix(path[order - 1], path[0]);
                 let k = if raw_h == 0 { 1 } else { raw_h };
@@ -1223,6 +1224,7 @@ fn posa_hamiltonian_fast_cert_u64(
                 if is_new {
                     found += 1;
                     since_found = 0;
+                    just_found_new = true;
                     cycle_basis = path;
                     cycle_basis_hash = raw_h;
                     have_cycle = true;
@@ -1233,6 +1235,29 @@ fn posa_hamiltonian_fast_cert_u64(
             }
 
             if is_closed || timed_out {
+                if just_found_new && is_cubic {
+                    rev_suffix(&mut path, &mut pos_of, 0, order);
+                    let new_tail = path[order - 1] as usize;
+                    let new_head = path[0] as usize;
+                    head_close_mask = rows[new_head];
+                    let open_nbrs =
+                        rows[new_tail] & !((1u64 << path[order - 2]) | (1u64 << new_head));
+                    if open_nbrs != 0 {
+                        let u_v = open_nbrs.trailing_zeros() as usize;
+                        let p = pos_of[u_v] as usize;
+                        if p > 0 && p + 1 < order {
+                            let u = path[p];
+                            let nxt = path[p + 1];
+                            path_hash ^= edge_mix(u, nxt) ^ edge_mix(u, new_tail as u8);
+                            prev_tail = new_tail;
+                            walk_steps = 1;
+                            rev_suffix(&mut path, &mut pos_of, p + 1, order);
+                            total_rotations += 1;
+                            since_found += 1;
+                            continue;
+                        }
+                    }
+                }
                 let (src, base_cycle_hash) = if timed_out {
                     (&cycle_basis, cycle_basis_hash)
                 } else {
