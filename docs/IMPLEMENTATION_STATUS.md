@@ -2,6 +2,11 @@
 
 Last implementation audit: **2026-11-26**.
 
+## Wave D1: Native Rust Exact-Matching Micro-LNS Destroy-and-Repair (`C4 = C8 = 0`)
+
+- **Exact-Matching Micro-LNS (`rust/sglab-engine/src/lns.rs`, `search.rs`, `main.rs`)**: Computes exact `C16` edge-participation heat `w_16(e)` via Bitset MitM, destroys `k in [4, 8]` pairwise-disjoint hot/cluster edges (`2k <= 16` ports), precomputes external path-length bitmasks `L_ext(p, q) <= 7` in frozen `G_rest`, and exhaustively solves legal `C4 = C8 = 0` strictly 2-connected perfect matchings via MRV branch-and-bound with incremental `C4`/`C8` pruning and exact early-aborting MitM `C16`. Exposed via `sglab-rust-engine lns-polish` (16-core shared-champion parallel polish) and opt-in `search --lns-interval`.
+- **Verification & Experiment 9 (`docs/reports/M6_WAVE_D1_EXACT_LNS_2026_11_26.md`)**: `14/14` Rust release tests (`0` warnings), `7/7` Python parity tests; evaluated `689M` exact `C4 = C8 = 0` repair leaves across 16 cores in ~100 s, smashing strictly 2-connected cubic `C16` records down to **`17`** (`n = 62`, `-61.4%`), **`23`** (`n = 60`, `-64.6%`), **`24`** (`n = 64`, `-25.0%`), **`44`** (`n = 58`, `-52.7%`), and **`77`** (`n = 50`, `-43.4%`).
+
 ## Deep `/goal` Research Campaign (Wave A + B + C + `LexCutoff`, 1.97B evaluations)
 
 - **Exact `LexCutoff` & ILS return-to-best (`rust/sglab-engine/src/cycles.rs`, `search.rs`, commit `2436da2`)**: Added exact ascending-length short-cycle early pruning under `--objective lex_short` (aborting in ~10–60 ns when `C4 > 0` or `C8 > 0`, yielding `11×` speedup on `n = 64` and `16.68M ev/s` peak on `single_block_41`) plus classic ILS return-to-best intensification after `10 × perturbation_interval` stagnant steps.

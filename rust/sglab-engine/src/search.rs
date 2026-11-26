@@ -61,6 +61,7 @@ pub struct SearchParams {
     pub targeted_prob: f64,
     pub three_edge_prob: f64,
     pub hashimoto_guide: bool,
+    pub lns_interval: usize,
     pub temperature: f64,
     pub cooling: f64,
     pub restart_threshold: usize,
@@ -581,6 +582,59 @@ fn run_lane_u64(params: &SearchParams, seed: u64, worker_idx: usize) -> Result<L
             }
             cur_hash_pot = None;
             stagnant_evals = 0;
+        }
+
+        // Optional Micro-LNS Destroy-and-Repair jump when stagnating inside C4=C8=0
+        if params.lns_interval > 0
+            && stagnant_evals > 0
+            && stagnant_evals % params.lns_interval == 0
+            && score.c4_c8_zero()
+            && block1_inner_mask == 0
+        {
+            let mut heat = Vec::with_capacity(edges_buf.len());
+            let cur_c16 = crate::lns::compute_c16_edge_heat_u64(&graph, &edges_buf, &mut heat);
+            if cur_c16 > 0 {
+                let k = 4 + rng.gen_range(4);
+                let out = crate::lns::lns_destroy_and_repair_u64(
+                    &graph,
+                    &edges_buf,
+                    &heat,
+                    cur_c16,
+                    k,
+                    params.mode,
+                    true,
+                    &mut rng,
+                    &mut scratch,
+                    15_000,
+                );
+                if let Some((rep_g, _rep_c16)) = out.repaired {
+                    let rep_score = score_graph_fast_u64(
+                        &rep_g,
+                        active_cap,
+                        active_budget,
+                        None,
+                        &mut scratch,
+                    )
+                    .expect("LNS repair score has no cutoff");
+                    let rep_ord = rep_score.ordering_key_for(obj);
+                    if rep_ord <= score.ordering_key_for(obj) {
+                        graph = rep_g;
+                        graph.collect_edges(&mut edges_buf);
+                        cycle_bank.reset_for_graph(&edges_buf);
+                        key = graph.zobrist_key64();
+                        score = rep_score;
+                        cur_hash_pot = None;
+                        witness_cache.invalidate();
+                        accepted += 1;
+                        if rep_ord < best_score.ordering_key_for(obj) {
+                            best_graph = graph;
+                            best_score = score;
+                            improvements += 1;
+                            stagnant_evals = 0;
+                        }
+                    }
+                }
+            }
         }
 
         // Classic ILS intensification: if perturbation kicked the walk into a

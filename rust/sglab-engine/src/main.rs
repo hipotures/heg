@@ -2,6 +2,7 @@ mod bank;
 mod cycles;
 mod exact_verify;
 mod graph;
+mod lns;
 mod mutation;
 mod protocol;
 mod rng;
@@ -214,6 +215,7 @@ fn cmd_search(args: &[String]) -> i32 {
     let mut targeted_prob = 0.5f64;
     let mut three_edge_prob = 0.0f64;
     let mut hashimoto_guide = false;
+    let mut lns_interval = 0usize;
     let mut tabu_tenure = 64usize;
     let mut perturbation_interval = 200usize;
     let mut temperature = 8.0f64;
@@ -282,6 +284,10 @@ fn cmd_search(args: &[String]) -> i32 {
             }
             "--hashimoto-guide" => {
                 hashimoto_guide = true;
+            }
+            "--lns-interval" => {
+                i += 1;
+                lns_interval = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(0);
             }
             "--algorithm" => {
                 i += 1;
@@ -380,6 +386,7 @@ fn cmd_search(args: &[String]) -> i32 {
         targeted_prob,
         three_edge_prob,
         hashimoto_guide,
+        lns_interval,
         temperature,
         cooling,
         restart_threshold,
@@ -612,11 +619,120 @@ fn cmd_verify_exact(args: &[String]) -> i32 {
     0
 }
 
+fn cmd_lns_polish(args: &[String]) -> i32 {
+    let mut g6 = String::new();
+    let mut mode = GraphMode::CubicFirst;
+    let mut k_min = 4usize;
+    let mut k_max = 7usize;
+    let mut wall_seconds = 5.0f64;
+    let mut workers = 16usize;
+    let mut seed = 20261126u64;
+    let mut allow_sideways = true;
+    let mut node_cap = 20_000u32;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--graph6" => {
+                i += 1;
+                g6 = args.get(i).cloned().unwrap_or_default();
+            }
+            "--mode" => {
+                i += 1;
+                mode = match args.get(i).map(|s| GraphMode::parse(s)) {
+                    Some(Ok(m)) => m,
+                    Some(Err(e)) => {
+                        eprintln!("{e}");
+                        return 2;
+                    }
+                    None => {
+                        eprintln!("missing value for --mode");
+                        return 2;
+                    }
+                };
+            }
+            "--k-min" => {
+                i += 1;
+                k_min = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(4);
+            }
+            "--k-max" => {
+                i += 1;
+                k_max = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(7);
+            }
+            "--wall-seconds" => {
+                i += 1;
+                wall_seconds = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(5.0);
+            }
+            "--workers" => {
+                i += 1;
+                workers = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(16);
+            }
+            "--seed" => {
+                i += 1;
+                seed = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(20261126);
+            }
+            "--node-cap" => {
+                i += 1;
+                node_cap = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(20_000);
+            }
+            "--no-sideways" => {
+                allow_sideways = false;
+            }
+            "--json" => {}
+            other => {
+                eprintln!("unknown argument: {other}");
+                return 2;
+            }
+        }
+        i += 1;
+    }
+    let graph = match BitGraph::from_graph6(&g6) {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!("graph6 error: {e}");
+            return 2;
+        }
+    };
+    if graph.n > 64 {
+        eprintln!("lns-polish supports n <= 64 (got {})", graph.n);
+        return 2;
+    }
+    let g64 = crate::graph::BitGraph64::from_graph(&graph);
+    let summary = crate::lns::run_parallel_lns_polish(
+        g64,
+        mode,
+        k_min,
+        k_max,
+        wall_seconds,
+        workers,
+        seed,
+        allow_sideways,
+        node_cap,
+    );
+    let best_g6 = escape_json_str(&summary.best_graph.to_graph().to_graph6());
+    println!(
+        "{{\"order\":{},\"mode\":\"{}\",\"k_min\":{},\"k_max\":{},\"workers\":{},\"wall_seconds\":{:.3},\"initial_c16\":{},\"best_c16\":{},\"total_steps\":{},\"total_leaves\":{},\"improvements\":{},\"sideways_moves\":{},\"best_graph6\":\"{}\"}}",
+        graph.n,
+        mode.as_str(),
+        k_min,
+        k_max,
+        workers,
+        summary.wall_seconds,
+        summary.initial_c16,
+        summary.best_c16,
+        summary.total_steps,
+        summary.total_leaves,
+        summary.improvements,
+        summary.sideways_moves,
+        best_g6
+    );
+    0
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
         eprintln!(
-            "usage: sglab-rust-engine --version | --serve | score | bench-score | search | verify-exact"
+            "usage: sglab-rust-engine --version | --serve | score | bench-score | search | verify-exact | lns-polish"
         );
         process::exit(2);
     }
@@ -630,6 +746,7 @@ fn main() {
         "bench-score" => cmd_bench_score(&args[2..]),
         "search" => cmd_search(&args[2..]),
         "verify-exact" => cmd_verify_exact(&args[2..]),
+        "lns-polish" => cmd_lns_polish(&args[2..]),
         other => {
             eprintln!("unknown subcommand: {other}");
             2
