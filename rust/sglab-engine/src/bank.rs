@@ -1570,6 +1570,7 @@ mod tests {
                     64,
                     50_000,
                     cutoff,
+                    None,
                     &mut scratch,
                     &mut bank,
                 );

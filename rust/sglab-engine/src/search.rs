@@ -7,8 +7,8 @@ use std::time::Instant;
 
 use crate::bank::CycleBank64;
 use crate::cycles::{
-    Cutoff, DfsScratch, ObjectiveMode, ScoreResult, score_graph_delta_u64, score_graph_fast,
-    score_graph_fast_u64,
+    Cutoff, DfsScratch, LexCutoff, ObjectiveMode, ScoreResult, score_graph_delta_u64,
+    score_graph_fast, score_graph_fast_u64,
 };
 use crate::graph::{BitGraph, BitGraph64, Edge, zobrist_edge, zobrist_edge64};
 use crate::mutation::{
@@ -583,6 +583,24 @@ fn run_lane_u64(params: &SearchParams, seed: u64, worker_idx: usize) -> Result<L
             stagnant_evals = 0;
         }
 
+        // Classic ILS intensification: if perturbation kicked the walk into a
+        // worse basin and it stagnates for 10 perturbation intervals, return
+        // to `best_graph` so subsequent perturbations explore fresh local optima
+        // around the current champion rather than drifting in expander space.
+        if params.algorithm == Algorithm::IteratedLocalSearchTabu
+            && stagnant_evals >= params.perturbation_interval.max(1).saturating_mul(10)
+            && best_score.ordering_key_for(obj) < score.ordering_key_for(obj)
+        {
+            graph = best_graph;
+            score = best_score;
+            graph.collect_edges(&mut edges_buf);
+            cycle_bank.reset_for_graph(&edges_buf);
+            key = graph.zobrist_key64();
+            cur_hash_pot = None;
+            witness_cache.invalidate();
+            stagnant_evals = 0;
+        }
+
         let targeted = params.targeted_prob > 0.0 && rng.next_f64() < params.targeted_prob;
         let (mut cand, delta) = mutate_u64(
             &graph,
@@ -629,6 +647,28 @@ fn run_lane_u64(params: &SearchParams, seed: u64, worker_idx: usize) -> Result<L
             None
         };
 
+        let lex_cutoff = if obj == ObjectiveMode::LexShort
+            && params.algorithm == Algorithm::IteratedLocalSearchTabu
+        {
+            let perturb = params.perturbation_interval.max(1);
+            if evaluated % perturb == 0 {
+                None
+            } else {
+                let ref_sc = if is_tabu { &best_score } else { &score };
+                let mut ref_counts = [0u32; 6];
+                for idx in 0..(ref_sc.counts_len as usize) {
+                    ref_counts[idx] = ref_sc.counts[idx].1;
+                }
+                Some(LexCutoff {
+                    counts: ref_counts,
+                    simplicity: ref_sc.simplicity,
+                    inclusive: is_tabu,
+                })
+            }
+        } else {
+            None
+        };
+
         let is_two_edge_switch = delta.removed_count == 2 && delta.added_count == 2;
         let cand_simplicity =
             (edges_buf.len() + delta.added_count as usize - delta.removed_count as usize) as u32;
@@ -644,6 +684,7 @@ fn run_lane_u64(params: &SearchParams, seed: u64, worker_idx: usize) -> Result<L
             active_cap,
             active_budget,
             cutoff,
+            lex_cutoff,
             &mut scratch,
             &mut cycle_bank,
         ) else {

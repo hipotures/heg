@@ -43,6 +43,16 @@ pub struct Cutoff {
     pub inclusive: bool,
 }
 
+/// Exact lexicographic short-cycle cutoff for `ObjectiveMode::LexShort`:
+/// prunes immediately as soon as any length in ascending order (C4, C8, C16, ...)
+/// exceeds `max_counts[len_idx]` while still tied on all shorter lengths.
+#[derive(Clone, Copy, Debug)]
+pub struct LexCutoff {
+    pub counts: [u32; 6],
+    pub simplicity: u32,
+    pub inclusive: bool,
+}
+
 impl Cutoff {
     #[inline]
     pub fn reached(&self, total: u32, weighted: u32, simplicity: u32) -> bool {
@@ -2900,15 +2910,17 @@ pub fn score_graph_delta_u64(
     cap: u32,
     node_budget: u32,
     cutoff: Option<Cutoff>,
+    lex_cutoff: Option<LexCutoff>,
     scratch: &mut DfsScratch,
     bank: &mut CycleBank64,
 ) -> Option<ScoreResult> {
     let lengths = forbidden_lengths(cand.n);
     let (mut order_idxs, n_len) = eval_order(lengths, cand.n, cutoff.is_some());
-    // When exact O(1) delta C4 (~10ns) & delta C8 (~50ns) are available on 4-length
-    // graphs (n=33..63), evaluate C4 & C8 FIRST so any positive C4/C8 immediately
-    // lowers `stop_at_count` for C16 & C32 (reducing bank misses and early-stopping)!
-    if is_two_edge_switch
+    if lex_cutoff.is_some() {
+        for i in 0..n_len {
+            order_idxs[i] = i;
+        }
+    } else if is_two_edge_switch
         && cutoff.is_some()
         && n_len == 4
         && lengths == [4, 8, 16, 32]
@@ -2925,6 +2937,7 @@ pub fn score_graph_delta_u64(
     let mut complete = true;
     let mut complete_mask = 0u8;
     let mut counts_arr = [(0u16, 0u32); 6];
+    let mut lex_tied = lex_cutoff.is_some();
 
     for pos in 0..n_len {
         let len_idx = order_idxs[pos];
@@ -2946,6 +2959,13 @@ pub fn score_graph_delta_u64(
                 ) {
                     stop_at_count = c;
                     break;
+                }
+            }
+        } else if lex_tied {
+            if let Some(lco) = lex_cutoff {
+                let target_c = lco.counts[len_idx];
+                if target_c < cap {
+                    stop_at_count = target_c + 1;
                 }
             }
         }
@@ -3079,6 +3099,21 @@ pub fn score_graph_delta_u64(
         if let Some(co) = cutoff {
             if co.reached(partial_total, partial_weighted, simplicity) {
                 return None;
+            }
+        } else if lex_tied {
+            if let Some(lco) = lex_cutoff {
+                let target_c = lco.counts[len_idx];
+                if effective_count > target_c {
+                    return None;
+                }
+                if effective_count < target_c {
+                    lex_tied = false;
+                } else if pos + 1 == n_len
+                    && (simplicity > lco.simplicity
+                        || (lco.inclusive && simplicity == lco.simplicity))
+                {
+                    return None;
+                }
             }
         }
     }
