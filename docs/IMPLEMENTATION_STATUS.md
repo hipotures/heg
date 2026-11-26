@@ -2,6 +2,10 @@
 
 Last implementation audit: **2026-11-26**.
 
+## 1-Hour Multi-Basin LNS Campaign (`n = 60, 62, 64`, 34.78B exact leaves)
+
+- **60.69-minute 16-core campaign (`docs/reports/M6_CAMPAIGN_1H_LNS_F4_60_62_64_2026_11_26.md`)**: Evaluated **`34,775,945,720`** exact `C4 = C8 = 0` LNS repair leaves (`+ 54.06M` SA evals) across 4 independent basins per order, establishing new strictly 2-connected (`bridges = 0`, `C4 = C8 = 0`) cubic records: **`n = 62 -> C16 = 12`** (`108×` below random), **`n = 64 -> C16 = 18`** (`78×` below random), and a 4-basin floor **`n = 60 -> C16 = 23`**, all certified by M4 + `verify-exact` (`0.5–0.9 ms`). No counterexample or `f(4) <= 64` witness was found.
+
 ## Wave D2: Bipartite `n ∈ [70, 128]` Voltage-Lift Search & x86-64 `PCLMULQDQ` Björklund $\mathrm{GF}(2^{16})$ Narrow Sieve
 
 - **Hardware `PCLMULQDQ` Bipartite Björklund Narrow Sieve (`rust/sglab-engine/src/voltage_bipartite.rs`, `main.rs`)**: Implemented `_mm_clmulepi64_si128`-accelerated $\mathrm{GF}(2^{16})$ arithmetic, Gray-code Ryser inclusion-exclusion over $2^{h-1}$ subsets on the smaller bipartition with exact characteristic-2 non-backtracking 2-step transitions (`C32` detection in `32.3–57.1 ms` on 16 cores at $n = 72..120$, zero false positives, 2-round error $< 5.2 \times 10^{-7}$), exposed via `sglab-rust-engine bjorklund-c32`.
