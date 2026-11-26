@@ -166,7 +166,38 @@ impl SingleLengthBank {
     }
 
     #[inline]
-    fn next_free_slot(&self) -> Option<usize> {
+    pub fn extract_any_cycle_edges(&self, edges: &[Edge], out: &mut [Edge]) -> usize {
+        if self.valid_count == 0 {
+            return 0;
+        }
+        let mut chosen_w = 0usize;
+        let mut chosen_bit = 0u64;
+        for w in 0..self.words_used {
+            let v = self.valid[w];
+            if v != 0 {
+                chosen_w = w;
+                chosen_bit = v & v.wrapping_neg();
+                break;
+            }
+        }
+        if chosen_bit == 0 {
+            return 0;
+        }
+        let mut k = 0usize;
+        let limit = edges.len().min(MAX_BANK_EDGES);
+        for eidx in 0..limit {
+            if (self.edge_in[eidx][chosen_w] & chosen_bit) != 0 {
+                if k < out.len() {
+                    out[k] = edges[eidx];
+                    k += 1;
+                }
+            }
+        }
+        k
+    }
+
+    #[inline]
+    pub fn next_free_slot(&self) -> Option<usize> {
         for w in 0..self.words_used {
             let inv = !self.valid[w];
             if inv != 0 {
@@ -287,6 +318,20 @@ impl CycleBank64 {
         self.c16.apply_accepted_switch(i0, i1);
         self.c32.apply_accepted_switch(i0, i1);
         self.c64.apply_accepted_switch(i0, i1);
+    }
+
+    /// Extract edges of one live banked cycle of `length` in O(m) (~40 ns), or 0 if none banked.
+    #[inline]
+    pub fn extract_witness_edges(&self, length: u16, edges: &[Edge], out: &mut [Edge]) -> usize {
+        if !self.active || edges.len() != self.m {
+            return 0;
+        }
+        match length {
+            16 => self.c16.extract_any_cycle_edges(edges, out),
+            32 => self.c32.extract_any_cycle_edges(edges, out),
+            64 => self.c64.extract_any_cycle_edges(edges, out),
+            _ => 0,
+        }
     }
 
     /// Ensure bank for `length` is topped up when `graph` is saturated at `cap`,
@@ -942,6 +987,8 @@ mod tests {
                     &mut rng,
                     GraphMode::CubicFirst,
                     false,
+                    !0u8,
+                    None,
                     &mut wc,
                     &mut scratch,
                 );

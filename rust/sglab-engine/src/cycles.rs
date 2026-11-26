@@ -76,6 +76,17 @@ impl ScoreResult {
     }
 
     #[inline]
+    pub fn nonzero_len_mask(&self) -> u8 {
+        let mut mask = 0u8;
+        for i in 0..(self.counts_len as usize) {
+            if self.counts[i].1 > 0 {
+                mask |= 1u8 << i;
+            }
+        }
+        mask
+    }
+
+    #[inline]
     pub fn ordering_key(&self) -> (u8, u32, u32, u32) {
         (
             if self.valid { 0 } else { 1 },
@@ -2456,8 +2467,221 @@ impl StackWitnesses {
     }
 }
 
+/// Fast analytic C4 witness extractor (~30 ns vs ~5 us DFS).
+#[inline]
+fn find_c4_witness_u64(rows: &[u64; 64], order: usize, out: &mut [Edge]) -> usize {
+    let max_start = order.saturating_sub(3);
+    for start in 0..max_start {
+        let greater_mask = !((1u64 << (start + 1)) - 1);
+        let mut nbrs = rows[start] & greater_mask;
+        if nbrs.count_ones() < 2 {
+            continue;
+        }
+        while nbrs != 0 {
+            let a = nbrs.trailing_zeros() as usize;
+            nbrs &= nbrs - 1;
+            let ra = rows[a] & greater_mask;
+            let mut rest = nbrs;
+            while rest != 0 {
+                let c = rest.trailing_zeros() as usize;
+                rest &= rest - 1;
+                let common = ra & rows[c];
+                if common != 0 {
+                    let b = common.trailing_zeros() as usize;
+                    out[0] = normalize_edge(start as u8, a as u8);
+                    out[1] = normalize_edge(a as u8, b as u8);
+                    out[2] = normalize_edge(b as u8, c as u8);
+                    out[3] = normalize_edge(c as u8, start as u8);
+                    return 4;
+                }
+            }
+        }
+    }
+    0
+}
+
+/// Fast single Hamiltonian witness finder via Posa extension + lollipop close (~2 us).
+fn find_hamiltonian_witness_posa_u64(rows: &[u64; 64], order: usize, out: &mut [Edge]) -> usize {
+    if order < 8 || order > 64 {
+        return 0;
+    }
+    let full_mask: u64 = if order == 64 {
+        !0u64
+    } else {
+        (1u64 << order) - 1
+    };
+    let mut path = [0u8; 64];
+    let mut pos_of = [255u8; 64];
+    let mut rng_state: u64 = 0x517c_c1b7_2722_0a95 ^ (order as u64);
+
+    #[inline]
+    fn fast_rand(s: &mut u64) -> u64 {
+        *s ^= *s << 13;
+        *s ^= *s >> 7;
+        *s ^= *s << 17;
+        *s
+    }
+
+    let mut total_rot = 0usize;
+    for restart in 0..3usize {
+        if total_rot >= 400 {
+            break;
+        }
+        let start = (restart * 17) % order;
+        path[0] = start as u8;
+        let mut len = 1usize;
+        let mut in_path = 1u64 << start;
+        pos_of.fill(255);
+        pos_of[start] = 0;
+        let mut stuck = 0usize;
+        let mut prev_tail = usize::MAX;
+        while len < order && total_rot < 400 && stuck < 120 {
+            let tail = path[len - 1] as usize;
+            let unvis = rows[tail] & !in_path;
+            if unvis != 0 {
+                let mut best_v = unvis.trailing_zeros() as usize;
+                let mut best_d = (rows[best_v] & !in_path).count_ones();
+                let mut b = unvis & (unvis - 1);
+                while b != 0 {
+                    let v = b.trailing_zeros() as usize;
+                    b &= b - 1;
+                    let d = (rows[v] & !in_path).count_ones();
+                    if d < best_d {
+                        best_d = d;
+                        best_v = v;
+                    }
+                }
+                path[len] = best_v as u8;
+                pos_of[best_v] = len as u8;
+                in_path |= 1u64 << best_v;
+                len += 1;
+                stuck = 0;
+                prev_tail = usize::MAX;
+                continue;
+            }
+            let head = path[0] as usize;
+            if (rows[head] & !in_path) != 0 {
+                path[..len].reverse();
+                for idx in 0..len {
+                    pos_of[path[idx] as usize] = idx as u8;
+                }
+                prev_tail = usize::MAX;
+                continue;
+            }
+            if len >= 3 && (rows[tail] & (1u64 << head)) != 0 {
+                let mut ext_idx = None;
+                for idx in 0..len {
+                    if (rows[path[idx] as usize] & !in_path) != 0 {
+                        ext_idx = Some(idx);
+                        break;
+                    }
+                }
+                if let Some(idx) = ext_idx {
+                    let shift = (idx + 1) % len;
+                    if shift != 0 {
+                        path[..len].rotate_left(shift);
+                        for k in 0..len {
+                            pos_of[path[k] as usize] = k as u8;
+                        }
+                    }
+                    prev_tail = usize::MAX;
+                    continue;
+                } else {
+                    break;
+                }
+            }
+            let mut nbrs = rows[tail] & in_path;
+            if len >= 2 {
+                nbrs &= !(1u64 << path[len - 2]);
+            }
+            let mut chosen = None;
+            let mut fb = [0usize; 8];
+            let mut fb_len = 0usize;
+            while nbrs != 0 {
+                let u = nbrs.trailing_zeros() as usize;
+                nbrs &= nbrs - 1;
+                let p = pos_of[u] as usize;
+                if p + 1 < len {
+                    let nt = path[p + 1] as usize;
+                    if (rows[nt] & !in_path) != 0 {
+                        chosen = Some(p);
+                        break;
+                    }
+                    if nt != prev_tail && fb_len < fb.len() {
+                        fb[fb_len] = p;
+                        fb_len += 1;
+                    }
+                }
+            }
+            let rot_p = match chosen {
+                Some(p) => p,
+                None if fb_len > 0 => fb[(fast_rand(&mut rng_state) as usize) % fb_len],
+                None => break,
+            };
+            prev_tail = tail;
+            path[(rot_p + 1)..len].reverse();
+            for idx in (rot_p + 1)..len {
+                pos_of[path[idx] as usize] = idx as u8;
+            }
+            total_rot += 1;
+            stuck += 1;
+        }
+        if len < order || in_path != full_mask {
+            continue;
+        }
+        let mut prev_t = usize::MAX;
+        for _ in 0..120 {
+            let head = path[0] as usize;
+            let tail = path[order - 1] as usize;
+            if (rows[tail] & (1u64 << head)) != 0 {
+                for i in 0..order {
+                    out[i] = normalize_edge(path[i], path[(i + 1) % order]);
+                }
+                return order;
+            }
+            let mut nbrs = rows[tail] & !((1u64 << path[order - 2]) | (1u64 << head));
+            let mut chosen = None;
+            let mut cands = [0usize; 8];
+            let mut clen = 0usize;
+            while nbrs != 0 {
+                let u = nbrs.trailing_zeros() as usize;
+                nbrs &= nbrs - 1;
+                let p = pos_of[u] as usize;
+                if p > 0 && p + 1 < order {
+                    let nt = path[p + 1] as usize;
+                    if nt == prev_t {
+                        continue;
+                    }
+                    if (rows[nt] & (1u64 << head)) != 0 {
+                        chosen = Some(p);
+                        break;
+                    }
+                    if clen < cands.len() {
+                        cands[clen] = p;
+                        clen += 1;
+                    }
+                }
+            }
+            let rot_p = match chosen {
+                Some(p) => p,
+                None if clen > 0 => cands[(fast_rand(&mut rng_state) as usize) % clen],
+                None => break,
+            };
+            prev_t = tail;
+            path[(rot_p + 1)..order].reverse();
+            for idx in (rot_p + 1)..order {
+                pos_of[path[idx] as usize] = idx as u8;
+            }
+        }
+    }
+    0
+}
+
 pub fn find_witness_edge_groups_u64(
     graph: &BitGraph64,
+    edges: &[Edge],
+    nonzero_len_mask: u8,
+    bank: Option<&CycleBank64>,
     node_budget: u32,
     scratch: &mut DfsScratch,
     out: &mut StackWitnesses,
@@ -2468,8 +2692,44 @@ pub fn find_witness_edge_groups_u64(
     let order = graph.n;
     let budget = node_budget as u64;
 
-    for &length in lengths {
+    for (len_idx, &length) in lengths.iter().enumerate() {
+        // Exact skip: if score already proved zero cycles of `length`, no witness exists!
+        if (nonzero_len_mask & (1u8 << len_idx)) == 0 {
+            continue;
+        }
         let target = length as usize;
+        let slot = out.count;
+
+        // Instant O(m) (~40 ns) witness extraction directly from CycleBank64 when available!
+        if let Some(b) = bank {
+            let extracted = b.extract_witness_edges(length, edges, &mut out.groups[slot]);
+            if extracted == target {
+                out.lens[slot] = target as u8;
+                out.count += 1;
+                continue;
+            }
+        }
+
+        // Fast analytic C4 witness (~30 ns).
+        if length == 4 {
+            let found = find_c4_witness_u64(rows, order, &mut out.groups[slot]);
+            if found == 4 {
+                out.lens[slot] = 4;
+                out.count += 1;
+            }
+            continue;
+        }
+
+        // Fast Posa Hamiltonian witness (~2 us vs 25 us failing iterative DFS).
+        if target == order && order >= 48 {
+            let found = find_hamiltonian_witness_posa_u64(rows, order, &mut out.groups[slot]);
+            if found == order {
+                out.lens[slot] = order as u8;
+                out.count += 1;
+            }
+            continue;
+        }
+
         let max_start = order - target + 1;
         let close_depth = target - 2;
         let mut nodes = 0u64;
@@ -2602,7 +2862,7 @@ pub fn find_witness_edge_groups(
 ) {
     if graph.n <= 64 {
         let g64 = BitGraph64::from_graph(graph);
-        return find_witness_edge_groups_u64(&g64, node_budget, scratch, out);
+        return find_witness_edge_groups_u64(&g64, &[], !0u8, None, node_budget, scratch, out);
     }
     out.count = 0;
     let lengths = forbidden_lengths(graph.n);
@@ -2845,7 +3105,7 @@ mod tests {
                 for _ in 0..40 {
                     let exact_c4_p = count_c4_u64(&g.rows, n, 10_000, 0).count;
                     let exact_c8_p = count_c8_mitm_u64(&g.rows, n, 10_000, 0, 0, &mut scratch).count;
-                    let (mut cand, delta) = mutate_u64(&g, &edges_buf, &mut rng, mode, false, &mut wc, &mut scratch);
+                    let (mut cand, delta) = mutate_u64(&g, &edges_buf, &mut rng, mode, false, !0u8, None, &mut wc, &mut scratch);
                     if !delta.changed || delta.removed_count != 2 || delta.added_count != 2 {
                         continue;
                     }

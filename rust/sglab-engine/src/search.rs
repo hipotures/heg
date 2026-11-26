@@ -474,6 +474,8 @@ fn run_lane_u64(params: &SearchParams, seed: u64) -> Result<LaneSummary, String>
             &mut rng,
             params.mode,
             targeted,
+            score.nonzero_len_mask(),
+            Some(&cycle_bank),
             &mut witness_cache,
             &mut scratch,
         );

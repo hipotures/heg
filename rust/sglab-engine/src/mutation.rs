@@ -1,6 +1,7 @@
 //! Seed generators and zero-allocation mutation operators matching
 //! `sglab.targets.erdos_gyarfas` (including Ducoffe-Dumitru structural prior).
 
+use crate::bank::CycleBank64;
 use crate::cycles::{
     DfsScratch, StackWitnesses, find_witness_edge_groups, find_witness_edge_groups_u64,
 };
@@ -177,10 +178,21 @@ impl WitnessCache {
     pub fn get_or_compute_u64(
         &mut self,
         graph: &BitGraph64,
+        edges: &[Edge],
+        nonzero_len_mask: u8,
+        bank: Option<&CycleBank64>,
         scratch: &mut DfsScratch,
     ) -> &StackWitnesses {
         if !self.valid {
-            find_witness_edge_groups_u64(graph, 4_096, scratch, &mut self.data);
+            find_witness_edge_groups_u64(
+                graph,
+                edges,
+                nonzero_len_mask,
+                bank,
+                4_096,
+                scratch,
+                &mut self.data,
+            );
             self.valid = true;
         }
         &self.data
@@ -262,12 +274,15 @@ fn try_two_edge_switch_u64(
 
 /// Mutate a 64-vertex graph using a pre-cached edge list (`edges_buf` is owned
 /// by the lane and only rebuilt when `graph` changes).
+#[allow(clippy::too_many_arguments)]
 pub fn mutate_u64(
     graph: &BitGraph64,
     edges: &[Edge],
     rng: &mut Rng,
     mode: GraphMode,
     targeted: bool,
+    nonzero_len_mask: u8,
+    bank: Option<&CycleBank64>,
     witness_cache: &mut WitnessCache,
     scratch: &mut DfsScratch,
 ) -> (BitGraph64, MutationDelta) {
@@ -331,7 +346,7 @@ pub fn mutate_u64(
     }
 
     if targeted {
-        let w = witness_cache.get_or_compute_u64(graph, scratch);
+        let w = witness_cache.get_or_compute_u64(graph, edges, nonzero_len_mask, bank, scratch);
         if w.count == 0 {
             return (*graph, MutationDelta::NONE);
         }
