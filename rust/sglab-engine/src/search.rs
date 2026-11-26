@@ -11,8 +11,8 @@ use crate::cycles::{
 };
 use crate::graph::{BitGraph, BitGraph64, Edge, zobrist_edge, zobrist_edge64};
 use crate::mutation::{
-    GraphMode, MutationDelta, SeedStyle, WitnessCache, generate_seed,
-    generate_two_block_ducoffe_seed, mutate, mutate_u64,
+    GraphMode, MutationDelta, SeedStyle, WitnessCache, generate_markstrom25_single_block_seed,
+    generate_seed, generate_two_block_ducoffe_seed, mutate, mutate_u64,
 };
 use crate::rng::Rng;
 
@@ -389,8 +389,22 @@ fn update_key64(mut key: u64, delta: &MutationDelta) -> u64 {
 fn make_lane_seed(
     rng: &mut Rng,
     params: &SearchParams,
+    worker_idx: usize,
     use_two_block: bool,
 ) -> Result<(BitGraph, u64), String> {
+    if params.mode == GraphMode::SingleBlock41 {
+        let use_markstrom = params.order == 25
+            && match params.seed_style {
+                SeedStyle::Markstrom => true,
+                SeedStyle::Mixed => (worker_idx & 1) == 0,
+                SeedStyle::Random | SeedStyle::TwoBlock => false,
+            };
+        if use_markstrom {
+            let g = generate_markstrom25_single_block_seed(rng, worker_idx == 0)?;
+            return Ok((g, 0u64));
+        }
+        return Ok((generate_seed(rng, params.order, params.mode)?, 0u64));
+    }
     if use_two_block {
         generate_two_block_ducoffe_seed(rng, params.order)
     } else {
@@ -403,8 +417,8 @@ fn lane_uses_two_block(params: &SearchParams, worker_idx: usize) -> bool {
         && params.mode == GraphMode::MinimalStructureMixedDegree
         && match params.seed_style {
             SeedStyle::TwoBlock => true,
-            SeedStyle::Mixed => (worker_idx & 1) == 0,
-            SeedStyle::Random => false,
+            SeedStyle::Mixed => params.order % 2 == 1 && params.order >= 13 && (worker_idx & 1) == 0,
+            SeedStyle::Random | SeedStyle::Markstrom => false,
         }
 }
 
@@ -420,7 +434,7 @@ fn run_lane_u64(params: &SearchParams, seed: u64, worker_idx: usize) -> Result<L
     let (init_g, mut block1_inner_mask) = match params.initial_graph {
         Some(g) => (BitGraph64::from_graph(&g), 0u64),
         None => {
-            let (g, mask) = make_lane_seed(&mut rng, params, use_two_block)?;
+            let (g, mask) = make_lane_seed(&mut rng, params, worker_idx, use_two_block)?;
             (BitGraph64::from_graph(&g), mask)
         }
     };
@@ -462,7 +476,7 @@ fn run_lane_u64(params: &SearchParams, seed: u64, worker_idx: usize) -> Result<L
         evaluated += 1;
 
         if params.algorithm == Algorithm::RandomRestart {
-            let (seed_g, mask) = make_lane_seed(&mut rng, params, use_two_block)?;
+            let (seed_g, mask) = make_lane_seed(&mut rng, params, worker_idx, use_two_block)?;
             let cand = BitGraph64::from_graph(&seed_g);
             block1_inner_mask = mask;
             let cand_score = score_graph_fast_u64(
@@ -488,7 +502,7 @@ fn run_lane_u64(params: &SearchParams, seed: u64, worker_idx: usize) -> Result<L
             && params.restart_threshold > 0
             && evaluated % params.restart_threshold == 0
         {
-            let (seed_g, mask) = make_lane_seed(&mut rng, params, use_two_block)?;
+            let (seed_g, mask) = make_lane_seed(&mut rng, params, worker_idx, use_two_block)?;
             graph = BitGraph64::from_graph(&seed_g);
             block1_inner_mask = mask;
             graph.collect_edges(&mut edges_buf);
@@ -681,7 +695,7 @@ pub fn run_lane(params: &SearchParams, seed: u64, worker_idx: usize) -> Result<L
 
     let mut graph = match params.initial_graph {
         Some(g) => g,
-        None => make_lane_seed(&mut rng, params, use_two_block)?.0,
+        None => make_lane_seed(&mut rng, params, worker_idx, use_two_block)?.0,
     };
     graph.collect_edges(&mut edges_buf);
     let mut key = graph.zobrist_key();

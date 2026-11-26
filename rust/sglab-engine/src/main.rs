@@ -225,10 +225,17 @@ fn cmd_search(args: &[String]) -> i32 {
             }
             "--mode" => {
                 i += 1;
-                mode = args
-                    .get(i)
-                    .and_then(|s| GraphMode::parse(s).ok())
-                    .unwrap_or(GraphMode::CubicFirst);
+                mode = match args.get(i).map(|s| GraphMode::parse(s)) {
+                    Some(Ok(m)) => m,
+                    Some(Err(e)) => {
+                        eprintln!("{e}");
+                        return 2;
+                    }
+                    None => {
+                        eprintln!("missing value for --mode");
+                        return 2;
+                    }
+                };
             }
             "--seed-style" => {
                 i += 1;

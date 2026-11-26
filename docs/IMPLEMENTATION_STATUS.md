@@ -2,6 +2,12 @@
 
 Last implementation audit: **2026-11-26**.
 
+## Wave A: Closed Ducoffe–Dumitru filter, Conjecture 4.1 single-block mode, and Markström-24 seeding
+
+- **Closed Ducoffe–Dumitru structural filter (`rust/sglab-engine/src/graph.rs`)**: Implemented full arXiv:2609.28594 constraints on both `BitGraph64` and `BitGraph`: strict 2-connectivity (`is_biconnected()`) for even orders (Theorem 2.3 / Corollary 2.4), zero bridges (Corollary 2.2), symmetric equal-order equal-edge 2-degenerate 1-clique-sums with cut-vertex degree `4` for odd orders, doubling-reduction auxiliary graph `M` check (`auxiliary_m_valid()`, Lemma 3.5: simple, `|L_2| <= max(0, 2h - 3)`, 2-degenerate), and Theorem 3.7 global bounds (`h <= floor(n/3) - 1`, `m <= 2n - 2` for `n >= 13`).
+- **Conjecture 4.1 / Theorem 4.2 single-block search mode (`--mode single_block_41`, `mutation.rs`, `search.rs`, `main.rs`)**: Searches a single 2-connected, 2-degenerate block `B` of order `k` (vertex `0` of degree `2` with degree-3 neighbors; all other vertices `>= 3`), where `B +_0 B` is a legal odd candidate of order `n = 2k - 1` with automatic `C32 = C64 = 0` for `k in [21, 31]`. Added exact Markström-24 (`K4 -> K3 + 3·H7`, `C4 = C8 = 0, C16 = 228`) and optimal 1-edge subdivision seed (`--seed-style markstrom`, `k = 25`, `C4 = C8 = 0, C16 = 187`).
+- **Verification & M4-certified Experiment 6 (`docs/reports/M6_WAVE_A_DUCOFFE_SINGLE_BLOCK_2026_11_26.md`)**: `8/8` Rust release tests, `11/11` Python parity/resource tests (`--serve` v2 parity intact), and 16-core M4-certified scan across `k = 21..31` (`n = 41..61`) sustaining `2.95–4.85M ev/s`, driving `C16 = C32 = 0` on every odd order `41..61` (`total = 2` at `n = 41`, `total = 3` at `n = 43..61`; M4 refuted all 13 glued candidates).
+
 ## Rust 2-block Ducoffe–Dumitru seeding, exact Tarjan block scoring, adaptive cap, and `/proc` RSS fix
 
 - **Fixed `/proc` RSS race condition (`src/sglab/resources.py`, `tests/test_resources.py`)**: `current_rss_bytes()` and `process_tree_rss_bytes()` now handle `ProcessLookupError` when short-lived worker subprocesses exit mid-read. Verified with unit tests (`4/4`) and a 20-second 16-lane Rust `sglab research-campaign` (11.73M evaluations, clean `paused_by_operator`, `last_error: null`, zero orphan processes).
