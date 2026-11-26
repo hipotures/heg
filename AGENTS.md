@@ -113,14 +113,17 @@ A behavior change must update:
 
 Do not document future behavior as implemented.
 
-## Screenshot markers
+# GitHub access
 
-User documents contain markers in this form:
-
-```text
-[screenshot: ID=...; save as ...; crop ...]
-```
-
-Do not remove them until a screenshot has been captured, cropped, checked at
-desktop and mobile widths where requested, and inserted at the marker
-location. Follow `docs/user/screenshot-plan.md`.
+- After each completed cycle of changes, commit and push to the current branch's upstream. Never force-push; if the push is rejected, stop and report.
+- For any GitHub repository, issue, pull request, commit, release, or `github.com` URL, use the GitHub CLI (`gh`) as the primary interface.
+- Do not use web search or a browser to read GitHub content when `gh` can access it.
+- For GitHub issues, prefer the REST API via:
+  `gh api repos/<owner>/<repo>/issues/<number> --jq '"# " + .title + "\n\n" + .body'`
+- If issue comments are needed, fetch them separately with:
+  `gh api repos/<owner>/<repo>/issues/<number>/comments --jq '.[].body'`
+- Do not use the comments endpoint as a substitute for reading the issue body.
+- Avoid `gh issue view` when it fails because of deprecated Projects Classic GraphQL fields; fall back to `gh api`.
+- For pull requests, use `gh pr view` when it works; otherwise use the corresponding `gh api` REST endpoint.
+- For repository or API data, use `gh repo view` or `gh api`.
+- Use web access for GitHub only if `gh` cannot retrieve the required information, and state why.
