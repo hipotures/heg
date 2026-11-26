@@ -1,5 +1,6 @@
 mod bank;
 mod cycles;
+mod exact_verify;
 mod graph;
 mod mutation;
 mod protocol;
@@ -456,10 +457,167 @@ fn cmd_search(args: &[String]) -> i32 {
     0
 }
 
+fn cmd_verify_exact(args: &[String]) -> i32 {
+    let mut g6 = String::new();
+    let mut max_width = 14usize;
+    let mut max_states = 2_000_000usize;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--graph6" => {
+                i += 1;
+                g6 = args.get(i).cloned().unwrap_or_default();
+            }
+            "--max-width" => {
+                i += 1;
+                max_width = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(14);
+            }
+            "--max-states" => {
+                i += 1;
+                max_states = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(2_000_000);
+            }
+            other => {
+                eprintln!("unknown argument: {other}");
+                return 2;
+            }
+        }
+        i += 1;
+    }
+    let graph = match BitGraph::from_graph6(&g6) {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!("graph6 error: {e}");
+            return 2;
+        }
+    };
+    let t0 = Instant::now();
+    let mut scratch = DfsScratch::new();
+    let lengths = forbidden_lengths(graph.n);
+
+    // 1) Exact fast checks for C4, C8, C16 (analytic + Bitset MitM)
+    let mut status_map: Vec<(u16, &'static str)> = Vec::new();
+    let mut bnr_nodes = 0u64;
+    let mut c16_exact_count: Option<u32> = None;
+
+    if graph.n <= 64 {
+        let g64 = crate::graph::BitGraph64::from_graph(&graph);
+        for &len in lengths {
+            match len {
+                4 | 8 => {
+                    let r = crate::cycles::count_cycles_fast_u64(&g64, len, 1, 0, 0, &mut scratch);
+                    status_map.push((len, if r.count > 0 { "FOUND" } else { "ABSENT" }));
+                }
+                16 => {
+                    if let Some(r) = crate::cycles::count_c16_mitm_u64(
+                        &g64.rows,
+                        g64.n,
+                        u32::MAX,
+                        0,
+                        &mut scratch,
+                    ) {
+                        c16_exact_count = Some(r.count);
+                        status_map.push((16, if r.count > 0 { "FOUND" } else { "ABSENT" }));
+                    } else {
+                        status_map.push((16, "PENDING"));
+                    }
+                }
+                _ if (len as usize) == g64.n => {
+                    // Forced-Edge Branch-and-Reduce for exact Hamiltonian cycle C_n
+                    match crate::exact_verify::exact_cubic_hamiltonian_bnr_u64(&g64.rows, g64.n, 0)
+                    {
+                        crate::exact_verify::BnrResult::Found { nodes, .. } => {
+                            bnr_nodes = nodes;
+                            status_map.push((len, "FOUND"));
+                        }
+                        crate::exact_verify::BnrResult::Absent { nodes } => {
+                            bnr_nodes = nodes;
+                            status_map.push((len, "ABSENT"));
+                        }
+                        crate::exact_verify::BnrResult::BudgetExceeded { nodes } => {
+                            bnr_nodes = nodes;
+                            status_map.push((len, "PENDING"));
+                        }
+                    }
+                }
+                _ => {
+                    status_map.push((len, "PENDING"));
+                }
+            }
+        }
+    } else {
+        for &len in lengths {
+            status_map.push((len, "PENDING"));
+        }
+    }
+
+    // 2) Single-pass Frontier DP for remaining lengths (e.g. C32, C64 when n > 64)
+    let mut fdp_status = "SKIPPED";
+    let mut fdp_max_frontier = 0usize;
+    let mut fdp_peak_states = 0usize;
+    let mut fdp_ms = 0.0f64;
+    if status_map.iter().any(|&(_, st)| st == "PENDING") {
+        match crate::exact_verify::exact_spectrum_frontier_dp(&graph, max_width, max_states) {
+            crate::exact_verify::FrontierDpResult::Complete {
+                spectrum,
+                max_frontier,
+                peak_states,
+                elapsed_ms,
+            } => {
+                fdp_status = "COMPLETE";
+                fdp_max_frontier = max_frontier;
+                fdp_peak_states = peak_states;
+                fdp_ms = elapsed_ms;
+                for item in &mut status_map {
+                    if item.1 == "PENDING" && (item.0 as usize) < 128 {
+                        let has = (spectrum & (1u128 << (item.0 as usize))) != 0;
+                        item.1 = if has { "FOUND" } else { "ABSENT" };
+                    }
+                }
+            }
+            crate::exact_verify::FrontierDpResult::TooWide {
+                max_frontier,
+                peak_states,
+                elapsed_ms,
+            } => {
+                fdp_status = "TOO_WIDE";
+                fdp_max_frontier = max_frontier;
+                fdp_peak_states = peak_states;
+                fdp_ms = elapsed_ms;
+            }
+        }
+    }
+
+    let elapsed_ms = t0.elapsed().as_secs_f64() * 1000.0;
+    let status_json: Vec<String> = status_map
+        .iter()
+        .map(|(l, st)| format!("\"{l}\":\"{st}\""))
+        .collect();
+    let c16_json = match c16_exact_count {
+        Some(c) => c.to_string(),
+        None => "null".to_string(),
+    };
+    println!(
+        "{{\"order\":{},\"size\":{},\"elapsed_ms\":{:.3},\"c16_exact_count\":{},\"bnr_nodes\":{},\"frontier_dp_status\":\"{}\",\"frontier_dp_max_width\":{},\"frontier_dp_peak_states\":{},\"frontier_dp_ms\":{:.3},\"lengths\":{{{}}}}}",
+        graph.n,
+        graph.size(),
+        elapsed_ms,
+        c16_json,
+        bnr_nodes,
+        fdp_status,
+        fdp_max_frontier,
+        fdp_peak_states,
+        fdp_ms,
+        status_json.join(",")
+    );
+    0
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
-        eprintln!("usage: sglab-rust-engine --version | --serve | score | bench-score | search");
+        eprintln!(
+            "usage: sglab-rust-engine --version | --serve | score | bench-score | search | verify-exact"
+        );
         process::exit(2);
     }
     let code = match args[1].as_str() {
@@ -471,6 +629,7 @@ fn main() {
         "score" => cmd_score(&args[2..]),
         "bench-score" => cmd_bench_score(&args[2..]),
         "search" => cmd_search(&args[2..]),
+        "verify-exact" => cmd_verify_exact(&args[2..]),
         other => {
             eprintln!("unknown subcommand: {other}");
             2

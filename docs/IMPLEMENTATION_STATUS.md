@@ -2,6 +2,12 @@
 
 Last implementation audit: **2026-11-26**.
 
+## Wave C: Exact Bitset MitM `C16`, Forced-Edge Branch-and-Reduce `C_n`, and Single-Pass Frontier DP
+
+- **Exact Bitset Meet-in-the-Middle for `C16` (`rust/sglab-engine/src/cycles.rs`)**: Added `count_c16_mitm_u64` (canonical min-vertex 8-edge half-paths, `<= 384`/vertex in cubic graphs, disjoint bitmask pairing `(m1 & m2) == 0`) wired into `count_cycles_fast_u64`, eliminating `node_budget` exhaustion on `C16` while keeping `--serve` protocol v2 untouched and bit-for-bit parity-tested.
+- **Deterministic Forced-Edge Branch-and-Reduce & Frontier DP (`rust/sglab-engine/src/exact_verify.rs`, `main.rs`)**: Added Eppstein/Xiao–Nagamochi `exact_cubic_hamiltonian_bnr_u64` (wired as 2nd line after Pósa+Thomason in `count_hamiltonian_u64` for `n >= 32` cubic graphs) and single-pass Simpath mate-array `exact_spectrum_frontier_dp` (`u128` cycle-length spectrum) plus CLI `sglab-rust-engine verify-exact --graph6 <g6>`.
+- **Verification & Experiment 8 (`docs/reports/M6_WAVE_C_MITM16_BNR_FRONTIER_DP_2026_11_26.md`)**: `13/13` Rust release tests (`0` warnings, `0.13s`), `11/11` Python parity/resource tests; resolved all four Experiment 7 `n = 64` M4 10-second `C64` timeouts in `0.50–39.60 ms` (`0.72 ms` for `H7` `n = 64`), and cut true `C16` inside `C4 = C8 = 0` on 1-block cubic `n = 52..62` by `65%–91%` (down to `C16 = 93` at `n = 54, 62` and `C16 = 54, C64 = 0` at `n = 64`).
+
 ## Wave B: H7 gadget expansions, 3-edge switches, hot-edge heat, multi-objective & Hashimoto macro-gradient
 
 - **Hashimoto non-backtracking trace $\operatorname{Tr}(B^k)$ via Ihara–Bass (`rust/sglab-engine/src/spectral.rs`)**: Implemented pure-Rust cyclic-Jacobi eigensolver, exact cubic Ihara–Bass trace formula + algebraic connectivity $\lambda_2(L)$, and exact general-degree directed-edge walk-power trace (verified against McGee cage reference integers $\operatorname{Tr}(B^{16}) = 66\,336$ and $\operatorname{Tr}(B^{32}) = 4\,296\,496\,672$), wired as opt-in `--hashimoto-guide` plateau tie-breaker.

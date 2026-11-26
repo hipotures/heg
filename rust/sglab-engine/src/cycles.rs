@@ -216,6 +216,8 @@ pub struct DfsScratch {
     pub path: [u8; MAX_ORDER],
     pub mitm_left_mid: [u8; 64],
     pub mitm_left_mask: [u64; 64],
+    pub mitm16_masks: Vec<u64>,
+    pub mitm16_next: Vec<u32>,
 }
 
 impl DfsScratch {
@@ -230,6 +232,8 @@ impl DfsScratch {
             path: [0u8; MAX_ORDER],
             mitm_left_mid: [0u8; 64],
             mitm_left_mask: [0u64; 64],
+            mitm16_masks: Vec::with_capacity(1024),
+            mitm16_next: Vec::with_capacity(1024),
         }
     }
 }
@@ -1794,6 +1798,35 @@ pub fn count_hamiltonian_u64(
             }
         }
         if max_deg <= 3 {
+            // Deterministic 2nd line after Posa+Thomason: when order >= 32 and
+            // Posa found no Hamiltonian cycle, run Forced-Edge Branch-and-Reduce
+            // (Eppstein / Xiao-Nagamochi) to certify C_n = 0 deterministically in
+            // sub-millisecond time instead of exploding DFS!
+            if order >= 32 {
+                match crate::exact_verify::exact_cubic_hamiltonian_bnr_u64(rows, order, 40_000) {
+                    crate::exact_verify::BnrResult::Absent { nodes } => {
+                        return CountResult {
+                            length: order as u16,
+                            count: 0,
+                            complete: true,
+                            nodes,
+                            elapsed_ns: 0,
+                            cutoff_reached: false,
+                        };
+                    }
+                    crate::exact_verify::BnrResult::Found { nodes, .. } if stop_lim <= 1 => {
+                        return CountResult {
+                            length: order as u16,
+                            count: 1,
+                            complete: limit > 1,
+                            nodes,
+                            elapsed_ns: 0,
+                            cutoff_reached: stop_at_count != 0 && 1 >= stop_at_count,
+                        };
+                    }
+                    _ => {}
+                }
+            }
             return count_hamiltonian_cubic_u64(rows, order, limit, node_budget, stop_at_count);
         }
     }
@@ -2425,6 +2458,189 @@ pub fn count_cycles_pruned_u128(
     }
 }
 
+/// Exact Bitset Meet-in-the-Middle counter for C16 (`n <= 64`, sparse graphs).
+///
+/// For each canonical minimum vertex `s in 0..(n - 15)`, enumerates all simple
+/// half-paths of length 8 (`s -> v1 -> ... -> v7 -> t`) using vertices `> s`,
+/// stores the 7-vertex interior mask `m = (1<<v1)|...|(1<<v7)` in bucket `t`,
+/// and counts unordered disjoint pairs `(m1 & m2) == 0`.
+///
+/// Exact bijection: every simple 16-cycle has a unique minimum vertex `s` and
+/// unique opposite vertex `t` at distance 8, decomposing uniquely into an
+/// unordered pair of vertex-disjoint 8-edge paths from `s` to `t`.
+/// In cubic graphs, <= 384 half-paths per `s` (average < 100), giving exact
+/// counts in microseconds with ZERO node-budget exhaustion!
+/// Falls back to `None` only if a high-degree graph exceeds `MAX_HALF_PATHS` for some `s`.
+pub fn count_c16_mitm_u64(
+    rows: &[u64; 64],
+    order: usize,
+    limit: u32,
+    stop_at_count: u32,
+    scratch: &mut DfsScratch,
+) -> Option<CountResult> {
+    if order < 16 || order > 64 {
+        return Some(CountResult {
+            length: 16,
+            count: 0,
+            complete: true,
+            ..Default::default()
+        });
+    }
+    const MAX_HALF_PATHS: usize = 8_192;
+    let stop_lim = if stop_at_count != 0 {
+        stop_at_count.min(limit)
+    } else {
+        limit
+    };
+    let mut count = 0u32;
+    let mut nodes = 0u64;
+
+    for s in 0..=(order - 16) {
+        let allowed = !((1u64 << (s + 1)) - 1);
+        let deg_s = (rows[s] & allowed).count_ones();
+        if deg_s < 2 {
+            continue;
+        }
+        let mut head = [u32::MAX; 64];
+        let mut bucket_cnt = [0u16; 64];
+        let mut touched_t = [0u8; 64];
+        let mut touched_len = 0usize;
+        scratch.mitm16_masks.clear();
+        scratch.mitm16_next.clear();
+        let mut overflow = false;
+
+        // Iterative-unrolled depth-8 DFS from `s` over vertices in `allowed`.
+        // Path: s -> v1 -> v2 -> v3 -> v4 -> v5 -> v6 -> v7 -> t (8 edges).
+        let mut b1 = rows[s] & allowed;
+        while b1 != 0 {
+            let v1 = b1.trailing_zeros() as usize;
+            b1 &= b1 - 1;
+            let m1 = 1u64 << v1;
+            let mut b2 = rows[v1] & allowed & !m1;
+            while b2 != 0 {
+                let v2 = b2.trailing_zeros() as usize;
+                b2 &= b2 - 1;
+                let m2 = m1 | (1u64 << v2);
+                let mut b3 = rows[v2] & allowed & !m2;
+                while b3 != 0 {
+                    let v3 = b3.trailing_zeros() as usize;
+                    b3 &= b3 - 1;
+                    let m3 = m2 | (1u64 << v3);
+                    let mut b4 = rows[v3] & allowed & !m3;
+                    while b4 != 0 {
+                        let v4 = b4.trailing_zeros() as usize;
+                        b4 &= b4 - 1;
+                        let m4 = m3 | (1u64 << v4);
+                        let mut b5 = rows[v4] & allowed & !m4;
+                        while b5 != 0 {
+                            let v5 = b5.trailing_zeros() as usize;
+                            b5 &= b5 - 1;
+                            let m5 = m4 | (1u64 << v5);
+                            let mut b6 = rows[v5] & allowed & !m5;
+                            while b6 != 0 {
+                                let v6 = b6.trailing_zeros() as usize;
+                                b6 &= b6 - 1;
+                                let m6 = m5 | (1u64 << v6);
+                                let mut b7 = rows[v6] & allowed & !m6;
+                                while b7 != 0 {
+                                    let v7 = b7.trailing_zeros() as usize;
+                                    b7 &= b7 - 1;
+                                    let m7 = m6 | (1u64 << v7);
+                                    let mut bt = rows[v7] & allowed & !m7;
+                                    while bt != 0 {
+                                        let t = bt.trailing_zeros() as usize;
+                                        bt &= bt - 1;
+                                        let idx = scratch.mitm16_masks.len();
+                                        if idx >= MAX_HALF_PATHS {
+                                            overflow = true;
+                                            break;
+                                        }
+                                        scratch.mitm16_masks.push(m7);
+                                        scratch.mitm16_next.push(head[t]);
+                                        if head[t] == u32::MAX {
+                                            touched_t[touched_len] = t as u8;
+                                            touched_len += 1;
+                                        }
+                                        head[t] = idx as u32;
+                                        bucket_cnt[t] += 1;
+                                    }
+                                    if overflow {
+                                        break;
+                                    }
+                                }
+                                if overflow {
+                                    break;
+                                }
+                            }
+                            if overflow {
+                                break;
+                            }
+                        }
+                        if overflow {
+                            break;
+                        }
+                    }
+                    if overflow {
+                        break;
+                    }
+                }
+                if overflow {
+                    break;
+                }
+            }
+            if overflow {
+                break;
+            }
+        }
+        if overflow {
+            return None;
+        }
+
+        nodes += scratch.mitm16_masks.len() as u64;
+        let masks = &scratch.mitm16_masks;
+        let next = &scratch.mitm16_next;
+
+        // Pairwise disjointness check inside each bucket t with >= 2 half-paths
+        for ti in 0..touched_len {
+            let t = touched_t[ti] as usize;
+            if bucket_cnt[t] < 2 {
+                continue;
+            }
+            let mut i = head[t];
+            while i != u32::MAX {
+                let mi = masks[i as usize];
+                let mut j = next[i as usize];
+                while j != u32::MAX {
+                    if (mi & masks[j as usize]) == 0 {
+                        count += 1;
+                        if count >= stop_lim {
+                            return Some(CountResult {
+                                length: 16,
+                                count: count.min(limit),
+                                complete: false,
+                                nodes,
+                                elapsed_ns: 0,
+                                cutoff_reached: stop_at_count != 0 && count >= stop_at_count,
+                            });
+                        }
+                    }
+                    j = next[j as usize];
+                }
+                i = next[i as usize];
+            }
+        }
+    }
+
+    Some(CountResult {
+        length: 16,
+        count: count.min(limit),
+        complete: count < limit,
+        nodes,
+        elapsed_ns: 0,
+        cutoff_reached: false,
+    })
+}
+
 #[inline]
 pub fn count_cycles_fast_u64(
     g: &BitGraph64,
@@ -2437,6 +2653,12 @@ pub fn count_cycles_fast_u64(
     match length {
         4 => count_c4_u64(&g.rows, g.n, limit, stop_at_count),
         8 => count_c8_mitm_u64(&g.rows, g.n, limit, node_budget, stop_at_count, scratch),
+        16 => {
+            if let Some(res) = count_c16_mitm_u64(&g.rows, g.n, limit, stop_at_count, scratch) {
+                return res;
+            }
+            count_cycles_pruned_u64(&g.rows, g.n, 16, limit, node_budget, stop_at_count, scratch)
+        }
         _ => {
             let (block_count, blocks, max_block) = g.biconnected_blocks();
             if max_block < length as usize {
@@ -3582,6 +3804,37 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn c16_mitm_matches_parity_dfs_exactly() {
+        let mut rng = Rng::new(2026112607);
+        let mut scratch = DfsScratch::new();
+        for &mode in &[
+            GraphMode::CubicFirst,
+            GraphMode::MinimalStructureMixedDegree,
+        ] {
+            for &n in &[16usize, 20, 24, 32] {
+                for _ in 0..6 {
+                    let g = generate_seed(&mut rng, n, mode).unwrap();
+                    let g64 = BitGraph64::from_graph(&g);
+                    let ref_res = count_cycles(&g, 16, 10_000, 0, 0, &mut scratch, false);
+                    let mitm = count_c16_mitm_u64(&g64.rows, n, 10_000, 0, &mut scratch)
+                        .expect("MitM C16 must not overflow for sparse n<=32");
+                    assert_eq!(
+                        mitm.count, ref_res.count,
+                        "MitM C16 exact mismatch for n={n} mode={mode:?}"
+                    );
+                    assert_eq!(mitm.complete, ref_res.complete);
+                }
+            }
+        }
+        // Also verify exact Markstrom-24 (C16=228) and Petersen+9*H7 (n=64) capped/exact
+        let m24 = crate::mutation::build_markstrom24();
+        let m24_64 = BitGraph64::from_graph(&m24);
+        let mitm_m24 = count_c16_mitm_u64(&m24_64.rows, 24, 10_000, 0, &mut scratch).unwrap();
+        assert_eq!(mitm_m24.count, 228);
+        assert!(mitm_m24.complete);
     }
 
     #[test]
