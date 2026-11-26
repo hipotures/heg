@@ -45,6 +45,7 @@ pub enum SeedStyle {
     TwoBlock,
     Mixed,
     Markstrom,
+    H7Expansion,
 }
 
 impl SeedStyle {
@@ -54,6 +55,7 @@ impl SeedStyle {
             "two_block" | "two-block" | "ducoffe_two_block" => Ok(Self::TwoBlock),
             "mixed" => Ok(Self::Mixed),
             "markstrom" | "markstrom24" | "markstrom_subdiv" => Ok(Self::Markstrom),
+            "h7_expansion" | "h7" | "exoo" => Ok(Self::H7Expansion),
             _ => Err(format!("unsupported seed style: {s}")),
         }
     }
@@ -64,6 +66,7 @@ impl SeedStyle {
             Self::TwoBlock => "two_block",
             Self::Mixed => "mixed",
             Self::Markstrom => "markstrom",
+            Self::H7Expansion => "h7_expansion",
         }
     }
 }
@@ -157,6 +160,289 @@ pub const H7_EDGES: [(usize, usize); 9] = [
     (4, 6),
     (5, 6),
 ];
+
+/// Build the 10-vertex Petersen cubic graph (girth 5).
+pub fn build_petersen() -> BitGraph {
+    let mut g = BitGraph::empty(10);
+    for i in 0..5 {
+        g.add_edge(i, (i + 1) % 5);
+        g.add_edge(i, i + 5);
+        g.add_edge(i + 5, 5 + ((i + 2) % 5));
+    }
+    g
+}
+
+/// Build the 12-vertex cubic graph obtained by expanding vertex 0 of Petersen into a triangle K3.
+pub fn build_petersen_k3() -> BitGraph {
+    let p = build_petersen();
+    let mut g = BitGraph::empty(12);
+    // Keep all edges not incident to 0
+    for u in 1..10 {
+        for v in (u + 1)..10 {
+            if p.has_edge(u, v) {
+                g.add_edge(u, v);
+            }
+        }
+    }
+    // Triangle on {0, 10, 11} attached to the 3 neighbors of 0 in Petersen: 1, 4, 5
+    g.add_edge(0, 10);
+    g.add_edge(0, 11);
+    g.add_edge(10, 11);
+    g.add_edge(0, 1);
+    g.add_edge(10, 4);
+    g.add_edge(11, 5);
+    g
+}
+
+/// Build the 14-vertex Heawood bipartite cubic graph (girth 6, LCF [5, -5]^7).
+pub fn build_heawood() -> BitGraph {
+    let mut g = BitGraph::empty(14);
+    for i in 0..14 {
+        g.add_edge(i, (i + 1) % 14);
+        if i % 2 == 0 {
+            g.add_edge(i, (i + 5) % 14);
+        }
+    }
+    g
+}
+
+/// Build the 16-vertex cubic graph obtained by expanding vertex 0 of Heawood into a triangle K3.
+pub fn build_heawood_k3() -> BitGraph {
+    let h = build_heawood();
+    let mut g = BitGraph::empty(16);
+    for u in 1..14 {
+        for v in (u + 1)..14 {
+            if h.has_edge(u, v) {
+                g.add_edge(u, v);
+            }
+        }
+    }
+    // Neighbors of 0 in Heawood are 1, 5, 13
+    g.add_edge(0, 14);
+    g.add_edge(0, 15);
+    g.add_edge(14, 15);
+    g.add_edge(0, 1);
+    g.add_edge(14, 5);
+    g.add_edge(15, 13);
+    g
+}
+
+/// Replace `expanded[v] == true` vertices of cubic `base` by 7-vertex H7 gadgets,
+/// attaching each gadget's distinguished port 0 (u) to neighbor `u_choice[v] in 0..3`.
+fn expand_cubic_with_h7(base: &BitGraph, expanded: &[bool], u_choice: &[usize]) -> BitGraph {
+    let n0 = base.n;
+    let mut nbrs = vec![[0usize; 3]; n0];
+    for v in 0..n0 {
+        let mut bits = base.rows[v];
+        let mut idx = 0usize;
+        while bits != 0 {
+            let nb = bits.trailing_zeros() as usize;
+            bits &= bits - 1;
+            nbrs[v][idx] = nb;
+            idx += 1;
+        }
+        debug_assert_eq!(idx, 3);
+    }
+
+    let mut offsets = vec![0usize; n0];
+    let mut cur = 0usize;
+    for v in 0..n0 {
+        offsets[v] = cur;
+        cur += if expanded[v] { 7 } else { 1 };
+    }
+    let mut g = BitGraph::empty(cur);
+    for v in 0..n0 {
+        if expanded[v] {
+            let off = offsets[v];
+            for &(a, b) in &H7_EDGES {
+                g.add_edge(off + a, off + b);
+            }
+        }
+    }
+
+    let port_of = |v: usize, other: usize| -> usize {
+        if !expanded[v] {
+            return offsets[v];
+        }
+        let idx = nbrs[v].iter().position(|&x| x == other).unwrap();
+        let u_idx = u_choice[v] % 3;
+        if idx == u_idx {
+            return offsets[v];
+        }
+        let rem0 = if u_idx == 0 { 1 } else { 0 };
+        offsets[v] + if idx == rem0 { 1 } else { 2 }
+    };
+
+    for u in 0..n0 {
+        for &v in &nbrs[u] {
+            if u < v {
+                let pu = port_of(u, v);
+                let pv = port_of(v, u);
+                g.add_edge(pu, pv);
+            }
+        }
+    }
+    g
+}
+
+/// Fast (C4, C8, C16) evaluation key for H7 port orientation search.
+fn eval_c4_c8_c16(g: &BitGraph, scratch: &mut DfsScratch) -> (u32, u32, u32) {
+    let (_dom, res) = crate::cycles::evaluate_lengths(
+        g,
+        &[4, 8, 16],
+        512,
+        150_000,
+        None,
+        false,
+        scratch,
+        false,
+    );
+    let c4 = if res[0].complete { res[0].count } else { 512 };
+    let c8 = if res[1].complete { res[1].count } else { 512 };
+    let c16 = if res[2].complete { res[2].count } else { 512 };
+    (c4, c8, c16)
+}
+
+/// Generate a non-random H7-gadget expansion cubic seed for even `n in [16, 112]`
+/// (Exoo 2014 / Garcia arXiv:2609.04686) with fast coordinate-descent port-orientation
+/// optimization targeting C4 = C8 = 0 and minimal C16:
+///   n % 6 == 4: Petersen + r*H7 (n=16..70) or Heawood+K3 + r*H7 (n=76..112)
+///   n % 6 == 0: Petersen+K3 + r*H7 (n=18..78, including Exoo G78 with C4=C8=C16=0)
+///   n % 6 == 2: Heawood + r*H7 (n=20..98, including Heawood+14*H7 with C4=C8=C16=0)
+pub fn generate_h7_expansion_seed(
+    rng: &mut Rng,
+    n: usize,
+    mode: GraphMode,
+) -> Result<BitGraph, String> {
+    if mode == GraphMode::SingleBlock41 {
+        if n < 17 || n % 2 == 0 {
+            return generate_single_block_41_seed(rng, n);
+        }
+        let cubic = generate_h7_expansion_seed(rng, n - 1, GraphMode::CubicFirst)?;
+        let mut edges = Vec::new();
+        cubic.collect_edges(&mut edges);
+        // Subdivide a random edge to create degree-2 vertex 0
+        for _ in 0..32 {
+            let chosen = edges[rng.gen_range(edges.len())];
+            let mut g = BitGraph::empty(n);
+            g.add_edge(0, chosen.0 as usize + 1);
+            g.add_edge(0, chosen.1 as usize + 1);
+            for &(u, v) in &edges {
+                if (u, v) != chosen {
+                    g.add_edge(u as usize + 1, v as usize + 1);
+                }
+            }
+            if g.single_block_41_valid() {
+                return Ok(g);
+            }
+        }
+        return generate_single_block_41_seed(rng, n);
+    }
+
+    if n % 2 != 0 || !(16..=112).contains(&n) {
+        return generate_seed(rng, n, mode);
+    }
+    let base = match n % 6 {
+        4 => {
+            if n <= 70 {
+                build_petersen()
+            } else {
+                build_heawood_k3()
+            }
+        }
+        0 => {
+            if n <= 78 {
+                build_petersen_k3()
+            } else {
+                return generate_seed(rng, n, mode);
+            }
+        }
+        2 => {
+            if n <= 98 {
+                build_heawood()
+            } else {
+                return generate_seed(rng, n, mode);
+            }
+        }
+        _ => unreachable!(),
+    };
+    let n0 = base.n;
+    let r = (n - n0) / 6;
+    if r == 0 || r > n0 {
+        return generate_seed(rng, n, mode);
+    }
+
+    let mut scratch = DfsScratch::new();
+    let mut best_graph = None;
+    let mut best_key = (u32::MAX, u32::MAX, u32::MAX);
+    let mut verts: Vec<usize> = (0..n0).collect();
+
+    let restarts = if n >= 70 { 6 } else { 3 };
+    for _restart in 0..restarts {
+        rng.shuffle(&mut verts);
+        let mut expanded = vec![false; n0];
+        let mut exp_list = Vec::with_capacity(r);
+        for &v in &verts[..r] {
+            expanded[v] = true;
+            exp_list.push(v);
+        }
+        let mut u_choice = vec![0usize; n0];
+        for &v in &exp_list {
+            u_choice[v] = rng.gen_range(3);
+        }
+
+        let mut g = expand_cubic_with_h7(&base, &expanded, &u_choice);
+        let mut key = eval_c4_c8_c16(&g, &mut scratch);
+
+        for _sweep in 0..4 {
+            let mut improved = false;
+            rng.shuffle(&mut exp_list);
+            for &v in &exp_list {
+                let orig = u_choice[v];
+                let mut best_u = orig;
+                let mut best_local = key;
+                for alt in 0..3 {
+                    if alt == orig {
+                        continue;
+                    }
+                    u_choice[v] = alt;
+                    let cand = expand_cubic_with_h7(&base, &expanded, &u_choice);
+                    let ck = eval_c4_c8_c16(&cand, &mut scratch);
+                    if ck < best_local {
+                        best_local = ck;
+                        best_u = alt;
+                        g = cand;
+                    }
+                }
+                u_choice[v] = best_u;
+                if best_local < key {
+                    key = best_local;
+                    improved = true;
+                    if key == (0, 0, 0) {
+                        break;
+                    }
+                }
+            }
+            if !improved || key == (0, 0, 0) {
+                break;
+            }
+        }
+
+        if key < best_key {
+            best_key = key;
+            best_graph = Some(g);
+            if best_key == (0, 0, 0) {
+                break;
+            }
+        }
+    }
+
+    let g = best_graph.ok_or_else(|| "failed to build H7 expansion seed".to_string())?;
+    if mode == GraphMode::MinimalStructureMixedDegree && !g.minimal_structure_valid() {
+        return generate_seed(rng, n, mode);
+    }
+    Ok(g)
+}
 
 /// Exact Markstrom-24 cubic graph (K4 -> K3 + 3*H7 with port orientation u=(1,2,1)):
 /// smallest graph with delta >= 3 and C4 = C8 = 0 (exact C16 = 228).
@@ -470,21 +756,36 @@ impl WitnessCache {
 pub struct MutationDelta {
     pub changed: bool,
     pub removed_count: u8,
-    pub removed: [Edge; 2],
-    pub removed_idx: [u16; 2],
+    pub removed: [Edge; 3],
+    pub removed_idx: [u16; 3],
     pub added_count: u8,
-    pub added: [Edge; 2],
+    pub added: [Edge; 3],
 }
 
 impl MutationDelta {
     pub const NONE: Self = Self {
         changed: false,
         removed_count: 0,
-        removed: [(0, 0); 2],
-        removed_idx: [u16::MAX; 2],
+        removed: [(0, 0); 3],
+        removed_idx: [u16::MAX; 3],
         added_count: 0,
-        added: [(0, 0); 2],
+        added: [(0, 0); 3],
     };
+
+    #[inline]
+    pub fn removed2(&self) -> [Edge; 2] {
+        [self.removed[0], self.removed[1]]
+    }
+
+    #[inline]
+    pub fn removed_idx2(&self) -> [u16; 2] {
+        [self.removed_idx[0], self.removed_idx[1]]
+    }
+
+    #[inline]
+    pub fn added2(&self) -> [Edge; 2] {
+        [self.added[0], self.added[1]]
+    }
 }
 
 #[inline]
@@ -532,14 +833,123 @@ fn try_two_edge_switch_u64(
             MutationDelta {
                 changed: true,
                 removed_count: 2,
-                removed: [normalize_edge(first.0, first.1), normalize_edge(second.0, second.1)],
-                removed_idx: [first_idx, second_idx],
+                removed: [
+                    normalize_edge(first.0, first.1),
+                    normalize_edge(second.0, second.1),
+                    (0, 0),
+                ],
+                removed_idx: [first_idx, second_idx, u16::MAX],
                 added_count: 2,
-                added: [e1, e2],
+                added: [e1, e2, (0, 0)],
             },
         ));
     }
     None
+}
+
+/// Cyclic 3-edge switch on three pairwise-disjoint edges `(a,b), (c,d), (e,f)`:
+/// replaces them with `(a,c), (d,e), (f,b)` (testing random endpoint orientations),
+/// preserving the exact degree sequence and crossing C4=C8=0 barriers unreachable
+/// by single 2-edge switches.
+#[inline]
+fn try_three_edge_switch_u64(
+    graph: &BitGraph64,
+    e0: Edge,
+    i0: u16,
+    e1: Edge,
+    i1: u16,
+    e2: Edge,
+    i2: u16,
+    rng: &mut Rng,
+    mode: GraphMode,
+) -> Option<(BitGraph64, MutationDelta)> {
+    let (a0, b0) = (e0.0 as usize, e0.1 as usize);
+    let (c0, d0) = (e1.0 as usize, e1.1 as usize);
+    let (f0, g0) = (e2.0 as usize, e2.1 as usize);
+    let m0 = (1u64 << a0) | (1u64 << b0);
+    let m1 = (1u64 << c0) | (1u64 << d0);
+    let m2 = (1u64 << f0) | (1u64 << g0);
+    if (m0 & m1) != 0 || (m0 & m2) != 0 || (m1 & m2) != 0 {
+        return None;
+    }
+
+    let rbits = rng.next_u64();
+    let (a, b) = if (rbits & 1) == 0 { (a0, b0) } else { (b0, a0) };
+    let (c, d) = if (rbits & 2) == 0 { (c0, d0) } else { (d0, c0) };
+    let (f, g) = if (rbits & 4) == 0 { (f0, g0) } else { (g0, f0) };
+
+    let candidates = [
+        ((a, c), (d, f), (g, b)),
+        ((a, d), (c, g), (f, b)),
+        ((a, f), (g, c), (d, b)),
+    ];
+    for &((u1, v1), (u2, v2), (u3, v3)) in &candidates {
+        let n1 = normalize_edge(u1 as u8, v1 as u8);
+        let n2 = normalize_edge(u2 as u8, v2 as u8);
+        let n3 = normalize_edge(u3 as u8, v3 as u8);
+        if n1 == n2
+            || n1 == n3
+            || n2 == n3
+            || graph.has_edge(u1, v1)
+            || graph.has_edge(u2, v2)
+            || graph.has_edge(u3, v3)
+        {
+            continue;
+        }
+        let mut cand = *graph;
+        cand.remove_edge(a0, b0);
+        cand.remove_edge(c0, d0);
+        cand.remove_edge(f0, g0);
+        cand.add_edge(u1, v1);
+        cand.add_edge(u2, v2);
+        cand.add_edge(u3, v3);
+        if !cand.is_connected() {
+            continue;
+        }
+        if mode == GraphMode::MinimalStructureMixedDegree && !cand.minimal_structure_valid() {
+            continue;
+        }
+        if mode == GraphMode::SingleBlock41 && !cand.single_block_41_valid() {
+            continue;
+        }
+        return Some((
+            cand,
+            MutationDelta {
+                changed: true,
+                removed_count: 3,
+                removed: [
+                    normalize_edge(e0.0, e0.1),
+                    normalize_edge(e1.0, e1.1),
+                    normalize_edge(e2.0, e2.1),
+                ],
+                removed_idx: [i0, i1, i2],
+                added_count: 3,
+                added: [n1, n2, n3],
+            },
+        ));
+    }
+    None
+}
+
+/// Select a high-participation ("hot") edge index from `CycleBank64` via
+/// O(1) tournament sampling (zero allocation). Returns `None` if bank is empty.
+#[inline]
+fn select_hot_bank_edge(edges: &[Edge], bank: &CycleBank64, rng: &mut Rng) -> Option<usize> {
+    let m = edges.len();
+    if !bank.active || m == 0 {
+        return None;
+    }
+    let mut best_idx = None;
+    let mut best_heat = 0u32;
+    for _ in 0..6 {
+        let idx = rng.gen_range(m);
+        let h = bank.edge_heat(idx);
+        if h > best_heat {
+            best_heat = h;
+            best_idx = Some(idx);
+        }
+    }
+    best_idx
 }
 
 #[inline]
@@ -549,8 +959,11 @@ fn edge_in_block1(e: Edge, block1_inner_mask: u64) -> bool {
 
 /// Mutate a 64-vertex graph using a pre-cached edge list (`edges_buf` is owned
 /// by the lane and only rebuilt when `graph` changes).
-/// When `block1_inner_mask != 0`, 2-edge switches only pair edges from the same
-/// block, preserving the 2-block 1-clique-sum decomposition in O(1).
+/// When `block1_inner_mask != 0`, switches only pair edges from the same block.
+/// When `three_edge_prob > 0.0`, performs cyclic 3-edge switches with that
+/// probability to jump across C4=C8=0 barriers.
+/// When `targeted == true` and `bank` has live cycles, prefers high-participation
+/// ("hot") edges by bank heat w(e).
 #[allow(clippy::too_many_arguments)]
 pub fn mutate_u64(
     graph: &BitGraph64,
@@ -560,6 +973,7 @@ pub fn mutate_u64(
     targeted: bool,
     nonzero_len_mask: u8,
     block1_inner_mask: u64,
+    three_edge_prob: f64,
     bank: Option<&CycleBank64>,
     witness_cache: &mut WitnessCache,
     scratch: &mut DfsScratch,
@@ -579,10 +993,10 @@ pub fn mutate_u64(
                         MutationDelta {
                             changed: true,
                             removed_count: 0,
-                            removed: [(0, 0); 2],
-                            removed_idx: [u16::MAX; 2],
+                            removed: [(0, 0); 3],
+                            removed_idx: [u16::MAX; 3],
                             added_count: 1,
-                            added: [e, (0, 0)],
+                            added: [e, (0, 0), (0, 0)],
                         },
                     );
                 }
@@ -607,10 +1021,10 @@ pub fn mutate_u64(
                         MutationDelta {
                             changed: true,
                             removed_count: 1,
-                            removed: [e, (0, 0)],
-                            removed_idx: [idx, u16::MAX],
+                            removed: [e, (0, 0), (0, 0)],
+                            removed_idx: [idx, u16::MAX, u16::MAX],
                             added_count: 0,
-                            added: [(0, 0); 2],
+                            added: [(0, 0); 3],
                         },
                     );
                 }
@@ -623,7 +1037,80 @@ pub fn mutate_u64(
         return (*graph, MutationDelta::NONE);
     }
 
+    // Optional cyclic 3-edge switch (preserving degree sequence & block locality)
+    if m >= 3 && three_edge_prob > 0.0 && rng.next_f64() < three_edge_prob {
+        let hot_first = if targeted {
+            bank.and_then(|b| select_hot_bank_edge(edges, b, rng))
+        } else {
+            None
+        };
+        for _ in 0..48 {
+            let i0 = hot_first.unwrap_or_else(|| rng.gen_range(m));
+            let i1 = rng.gen_range(m);
+            let i2 = rng.gen_range(m);
+            if i0 == i1 || i0 == i2 || i1 == i2 {
+                continue;
+            }
+            if block1_inner_mask != 0 {
+                let b0 = edge_in_block1(edges[i0], block1_inner_mask);
+                if edge_in_block1(edges[i1], block1_inner_mask) != b0
+                    || edge_in_block1(edges[i2], block1_inner_mask) != b0
+                {
+                    continue;
+                }
+            }
+            if let Some(res) = try_three_edge_switch_u64(
+                graph,
+                edges[i0],
+                i0 as u16,
+                edges[i1],
+                i1 as u16,
+                edges[i2],
+                i2 as u16,
+                rng,
+                mode,
+            ) {
+                return res;
+            }
+        }
+    }
+
     if targeted {
+        // Hot-edge tournament selection from CycleBank64 when C4/C8 are already zero
+        // (or with 40% probability whenever the bank is active), focusing switches
+        // directly on the highest-participation C16/C32 bottleneck edges.
+        if let Some(b) = bank {
+            let prefer_hot = (nonzero_len_mask & 0b11) == 0 || (rng.next_u64() & 3) == 0;
+            if prefer_hot {
+                if let Some(hot_i) = select_hot_bank_edge(edges, b, rng) {
+                    let first = edges[hot_i];
+                    for _ in 0..48 {
+                        let j = rng.gen_range(m);
+                        if j == hot_i {
+                            continue;
+                        }
+                        if block1_inner_mask != 0
+                            && edge_in_block1(first, block1_inner_mask)
+                                != edge_in_block1(edges[j], block1_inner_mask)
+                        {
+                            continue;
+                        }
+                        if let Some(res) = try_two_edge_switch_u64(
+                            graph,
+                            first,
+                            hot_i as u16,
+                            edges[j],
+                            j as u16,
+                            rng,
+                            mode,
+                        ) {
+                            return res;
+                        }
+                    }
+                }
+            }
+        }
+
         let w = witness_cache.get_or_compute_u64(graph, edges, nonzero_len_mask, bank, scratch);
         if w.count == 0 {
             return (*graph, MutationDelta::NONE);
@@ -720,10 +1207,14 @@ fn try_two_edge_switch(
             MutationDelta {
                 changed: true,
                 removed_count: 2,
-                removed: [normalize_edge(first.0, first.1), normalize_edge(second.0, second.1)],
-                removed_idx: [u16::MAX; 2],
+                removed: [
+                    normalize_edge(first.0, first.1),
+                    normalize_edge(second.0, second.1),
+                    (0, 0),
+                ],
+                removed_idx: [u16::MAX; 3],
                 added_count: 2,
-                added: [e1, e2],
+                added: [e1, e2, (0, 0)],
             },
         ));
     }
@@ -754,10 +1245,10 @@ pub fn mutate(
                         MutationDelta {
                             changed: true,
                             removed_count: 0,
-                            removed: [(0, 0); 2],
-                            removed_idx: [u16::MAX; 2],
+                            removed: [(0, 0); 3],
+                            removed_idx: [u16::MAX; 3],
                             added_count: 1,
-                            added: [e, (0, 0)],
+                            added: [e, (0, 0), (0, 0)],
                         },
                     );
                 }
@@ -782,10 +1273,10 @@ pub fn mutate(
                         MutationDelta {
                             changed: true,
                             removed_count: 1,
-                            removed: [e, (0, 0)],
-                            removed_idx: [u16::MAX; 2],
+                            removed: [e, (0, 0), (0, 0)],
+                            removed_idx: [u16::MAX; 3],
                             added_count: 0,
-                            added: [(0, 0); 2],
+                            added: [(0, 0); 3],
                         },
                     );
                 }
@@ -923,6 +1414,7 @@ mod tests {
                 targeted,
                 0x3f,
                 b1_mask,
+                0.0,
                 None,
                 &mut wc,
                 &mut scratch,
@@ -1001,6 +1493,7 @@ mod tests {
                     false,
                     0x3f,
                     0,
+                    0.0,
                     None,
                     &mut wc,
                     &mut scratch,
@@ -1014,5 +1507,73 @@ mod tests {
             }
             assert!(moved >= 10, "k={k} expected >= 10 single_block_41 moves, got {moved}");
         }
+    }
+
+    #[test]
+    fn h7_expansion_seeds_break_c16_plateau_and_three_edge_switch_preserves_mode() {
+        let mut rng = Rng::new(2026112604);
+        let mut scratch = DfsScratch::new();
+
+        // Petersen + 9*H7 at n=64 must have C4=0, C8=0, and C16 << random (~1400)
+        let g64 = generate_h7_expansion_seed(&mut rng, 64, GraphMode::CubicFirst).unwrap();
+        assert_eq!(g64.n, 64);
+        assert_eq!(g64.size(), 96);
+        assert!(g64.is_biconnected());
+        let (c4_64, c8_64, c16_64) = eval_c4_c8_c16(&g64, &mut scratch);
+        assert_eq!(c4_64, 0, "Petersen+9*H7 must avoid C4");
+        assert_eq!(c8_64, 0, "Petersen+9*H7 must avoid C8");
+        assert!(
+            c16_64 <= 90,
+            "Petersen+9*H7 expected C16 <= 90 (vs ~1403 random), got {c16_64}"
+        );
+
+        // Heawood + 6*H7 at n=50 must have C4=0, C8=0, low C16
+        let g50 = generate_h7_expansion_seed(&mut rng, 50, GraphMode::CubicFirst).unwrap();
+        assert_eq!(g50.n, 50);
+        assert!(g50.is_biconnected());
+        let (c4_50, c8_50, c16_50) = eval_c4_c8_c16(&g50, &mut scratch);
+        assert_eq!(c4_50, 0);
+        assert_eq!(c8_50, 0);
+        assert!(c16_50 < 400, "Heawood+6*H7 expected C16 < 400, got {c16_50}");
+
+        // Petersen + 10*H7 at n=70 must have C4=0, C8=0, ultra-low C16
+        let g70 = generate_h7_expansion_seed(&mut rng, 70, GraphMode::CubicFirst).unwrap();
+        assert_eq!(g70.n, 70);
+        let (c4_70, c8_70, c16_70) = eval_c4_c8_c16(&g70, &mut scratch);
+        assert_eq!(c4_70, 0);
+        assert_eq!(c8_70, 0);
+        assert!(c16_70 <= 25, "Petersen+10*H7 expected C16 <= 25, got {c16_70}");
+
+        // 3-edge cyclic switch preserves cubic degree sequence & connectivity
+        let mut cur = BitGraph64::from_graph(&g64);
+        let mut edges = Vec::new();
+        cur.collect_edges(&mut edges);
+        let mut wc = WitnessCache::new();
+        let mut three_moves = 0usize;
+        for _ in 0..80 {
+            let (cand, delta) = mutate_u64(
+                &cur,
+                &edges,
+                &mut rng,
+                GraphMode::CubicFirst,
+                false,
+                0x3f,
+                0,
+                1.0,
+                None,
+                &mut wc,
+                &mut scratch,
+            );
+            if delta.changed && delta.removed_count == 3 {
+                assert!(cand.is_connected());
+                for u in 0..cand.n {
+                    assert_eq!(cand.degree(u), 3);
+                }
+                cur = cand;
+                cur.collect_edges(&mut edges);
+                three_moves += 1;
+            }
+        }
+        assert!(three_moves >= 20, "expected >= 20 valid 3-edge switches, got {three_moves}");
     }
 }

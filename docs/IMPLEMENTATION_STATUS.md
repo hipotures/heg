@@ -2,6 +2,12 @@
 
 Last implementation audit: **2026-11-26**.
 
+## Wave B: H7 gadget expansions, 3-edge switches, hot-edge heat, multi-objective & Hashimoto macro-gradient
+
+- **Hashimoto non-backtracking trace $\operatorname{Tr}(B^k)$ via Ihara–Bass (`rust/sglab-engine/src/spectral.rs`)**: Implemented pure-Rust cyclic-Jacobi eigensolver, exact cubic Ihara–Bass trace formula + algebraic connectivity $\lambda_2(L)$, and exact general-degree directed-edge walk-power trace (verified against McGee cage reference integers $\operatorname{Tr}(B^{16}) = 66\,336$ and $\operatorname{Tr}(B^{32}) = 4\,296\,496\,672$), wired as opt-in `--hashimoto-guide` plateau tie-breaker.
+- **$H_7$ gadget expansion seeds, 3-edge switches, hot-edge heat & objectives (`bank.rs`, `cycles.rs`, `mutation.rs`, `search.rs`, `main.rs`)**: Added `--seed-style h7_expansion` (Petersen / Petersen+$K_3$ / Heawood / Heawood+$K_3$ + $r\cdot H_7$ with port-orientation coordinate descent), `CycleBank64::edge_heat` (`O(1)` POPCNT), cyclic 3-edge switch (`--three-edge-prob`), and `--objective {total,weighted,lex_short}`.
+- **Verification & M4-certified Experiment 7 (`docs/reports/M6_WAVE_B_H7_HASHIMOTO_3EDGE_2026_11_26.md`)**: `10/10` Rust release tests (0 warnings), `7/7` Python parity tests; broke 1-block cubic `n = 64` inside `C4 = C8 = 0` down to `C16 = 54` (`C16 = 2` under `total`), and drove Markström-25 (`k = 25`, `n = 49`) from `C16 = 187` to `C16 = 126` strictly inside `C4 = C8 = 0` (`1.33M ev/s`).
+
 ## Wave A: Closed Ducoffe–Dumitru filter, Conjecture 4.1 single-block mode, and Markström-24 seeding
 
 - **Closed Ducoffe–Dumitru structural filter (`rust/sglab-engine/src/graph.rs`)**: Implemented full arXiv:2609.28594 constraints on both `BitGraph64` and `BitGraph`: strict 2-connectivity (`is_biconnected()`) for even orders (Theorem 2.3 / Corollary 2.4), zero bridges (Corollary 2.2), symmetric equal-order equal-edge 2-degenerate 1-clique-sums with cut-vertex degree `4` for odd orders, doubling-reduction auxiliary graph `M` check (`auxiliary_m_valid()`, Lemma 3.5: simple, `|L_2| <= max(0, 2h - 3)`, 2-degenerate), and Theorem 3.7 global bounds (`h <= floor(n/3) - 1`, `m <= 2n - 2` for `n >= 13`).

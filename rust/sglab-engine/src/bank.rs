@@ -113,6 +113,20 @@ impl SingleLengthBank {
         }
     }
 
+    /// Returns the number of live bank cycles containing edge `eidx` (O(1) POPCNT).
+    #[inline]
+    pub fn edge_participation(&self, eidx: usize) -> u32 {
+        if eidx >= MAX_BANK_EDGES {
+            return 0;
+        }
+        let mut cnt = 0u32;
+        let b = &self.edge_bits[eidx];
+        for w in 0..self.words_used {
+            cnt += (self.valid[w] & b[w].0).count_ones();
+        }
+        cnt
+    }
+
     /// Returns a mathematically sound lower bound on `#C_L(cand)` after removing
     /// edges at `i0`, `i1` and adding edges with orientation flag `want_same_dir`.
     #[inline]
@@ -311,6 +325,18 @@ impl CycleBank64 {
             ham_seed_count: 0,
             rng_seed: seed ^ 0x6a09_e667_f3bc_c908,
         }
+    }
+
+    /// Weighted cycle participation heat w(e) for edge index `eidx` across live
+    /// bank cycles (O(1) POPCNT): prioritizes C16 (4x), C32 (2x), C64 (1x).
+    #[inline]
+    pub fn edge_heat(&self, eidx: usize) -> u32 {
+        if !self.active || eidx >= self.m || eidx >= MAX_BANK_EDGES {
+            return 0;
+        }
+        self.c16.edge_participation(eidx).saturating_mul(4)
+            + self.c32.edge_participation(eidx).saturating_mul(2)
+            + self.c64.edge_participation(eidx)
     }
 
     pub fn reset_for_graph(&mut self, edges: &[Edge]) {
@@ -1366,6 +1392,7 @@ mod tests {
                     false,
                     !0u8,
                     0u64,
+                    0.0,
                     None,
                     &mut wc,
                     &mut scratch,
@@ -1374,7 +1401,7 @@ mod tests {
                     continue;
                 }
                 let proven = bank
-                    .query_or_refill(&g, len, delta.removed, delta.removed_idx, delta.added)
+                    .query_or_refill(&g, len, delta.removed2(), delta.removed_idx2(), delta.added2())
                     .unwrap_or(0);
                 if proven > 0 {
                     hits += 1;
@@ -1393,7 +1420,11 @@ mod tests {
                     let i1 = delta.removed_idx[1] as usize;
                     edges_buf[i0] = delta.added[0];
                     edges_buf[i1] = delta.added[1];
-                    bank.apply_accepted_switch(delta.removed, delta.removed_idx, delta.added);
+                    bank.apply_accepted_switch(
+                        delta.removed2(),
+                        delta.removed_idx2(),
+                        delta.added2(),
+                    );
                     g = cand;
                 }
             }
@@ -1503,6 +1534,7 @@ mod tests {
                     targeted,
                     score.nonzero_len_mask(),
                     0u64,
+                    0.0,
                     Some(&bank),
                     &mut wc,
                     &mut scratch,
@@ -1531,9 +1563,9 @@ mod tests {
                     &score,
                     &mut cand,
                     true,
-                    delta.removed,
-                    delta.removed_idx,
-                    delta.added,
+                    delta.removed2(),
+                    delta.removed_idx2(),
+                    delta.added2(),
                     edges_buf.len() as u32,
                     64,
                     50_000,
@@ -1561,7 +1593,11 @@ mod tests {
                         g = cand;
                         edges_buf[delta.removed_idx[0] as usize] = delta.added[0];
                         edges_buf[delta.removed_idx[1] as usize] = delta.added[1];
-                        bank.apply_accepted_switch(delta.removed, delta.removed_idx, delta.added);
+                        bank.apply_accepted_switch(
+                            delta.removed2(),
+                            delta.removed_idx2(),
+                            delta.added2(),
+                        );
                         score = cs;
                         accepted += 1;
                         wc.invalidate();

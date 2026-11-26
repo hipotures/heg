@@ -56,6 +56,32 @@ impl Cutoff {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ObjectiveMode {
+    Total,
+    Weighted,
+    LexShort,
+}
+
+impl ObjectiveMode {
+    pub fn parse(s: &str) -> Result<Self, String> {
+        match s {
+            "total" => Ok(Self::Total),
+            "weighted" | "weighted_penalty" => Ok(Self::Weighted),
+            "lex_short" | "lex-short" | "short_first" => Ok(Self::LexShort),
+            _ => Err(format!("unsupported objective mode: {s}")),
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Total => "total",
+            Self::Weighted => "weighted",
+            Self::LexShort => "lex_short",
+        }
+    }
+}
+
 /// Stack-allocated Copy score (zero heap allocations in the search hot loop).
 #[derive(Clone, Copy, Debug)]
 pub struct ScoreResult {
@@ -73,6 +99,16 @@ impl ScoreResult {
     #[inline]
     pub fn counts_slice(&self) -> &[(u16, u32)] {
         &self.counts[..(self.counts_len as usize)]
+    }
+
+    #[inline]
+    pub fn count_of(&self, len: u16) -> u32 {
+        for i in 0..(self.counts_len as usize) {
+            if self.counts[i].0 == len {
+                return self.counts[i].1;
+            }
+        }
+        0
     }
 
     #[inline]
@@ -118,12 +154,54 @@ impl ScoreResult {
     }
 
     #[inline]
+    pub fn ordering_key_for(&self, obj: ObjectiveMode) -> (u8, u32, u32, u32, u32, u32, u32) {
+        let inv = if self.valid { 0 } else { 1 };
+        match obj {
+            ObjectiveMode::Total => (inv, self.total, self.weighted_penalty, self.simplicity, 0, 0, 0),
+            ObjectiveMode::Weighted => {
+                (inv, self.weighted_penalty, self.total, self.simplicity, 0, 0, 0)
+            }
+            ObjectiveMode::LexShort => (
+                inv,
+                self.count_of(4),
+                self.count_of(8),
+                self.count_of(16),
+                self.count_of(32),
+                self.count_of(64),
+                self.simplicity,
+            ),
+        }
+    }
+
+    #[inline]
     pub fn scalar(&self) -> f64 {
         let invalid = if self.valid { 0.0 } else { 1.0 };
         invalid * 2_000_000.0
             + (self.total as f64)
             + (self.weighted_penalty as f64) / 2_000_000.0
             + (self.simplicity as f64) / 80_000_000_000_000_000.0
+    }
+
+    #[inline]
+    pub fn scalar_for(&self, obj: ObjectiveMode) -> f64 {
+        match obj {
+            ObjectiveMode::Total => self.scalar(),
+            ObjectiveMode::Weighted => {
+                let invalid = if self.valid { 0.0 } else { 1.0 };
+                invalid * 20_000_000.0
+                    + (self.weighted_penalty as f64)
+                    + (self.total as f64) / 1_000_000.0
+            }
+            ObjectiveMode::LexShort => {
+                let invalid = if self.valid { 0.0 } else { 1.0 };
+                invalid * 100_000_000.0
+                    + (self.count_of(4) as f64) * 512.0
+                    + (self.count_of(8) as f64) * 64.0
+                    + (self.count_of(16) as f64) * 4.0
+                    + (self.count_of(32) as f64) * 1.5
+                    + (self.count_of(64) as f64)
+            }
+        }
     }
 }
 
@@ -3534,7 +3612,7 @@ mod tests {
                 for _ in 0..40 {
                     let exact_c4_p = count_c4_u64(&g.rows, n, 10_000, 0).count;
                     let exact_c8_p = count_c8_mitm_u64(&g.rows, n, 10_000, 0, 0, &mut scratch).count;
-                    let (mut cand, delta) = mutate_u64(&g, &edges_buf, &mut rng, mode, false, !0u8, 0u64, None, &mut wc, &mut scratch);
+                    let (mut cand, delta) = mutate_u64(&g, &edges_buf, &mut rng, mode, false, !0u8, 0u64, 0.0, None, &mut wc, &mut scratch);
                     if !delta.changed || delta.removed_count != 2 || delta.added_count != 2 {
                         continue;
                     }

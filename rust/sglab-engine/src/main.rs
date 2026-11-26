@@ -5,12 +5,15 @@ mod mutation;
 mod protocol;
 mod rng;
 mod search;
+mod spectral;
 
 use std::env;
 use std::process;
 use std::time::Instant;
 
-use crate::cycles::{DfsScratch, evaluate_lengths, forbidden_lengths, score_graph_fast};
+use crate::cycles::{
+    DfsScratch, ObjectiveMode, evaluate_lengths, forbidden_lengths, score_graph_fast,
+};
 use crate::graph::BitGraph;
 use crate::mutation::{GraphMode, SeedStyle, WitnessCache, generate_seed, mutate};
 use crate::rng::Rng;
@@ -199,6 +202,7 @@ fn cmd_search(args: &[String]) -> i32 {
     let mut order = 50usize;
     let mut mode = GraphMode::CubicFirst;
     let mut seed_style = SeedStyle::Random;
+    let mut objective = ObjectiveMode::Total;
     let mut algorithm = Algorithm::IteratedLocalSearchTabu;
     let mut evals = 4_000usize;
     let mut workers = 1usize;
@@ -207,6 +211,8 @@ fn cmd_search(args: &[String]) -> i32 {
     let mut node_budget: Option<u32> = None;
     let mut seed = 20261126u64;
     let mut targeted_prob = 0.5f64;
+    let mut three_edge_prob = 0.0f64;
+    let mut hashimoto_guide = false;
     let mut tabu_tenure = 64usize;
     let mut perturbation_interval = 200usize;
     let mut temperature = 8.0f64;
@@ -254,6 +260,27 @@ fn cmd_search(args: &[String]) -> i32 {
             "--adaptive-cap-max" => {
                 i += 1;
                 adaptive_cap_max = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(0);
+            }
+            "--objective" => {
+                i += 1;
+                objective = match args.get(i).map(|s| ObjectiveMode::parse(s)) {
+                    Some(Ok(o)) => o,
+                    Some(Err(e)) => {
+                        eprintln!("{e}");
+                        return 2;
+                    }
+                    None => {
+                        eprintln!("missing value for --objective");
+                        return 2;
+                    }
+                };
+            }
+            "--three-edge-prob" => {
+                i += 1;
+                three_edge_prob = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(0.0);
+            }
+            "--hashimoto-guide" => {
+                hashimoto_guide = true;
             }
             "--algorithm" => {
                 i += 1;
@@ -343,12 +370,15 @@ fn cmd_search(args: &[String]) -> i32 {
         order,
         mode,
         seed_style,
+        objective,
         algorithm,
         evaluations_per_worker: evals,
         witness_cap: cap,
         adaptive_cap_max,
         node_budget: node_budget.unwrap_or_else(|| SearchParams::default_node_budget(cap)),
         targeted_prob,
+        three_edge_prob,
+        hashimoto_guide,
         temperature,
         cooling,
         restart_threshold,
@@ -372,7 +402,7 @@ fn cmd_search(args: &[String]) -> i32 {
     let total_improvements: usize = lanes.iter().map(|l| l.improvements).sum();
     let best = lanes
         .iter()
-        .min_by_key(|l| l.best_score.ordering_key())
+        .min_by_key(|l| l.best_score.ordering_key_for(objective))
         .expect("at least one lane");
     let last_lane = lanes.last().expect("at least one lane");
     let agg_sps = (total_evals as f64) / wall_s.max(1e-9);
@@ -381,10 +411,11 @@ fn cmd_search(args: &[String]) -> i32 {
 
     if json_output {
         println!(
-            "{{\"engine\":\"rust\",\"order\":{},\"mode\":\"{}\",\"seed_style\":\"{}\",\"algorithm\":\"{}\",\"workers\":{},\"effective_cap\":{},\"total_evaluations\":{},\"wall_seconds\":{:.6},\"evals_per_second\":{:.2},\"accepted\":{},\"improvements\":{},\"cutoffs\":{},\"best_total\":{},\"best_weighted_penalty\":{},\"best_complete\":{},\"best_witness_counts\":{},\"best_graph6\":\"{}\",\"final_total\":{},\"final_weighted_penalty\":{},\"final_complete\":{},\"final_witness_counts\":{},\"final_graph6\":\"{}\"}}",
+            "{{\"engine\":\"rust\",\"order\":{},\"mode\":\"{}\",\"seed_style\":\"{}\",\"objective\":\"{}\",\"algorithm\":\"{}\",\"workers\":{},\"effective_cap\":{},\"total_evaluations\":{},\"wall_seconds\":{:.6},\"evals_per_second\":{:.2},\"accepted\":{},\"improvements\":{},\"cutoffs\":{},\"best_total\":{},\"best_weighted_penalty\":{},\"best_complete\":{},\"best_witness_counts\":{},\"best_graph6\":\"{}\",\"final_total\":{},\"final_weighted_penalty\":{},\"final_complete\":{},\"final_witness_counts\":{},\"final_graph6\":\"{}\"}}",
             order,
             mode.as_str(),
             seed_style.as_str(),
+            objective.as_str(),
             algorithm.as_str(),
             workers,
             best.effective_cap,

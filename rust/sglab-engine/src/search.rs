@@ -7,14 +7,17 @@ use std::time::Instant;
 
 use crate::bank::CycleBank64;
 use crate::cycles::{
-    Cutoff, DfsScratch, ScoreResult, score_graph_delta_u64, score_graph_fast, score_graph_fast_u64,
+    Cutoff, DfsScratch, ObjectiveMode, ScoreResult, score_graph_delta_u64, score_graph_fast,
+    score_graph_fast_u64,
 };
 use crate::graph::{BitGraph, BitGraph64, Edge, zobrist_edge, zobrist_edge64};
 use crate::mutation::{
-    GraphMode, MutationDelta, SeedStyle, WitnessCache, generate_markstrom25_single_block_seed,
-    generate_seed, generate_two_block_ducoffe_seed, mutate, mutate_u64,
+    GraphMode, MutationDelta, SeedStyle, WitnessCache, generate_h7_expansion_seed,
+    generate_markstrom25_single_block_seed, generate_seed, generate_two_block_ducoffe_seed, mutate,
+    mutate_u64,
 };
 use crate::rng::Rng;
+use crate::spectral::hashimoto_metrics_u64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Algorithm {
@@ -49,12 +52,15 @@ pub struct SearchParams {
     pub order: usize,
     pub mode: GraphMode,
     pub seed_style: SeedStyle,
+    pub objective: ObjectiveMode,
     pub algorithm: Algorithm,
     pub evaluations_per_worker: usize,
     pub witness_cap: u32,
     pub adaptive_cap_max: u32,
     pub node_budget: u32,
     pub targeted_prob: f64,
+    pub three_edge_prob: f64,
+    pub hashimoto_guide: bool,
     pub temperature: f64,
     pub cooling: f64,
     pub restart_threshold: usize,
@@ -324,29 +330,33 @@ impl TabuRing64 {
 
 #[inline]
 fn patch_edges_in_place(edges_buf: &mut Vec<Edge>, delta: &MutationDelta) {
-    if delta.removed_count == 2 && delta.added_count == 2 {
-        let i0 = delta.removed_idx[0] as usize;
-        let i1 = delta.removed_idx[1] as usize;
-        if i0 < edges_buf.len() && i1 < edges_buf.len() {
-            edges_buf[i0] = delta.added[0];
-            edges_buf[i1] = delta.added[1];
+    if delta.removed_count == delta.added_count
+        && (delta.removed_count == 2 || delta.removed_count == 3)
+    {
+        let k = delta.removed_count as usize;
+        let mut all_idx_ok = true;
+        for j in 0..k {
+            if (delta.removed_idx[j] as usize) >= edges_buf.len() {
+                all_idx_ok = false;
+                break;
+            }
+        }
+        if all_idx_ok {
+            for j in 0..k {
+                edges_buf[delta.removed_idx[j] as usize] = delta.added[j];
+            }
             return;
         }
-        let r0 = delta.removed[0];
-        let r1 = delta.removed[1];
-        let mut replaced = 0u8;
+        let mut replaced = 0usize;
         for e in edges_buf.iter_mut() {
-            if *e == r0 {
-                *e = delta.added[0];
-                replaced += 1;
-                if replaced == 2 {
-                    return;
-                }
-            } else if *e == r1 {
-                *e = delta.added[1];
-                replaced += 1;
-                if replaced == 2 {
-                    return;
+            for j in 0..k {
+                if *e == delta.removed[j] {
+                    *e = delta.added[j];
+                    replaced += 1;
+                    if replaced == k {
+                        return;
+                    }
+                    break;
                 }
             }
         }
@@ -392,18 +402,29 @@ fn make_lane_seed(
     worker_idx: usize,
     use_two_block: bool,
 ) -> Result<(BitGraph, u64), String> {
+    if params.seed_style == SeedStyle::H7Expansion {
+        return Ok((generate_h7_expansion_seed(rng, params.order, params.mode)?, 0u64));
+    }
     if params.mode == GraphMode::SingleBlock41 {
         let use_markstrom = params.order == 25
             && match params.seed_style {
                 SeedStyle::Markstrom => true,
                 SeedStyle::Mixed => (worker_idx & 1) == 0,
-                SeedStyle::Random | SeedStyle::TwoBlock => false,
+                SeedStyle::Random | SeedStyle::TwoBlock | SeedStyle::H7Expansion => false,
             };
         if use_markstrom {
             let g = generate_markstrom25_single_block_seed(rng, worker_idx == 0)?;
             return Ok((g, 0u64));
         }
         return Ok((generate_seed(rng, params.order, params.mode)?, 0u64));
+    }
+    if params.mode == GraphMode::CubicFirst
+        && params.seed_style == SeedStyle::Mixed
+        && (worker_idx & 1) == 0
+        && params.order >= 16
+        && params.order <= 98
+    {
+        return Ok((generate_h7_expansion_seed(rng, params.order, params.mode)?, 0u64));
     }
     if use_two_block {
         generate_two_block_ducoffe_seed(rng, params.order)
@@ -418,7 +439,7 @@ fn lane_uses_two_block(params: &SearchParams, worker_idx: usize) -> bool {
         && match params.seed_style {
             SeedStyle::TwoBlock => true,
             SeedStyle::Mixed => params.order % 2 == 1 && params.order >= 13 && (worker_idx & 1) == 0,
-            SeedStyle::Random | SeedStyle::Markstrom => false,
+            SeedStyle::Random | SeedStyle::Markstrom | SeedStyle::H7Expansion => false,
         }
 }
 
@@ -455,6 +476,12 @@ fn run_lane_u64(params: &SearchParams, seed: u64, worker_idx: usize) -> Result<L
 
     let mut best_graph = graph;
     let mut best_score = score;
+    let mut cur_hash_pot: Option<f64> = if params.hashimoto_guide && score.has_saturated_length(active_cap) {
+        Some(hashimoto_metrics_u64(&graph).potential)
+    } else {
+        None
+    };
+    let mut best_hash_pot: f64 = cur_hash_pot.unwrap_or(f64::INFINITY);
 
     let mut tabu = TabuRing64::new(params.tabu_tenure);
     tabu.push(key);
@@ -466,6 +493,7 @@ fn run_lane_u64(params: &SearchParams, seed: u64, worker_idx: usize) -> Result<L
     let mut stagnant_evals = 0usize;
     let mut sa_temp = params.temperature;
     let threshold = params.restart_threshold.max(1);
+    let obj = params.objective;
 
     while evaluated < params.evaluations_per_worker {
         if let Some(limit_s) = params.max_wall_seconds {
@@ -488,7 +516,7 @@ fn run_lane_u64(params: &SearchParams, seed: u64, worker_idx: usize) -> Result<L
             )
             .expect("random restart has no cutoff");
             accepted += 1;
-            if cand_score.ordering_key() < best_score.ordering_key() {
+            if cand_score.ordering_key_for(obj) < best_score.ordering_key_for(obj) {
                 best_graph = cand;
                 best_score = cand_score;
                 improvements += 1;
@@ -516,6 +544,7 @@ fn run_lane_u64(params: &SearchParams, seed: u64, worker_idx: usize) -> Result<L
                 &mut scratch,
             )
             .expect("reseed has no cutoff");
+            cur_hash_pot = None;
             witness_cache.invalidate();
             sa_temp = params.temperature;
         }
@@ -546,10 +575,11 @@ fn run_lane_u64(params: &SearchParams, seed: u64, worker_idx: usize) -> Result<L
                 &mut scratch,
             )
             .expect("adaptive best re-score has no cutoff");
-            if score.ordering_key() < best_score.ordering_key() {
+            if score.ordering_key_for(obj) < best_score.ordering_key_for(obj) {
                 best_graph = graph;
                 best_score = score;
             }
+            cur_hash_pot = None;
             stagnant_evals = 0;
         }
 
@@ -562,6 +592,7 @@ fn run_lane_u64(params: &SearchParams, seed: u64, worker_idx: usize) -> Result<L
             targeted,
             score.nonzero_len_mask(),
             block1_inner_mask,
+            params.three_edge_prob,
             Some(&cycle_bank),
             &mut witness_cache,
             &mut scratch,
@@ -573,7 +604,9 @@ fn run_lane_u64(params: &SearchParams, seed: u64, worker_idx: usize) -> Result<L
         let cand_key = update_key64(key, &delta);
         let is_tabu = params.algorithm == Algorithm::IteratedLocalSearchTabu
             && tabu.contains(cand_key);
-        let cutoff = if params.algorithm == Algorithm::IteratedLocalSearchTabu {
+        let cutoff = if obj == ObjectiveMode::Total
+            && params.algorithm == Algorithm::IteratedLocalSearchTabu
+        {
             let perturb = params.perturbation_interval.max(1);
             if evaluated % perturb == 0 {
                 None
@@ -604,9 +637,9 @@ fn run_lane_u64(params: &SearchParams, seed: u64, worker_idx: usize) -> Result<L
             &score,
             &mut cand,
             is_two_edge_switch,
-            delta.removed,
-            delta.removed_idx,
-            delta.added,
+            delta.removed2(),
+            delta.removed_idx2(),
+            delta.added2(),
             cand_simplicity,
             active_cap,
             active_budget,
@@ -619,7 +652,30 @@ fn run_lane_u64(params: &SearchParams, seed: u64, worker_idx: usize) -> Result<L
             continue;
         };
 
-        let is_global_record = cand_score.ordering_key() < best_score.ordering_key();
+        let cand_ord = cand_score.ordering_key_for(obj);
+        let cur_ord = score.ordering_key_for(obj);
+        let best_ord = best_score.ordering_key_for(obj);
+
+        // Hashimoto non-backtracking macro-gradient tie-break on cap-saturated plateaus
+        let mut cand_hash_pot: Option<f64> = None;
+        let mut hash_improves_cur = false;
+        let mut hash_improves_best = false;
+        if params.hashimoto_guide
+            && score.has_saturated_length(active_cap)
+            && cand_ord == cur_ord
+        {
+            let base_p = *cur_hash_pot.get_or_insert_with(|| hashimoto_metrics_u64(&graph).potential);
+            let cp = hashimoto_metrics_u64(&cand).potential;
+            cand_hash_pot = Some(cp);
+            if cp + 1e-6 < base_p {
+                hash_improves_cur = true;
+            }
+            if cand_ord == best_ord && cp + 1e-6 < best_hash_pot {
+                hash_improves_best = true;
+            }
+        }
+
+        let is_global_record = cand_ord < best_ord || hash_improves_best;
         let accept = match params.algorithm {
             Algorithm::SimulatedAnnealing => {
                 if evaluated % threshold == 0 {
@@ -628,13 +684,22 @@ fn run_lane_u64(params: &SearchParams, seed: u64, worker_idx: usize) -> Result<L
                     sa_temp *= params.cooling;
                 }
                 let temp = sa_temp.max(0.001);
-                let delta_s = cand_score.scalar() - score.scalar();
+                let mut delta_s = cand_score.scalar_for(obj) - score.scalar_for(obj);
+                if let (Some(cp), Some(bp)) = (cand_hash_pot, cur_hash_pot) {
+                    if delta_s.abs() < 1e-9 {
+                        delta_s = (cp - bp) * 8.0;
+                    }
+                }
                 delta_s <= 0.0 || rng.next_f64() < (-delta_s.min(700.0) / temp).exp()
             }
             Algorithm::IteratedLocalSearchTabu => {
                 let perturb = params.perturbation_interval.max(1);
-                let ok = (!is_tabu && cand_score.ordering_key() <= score.ordering_key())
-                    || (evaluated % perturb == 0);
+                let better_or_eq = if params.hashimoto_guide && score.has_saturated_length(active_cap) && cand_ord == cur_ord {
+                    hash_improves_cur
+                } else {
+                    cand_ord <= cur_ord
+                };
+                let ok = (!is_tabu && better_or_eq) || (evaluated % perturb == 0);
                 if ok {
                     tabu.push(cand_key);
                 }
@@ -646,6 +711,11 @@ fn run_lane_u64(params: &SearchParams, seed: u64, worker_idx: usize) -> Result<L
         if is_global_record {
             best_graph = cand;
             best_score = cand_score;
+            if let Some(cp) = cand_hash_pot {
+                best_hash_pot = cp;
+            } else if cand_ord < best_ord {
+                best_hash_pot = f64::INFINITY;
+            }
             improvements += 1;
             stagnant_evals = 0;
         } else {
@@ -655,12 +725,17 @@ fn run_lane_u64(params: &SearchParams, seed: u64, worker_idx: usize) -> Result<L
             graph = cand;
             patch_edges_in_place(&mut edges_buf, &delta);
             if is_two_edge_switch {
-                cycle_bank.apply_accepted_switch(delta.removed, delta.removed_idx, delta.added);
+                cycle_bank.apply_accepted_switch(
+                    delta.removed2(),
+                    delta.removed_idx2(),
+                    delta.added2(),
+                );
             } else {
                 cycle_bank.reset_for_graph(&edges_buf);
             }
             key = cand_key;
             score = cand_score;
+            cur_hash_pot = cand_hash_pot;
             accepted += 1;
             witness_cache.invalidate();
         }
