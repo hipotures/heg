@@ -27,11 +27,8 @@ pub const BANK_CAP: usize = BANK_WORDS * 64;
 /// Zero-memory-lookup ALU mixer for an undirected edge `(a, b)` — zero L1/L2 cache traffic!
 #[inline(always)]
 fn edge_mix64(a: u8, b: u8) -> u64 {
-    let (lo, hi) = if a < b {
-        (a as u64, b as u64)
-    } else {
-        (b as u64, a as u64)
-    };
+    let lo = a.min(b) as u64;
+    let hi = a.max(b) as u64;
     let k = (lo | (hi << 8)).wrapping_add(1);
     let z = k.wrapping_mul(0x9e37_79b9_7f4a_7c15);
     let z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
@@ -237,7 +234,7 @@ impl SingleLengthBank {
         None
     }
 
-    /// Zero-division cycle insertion into `slot`!
+    /// Zero-division, ZERO-BRANCH cycle insertion into `slot`!
     #[inline(always)]
     fn insert_cycle(
         &mut self,
@@ -256,9 +253,7 @@ impl SingleLengthBank {
             debug_assert!(eidx < MAX_BANK_EDGES);
             let cell = &mut self.edge_bits[eidx][w];
             cell.0 |= bit;
-            if a < b {
-                cell.1 |= bit;
-            }
+            cell.1 |= bit & u64::from(a < b).wrapping_neg();
             a = b;
         }
         let b = path[0] as usize;
@@ -266,9 +261,7 @@ impl SingleLengthBank {
         debug_assert!(eidx < MAX_BANK_EDGES);
         let cell = &mut self.edge_bits[eidx][w];
         cell.0 |= bit;
-        if a < b {
-            cell.1 |= bit;
-        }
+        cell.1 |= bit & u64::from(a < b).wrapping_neg();
 
         self.valid[w] |= bit;
         self.dir_valid[w] |= bit;
@@ -1230,19 +1223,21 @@ fn refill_posa_bank_64(
                 let p0 = pos_of[u0] as usize;
                 let p1 = pos_of[u1] as usize;
                 let nt0 = path[p0 + 1] as usize;
-                let nt1 = path[p1 + 1] as usize;
-                if nt0 == prev_tail {
-                    p1
-                } else if nt1 == prev_tail {
-                    p0
-                } else if (head_close_mask & (1u64 << nt0)) != 0 {
-                    p0
-                } else if (head_close_mask & (1u64 << nt1)) != 0 {
-                    p1
-                } else if (fast_rand(&mut rng_state) & 1) == 0 {
-                    p0
+                if prev_tail != usize::MAX {
+                    // During a Thomason lollipop walk on a cubic graph, exactly one of
+                    // {p0, p1} backtracks to prev_tail; the other is uniquely forced!
+                    if nt0 == prev_tail { p1 } else { p0 }
                 } else {
-                    p1
+                    let nt1 = path[p1 + 1] as usize;
+                    if (head_close_mask & (1u64 << nt0)) != 0 {
+                        p0
+                    } else if (head_close_mask & (1u64 << nt1)) != 0 {
+                        p1
+                    } else if (fast_rand(&mut rng_state) & 1) == 0 {
+                        p0
+                    } else {
+                        p1
+                    }
                 }
             } else {
                 let mut nbrs = rows[tail] & !((1u64 << path[62]) | (1u64 << head));

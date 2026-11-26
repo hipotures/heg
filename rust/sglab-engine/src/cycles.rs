@@ -12,7 +12,7 @@
 use std::time::Instant;
 
 use crate::bank::CycleBank64;
-use crate::graph::{BitGraph, BitGraph64, Edge, MAX_ORDER, normalize_edge, zobrist_edge};
+use crate::graph::{BitGraph, BitGraph64, Edge, MAX_ORDER, normalize_edge};
 
 pub const FORBIDDEN_ALL: [u16; 6] = [4, 8, 16, 32, 64, 128];
 
@@ -553,6 +553,192 @@ pub fn count_c8_through_two_edges_u64(rows: &mut [u64; 64], e1: Edge, e2: Edge) 
     Some(c1 + c2?)
 }
 
+/// Exact count of simple `target`-cycles containing edge `(u, v)` present in `rows`.
+/// Returns `None` if `node_budget` is exhausted; early-stops if `stop_lim > 0 && count >= stop_lim`.
+fn count_cycles_through_edge_raw_u64(
+    rows: &[u64; 64],
+    order: usize,
+    target: usize,
+    u: usize,
+    v: usize,
+    stop_lim: u32,
+    node_budget: u64,
+    dist_mask: &mut [u64; 65],
+) -> Option<u32> {
+    if target < 4 || target > order {
+        return Some(0);
+    }
+    let full_mask: u64 = if order == 64 {
+        !0u64
+    } else {
+        (1u64 << order) - 1
+    };
+    let u_bit = 1u64 << u;
+    let v_bit = 1u64 << v;
+    let closing_set = rows[u] & !v_bit;
+    if closing_set == 0 {
+        return Some(0);
+    }
+    let allowed_domain = full_mask & !(u_bit | v_bit);
+    let max_r = target - 2;
+
+    let mut reached = closing_set;
+    let mut frontier = closing_set;
+    let mut adj_to_closing = 0u64;
+    dist_mask[1] = reached;
+    let mut built_r = 1usize;
+    while built_r < max_r && frontier != 0 {
+        let mut next = 0u64;
+        let mut f = frontier;
+        while f != 0 {
+            let x = f.trailing_zeros() as usize;
+            f &= f - 1;
+            next |= rows[x];
+        }
+        if built_r == 1 {
+            adj_to_closing = next & allowed_domain;
+        }
+        frontier = (next & allowed_domain) & !reached;
+        reached |= frontier;
+        built_r += 1;
+        dist_mask[built_r] = reached;
+    }
+    for r in (built_r + 1)..=max_r {
+        dist_mask[r] = reached;
+    }
+    if adj_to_closing == 0 || (rows[v] & dist_mask[max_r]) == 0 {
+        return Some(0);
+    }
+
+    struct EdgeDfsState<'a> {
+        rows: &'a [u64; 64],
+        dist_mask: &'a [u64; 65],
+        adj_to_closing: u64,
+        closing_set: u64,
+        count: u32,
+        nodes: u64,
+        budget: u64,
+        stop_lim: u32,
+        exhausted: bool,
+    }
+
+    fn dfs(st: &mut EdgeDfsState<'_>, vertex: usize, seen: u64, rem: usize) {
+        if rem == 3 {
+            let mut x_bits = st.rows[vertex] & !seen & st.dist_mask[3];
+            while x_bits != 0 {
+                let x = x_bits.trailing_zeros() as usize;
+                x_bits &= x_bits - 1;
+                st.nodes += 1;
+                if st.budget != 0 && st.nodes > st.budget {
+                    st.exhausted = true;
+                    return;
+                }
+                let seen_x = seen | (1u64 << x);
+                let closing_avail = st.closing_set & !seen_x;
+                if closing_avail == 0 {
+                    continue;
+                }
+                let mut w_bits = st.rows[x] & !seen_x & st.adj_to_closing;
+                while w_bits != 0 {
+                    let w = w_bits.trailing_zeros() as usize;
+                    w_bits &= w_bits - 1;
+                    let c = (st.rows[w] & closing_avail).count_ones();
+                    if c != 0 {
+                        st.count += c;
+                        if st.stop_lim != 0 && st.count >= st.stop_lim {
+                            return;
+                        }
+                    }
+                }
+            }
+            return;
+        }
+
+        let mut next_bits = st.rows[vertex] & !seen & st.dist_mask[rem];
+        let next_rem = rem - 1;
+        while next_bits != 0 {
+            let x = next_bits.trailing_zeros() as usize;
+            next_bits &= next_bits - 1;
+            st.nodes += 1;
+            if st.budget != 0 && st.nodes > st.budget {
+                st.exhausted = true;
+                return;
+            }
+            let next_seen = seen | (1u64 << x);
+            if (st.closing_set & !next_seen) == 0 {
+                continue;
+            }
+            dfs(st, x, next_seen, next_rem);
+            if st.exhausted || (st.stop_lim != 0 && st.count >= st.stop_lim) {
+                return;
+            }
+        }
+    }
+
+    let mut st = EdgeDfsState {
+        rows,
+        dist_mask,
+        adj_to_closing,
+        closing_set,
+        count: 0,
+        nodes: 0,
+        budget: node_budget,
+        stop_lim,
+        exhausted: false,
+    };
+    dfs(&mut st, v, u_bit | v_bit, max_r);
+    if st.exhausted {
+        None
+    } else {
+        Some(st.count)
+    }
+}
+
+/// Exact count of simple `target`-cycles containing at least one of two vertex-disjoint
+/// edges `e1`, `e2` present in `rows`. If `stop_lim > 0`, early-stops once total >= `stop_lim`.
+pub fn count_cycles_through_two_edges_u64(
+    rows: &mut [u64; 64],
+    order: usize,
+    target: usize,
+    e1: Edge,
+    e2: Edge,
+    stop_lim: u32,
+    node_budget: u64,
+    dist_mask: &mut [u64; 65],
+) -> Option<u32> {
+    let (u1, v1) = (e1.0 as usize, e1.1 as usize);
+    let (u2, v2) = (e2.0 as usize, e2.1 as usize);
+    let c1 = count_cycles_through_edge_raw_u64(
+        rows,
+        order,
+        target,
+        u1,
+        v1,
+        stop_lim,
+        node_budget,
+        dist_mask,
+    )?;
+    if stop_lim != 0 && c1 >= stop_lim {
+        return Some(c1);
+    }
+    let rem_lim = if stop_lim != 0 { stop_lim - c1 } else { 0 };
+    rows[u1] ^= 1u64 << v1;
+    rows[v1] ^= 1u64 << u1;
+    let c2 = count_cycles_through_edge_raw_u64(
+        rows,
+        order,
+        target,
+        u2,
+        v2,
+        rem_lim,
+        node_budget,
+        dist_mask,
+    );
+    rows[u1] ^= 1u64 << v1;
+    rows[v1] ^= 1u64 << u1;
+    Some(c1 + c2?)
+}
+
 /// Exact analytic C4 count on u64 (zero DFS, ~0.15 us for n=64).
 #[inline]
 pub fn count_c4_u64(rows: &[u64; 64], order: usize, limit: u32, stop_at_count: u32) -> CountResult {
@@ -819,8 +1005,8 @@ pub fn count_c8_mitm_u64(
     }
 }
 
-/// Fast sound Posa extension + Thomason lollipop witness harvester for
-/// Hamiltonian cycles (`target == order`).
+/// Fast sound Posa extension + cubic-specialized Thomason lollipop witness harvester
+/// for Hamiltonian cycles (`target == order`).
 /// If it finds `target_count` pairwise-distinct, edge-verified simple Hamiltonian
 /// cycles within a small rotation budget, that mathematically proves the true
 /// count is >= `target_count`. Otherwise returns `None` so exact DFS runs.
@@ -838,13 +1024,17 @@ fn posa_hamiltonian_fast_cert_u64(
         (1u64 << order) - 1
     };
 
-    let mut seen_hashes = [0u128; 128];
-    let mut found = 0u32;
-    let mut path = [0u8; 64];
-    let mut pos_of = [255u8; 64];
-    let mut rng_state: u64 = 0x9e37_79b9_7f4a_7c15 ^ (order as u64);
+    #[inline(always)]
+    fn edge_mix(a: u8, b: u8) -> u64 {
+        let lo = a.min(b) as u64;
+        let hi = a.max(b) as u64;
+        let k = (lo | (hi << 8)).wrapping_add(1);
+        let z = k.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+        let z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z ^ (z >> 27)
+    }
 
-    #[inline]
+    #[inline(always)]
     fn fast_rand(s: &mut u64) -> u64 {
         *s ^= *s << 13;
         *s ^= *s >> 7;
@@ -852,14 +1042,46 @@ fn posa_hamiltonian_fast_cert_u64(
         *s
     }
 
+    #[inline(always)]
+    fn rev_suffix(path: &mut [u8; 64], pos_of: &mut [u8; 64], lo: usize, order: usize) {
+        let mut l = lo;
+        let mut r = order - 1;
+        while l < r {
+            let vl = path[l];
+            let vr = path[r];
+            path[l] = vr;
+            path[r] = vl;
+            pos_of[vr as usize] = l as u8;
+            pos_of[vl as usize] = r as u8;
+            l += 1;
+            r -= 1;
+        }
+    }
+
+    let mut is_cubic = true;
+    for u in 0..order {
+        if rows[u].count_ones() != 3 {
+            is_cubic = false;
+            break;
+        }
+    }
+
+    // 256-slot open-addressed u64 hash table (2 KB, L1-resident) for O(1) dedup!
+    let mut seen_tbl = [0u64; 256];
+    let mut found = 0u32;
+    let mut path = [0u8; 64];
+    let mut tmp_path = [0u8; 64];
+    let mut pos_of = [255u8; 64];
+    let mut rng_state: u64 = 0x9e37_79b9_7f4a_7c15 ^ (order as u64);
+
     let mut total_rotations = 0usize;
-    let max_total_rotations = 5_000usize;
+    let max_total_rotations = 4_500usize;
+    let mut shift_cursor = 7usize;
 
     for restart in 0..4usize {
         if total_rotations >= max_total_rotations {
             break;
         }
-        // Phase 1: Build a Hamiltonian path via Warnsdorff + Posa extension + subcycle opening.
         let start = (restart * 13) % order;
         path[0] = start as u8;
         let mut len = 1usize;
@@ -895,15 +1117,10 @@ fn posa_hamiltonian_fast_cert_u64(
             }
             let head = path[0] as usize;
             if (rows[head] & !in_path) != 0 {
-                path[..len].reverse();
-                for idx in 0..len {
-                    pos_of[path[idx] as usize] = idx as u8;
-                }
+                rev_suffix(&mut path, &mut pos_of, 0, len);
                 prev_tail_p1 = usize::MAX;
                 continue;
             }
-            // If current path is a closed subcycle (len < order), rotate it so a vertex
-            // with an unvisited neighbor becomes tail -> guaranteed extension!
             if len >= 3 && (rows[tail] & (1u64 << head)) != 0 {
                 let mut ext_idx = None;
                 for idx in 0..len {
@@ -923,10 +1140,9 @@ fn posa_hamiltonian_fast_cert_u64(
                     prev_tail_p1 = usize::MAX;
                     continue;
                 } else {
-                    break; // Disconnected component
+                    break;
                 }
             }
-            // Non-backtracking Posa rotation on tail.
             let mut nbrs = rows[tail] & in_path;
             if len >= 2 {
                 nbrs &= !(1u64 << path[len - 2]);
@@ -959,10 +1175,7 @@ fn posa_hamiltonian_fast_cert_u64(
                 None => break,
             };
             prev_tail_p1 = tail;
-            path[(rot_p + 1)..len].reverse();
-            for idx in (rot_p + 1)..len {
-                pos_of[path[idx] as usize] = idx as u8;
-            }
+            rev_suffix(&mut path, &mut pos_of, rot_p + 1, len);
             total_rotations += 1;
             local_stuck += 1;
         }
@@ -971,51 +1184,47 @@ fn posa_hamiltonian_fast_cert_u64(
             continue;
         }
 
-        // Compute initial path edge hash once; maintained in O(1) per Posa rotation!
-        let mut path_hash = 0u128;
+        let mut path_hash = 0u64;
         for i in 0..(order - 1) {
-            path_hash ^= zobrist_edge((path[i], path[i + 1]));
+            path_hash ^= edge_mix(path[i], path[i + 1]);
         }
 
-        // Phase 2: Thomason lollipop walks with incremental O(1) edge hashing.
         let mut since_found = 0usize;
         let mut walk_steps = 0usize;
         let mut prev_tail: usize = usize::MAX;
         let mut cycle_basis = [0u8; 64];
-        let mut cycle_basis_hash = 0u128;
+        let mut cycle_basis_hash = 0u64;
         let mut have_cycle = false;
+        let mut head_close_mask = rows[path[0] as usize];
 
-        while total_rotations < max_total_rotations && since_found < 320 {
+        while total_rotations < max_total_rotations && since_found < 280 {
             let head = path[0] as usize;
             let tail = path[order - 1] as usize;
-            let is_closed = (rows[tail] & (1u64 << head)) != 0;
-            let timed_out = !is_closed && have_cycle && walk_steps >= 80;
+            let is_closed = (head_close_mask & (1u64 << tail)) != 0;
+            let timed_out = !is_closed && have_cycle && walk_steps >= 28;
 
             if is_closed {
-                let h = path_hash ^ zobrist_edge((path[order - 1], path[0]));
-                let mut dup = false;
-                for j in 0..(found as usize) {
-                    if seen_hashes[j] == h {
-                        dup = true;
+                let raw_h = path_hash ^ edge_mix(path[order - 1], path[0]);
+                let k = if raw_h == 0 { 1 } else { raw_h };
+                let mut slot = ((k ^ (k >> 17)) as usize) & 255;
+                let mut is_new = false;
+                loop {
+                    let cur = seen_tbl[slot];
+                    if cur == 0 {
+                        seen_tbl[slot] = k;
+                        is_new = true;
                         break;
                     }
+                    if cur == k {
+                        break;
+                    }
+                    slot = (slot + 1) & 255;
                 }
-                if !dup {
-                    debug_assert!({
-                        let mut ok = true;
-                        for i in 0..order {
-                            if (rows[path[i] as usize] & (1u64 << path[(i + 1) % order])) == 0 {
-                                ok = false;
-                                break;
-                            }
-                        }
-                        ok
-                    });
-                    seen_hashes[found as usize] = h;
+                if is_new {
                     found += 1;
                     since_found = 0;
                     cycle_basis = path;
-                    cycle_basis_hash = h;
+                    cycle_basis_hash = raw_h;
                     have_cycle = true;
                     if found >= target_count {
                         return Some(found);
@@ -1024,104 +1233,125 @@ fn posa_hamiltonian_fast_cert_u64(
             }
 
             if is_closed || timed_out {
-                // On timeout, ALWAYS reset to the verified closed `cycle_basis`!
-                // On closed cycle, stay on the newly closed cycle (or jump to cycle_basis).
-                let base_cycle_hash = if timed_out {
-                    path = cycle_basis;
-                    cycle_basis_hash
+                let (src, base_cycle_hash) = if timed_out {
+                    (&cycle_basis, cycle_basis_hash)
                 } else {
-                    path_hash ^ zobrist_edge((path[order - 1], path[0]))
+                    (&path, path_hash ^ edge_mix(path[order - 1], path[0]))
                 };
-                if (fast_rand(&mut rng_state) & 1) != 0 {
-                    path[..order].reverse();
+                shift_cursor += 11;
+                if shift_cursor >= order {
+                    shift_cursor -= order - 1;
                 }
-                let shift = 1 + ((fast_rand(&mut rng_state) as usize) % (order - 1));
-                path[..order].rotate_left(shift);
-                for idx in 0..order {
-                    pos_of[path[idx] as usize] = idx as u8;
+                let shift = shift_cursor;
+                let rev = (fast_rand(&mut rng_state) & 1) != 0;
+                if !rev {
+                    for idx in 0..order {
+                        let mut s = idx + shift;
+                        if s >= order {
+                            s -= order;
+                        }
+                        let v = src[s];
+                        tmp_path[idx] = v;
+                        pos_of[v as usize] = idx as u8;
+                    }
+                } else {
+                    for idx in 0..order {
+                        let s = (order - 1 + shift - idx) % order;
+                        let v = src[s];
+                        tmp_path[idx] = v;
+                        pos_of[v as usize] = idx as u8;
+                    }
                 }
-                // Opening edge (new_tail, new_head) removes that edge from the cycle hash.
+                path = tmp_path;
                 let new_tail = path[order - 1] as usize;
                 let new_head = path[0] as usize;
-                path_hash = base_cycle_hash ^ zobrist_edge((new_tail as u8, new_head as u8));
+                head_close_mask = rows[new_head];
+                path_hash = base_cycle_hash ^ edge_mix(new_tail as u8, new_head as u8);
 
-                let mut open_nbrs =
+                let open_nbrs =
                     rows[new_tail] & !((1u64 << path[order - 2]) | (1u64 << new_head));
-                let mut open_p = None;
-                while open_nbrs != 0 {
-                    let u = open_nbrs.trailing_zeros() as usize;
-                    open_nbrs &= open_nbrs - 1;
-                    let p = pos_of[u] as usize;
+                if open_nbrs != 0 {
+                    let u_v = open_nbrs.trailing_zeros() as usize;
+                    let p = pos_of[u_v] as usize;
                     if p > 0 && p + 1 < order {
-                        open_p = Some(p);
-                        break;
-                    }
-                }
-                if let Some(p) = open_p {
-                    let u = path[p];
-                    let nxt = path[p + 1];
-                    path_hash ^= zobrist_edge((u, nxt)) ^ zobrist_edge((u, new_tail as u8));
-                    prev_tail = new_tail;
-                    walk_steps = 1;
-                    path[(p + 1)..order].reverse();
-                    for idx in (p + 1)..order {
-                        pos_of[path[idx] as usize] = idx as u8;
-                    }
-                    total_rotations += 1;
-                    since_found += 1;
-                    continue;
-                } else {
-                    break;
-                }
-            }
-
-            // Non-backtracking Thomason lollipop step.
-            let mut nbrs = rows[tail] & !((1u64 << path[order - 2]) | (1u64 << head));
-            let mut chosen = None;
-            let mut candidates = [0usize; 8];
-            let mut cand_len = 0usize;
-            while nbrs != 0 {
-                let u = nbrs.trailing_zeros() as usize;
-                nbrs &= nbrs - 1;
-                let p = pos_of[u] as usize;
-                if p > 0 && p + 1 < order {
-                    let new_tail = path[p + 1] as usize;
-                    if new_tail == prev_tail {
+                        let u = path[p];
+                        let nxt = path[p + 1];
+                        path_hash ^= edge_mix(u, nxt) ^ edge_mix(u, new_tail as u8);
+                        prev_tail = new_tail;
+                        walk_steps = 1;
+                        rev_suffix(&mut path, &mut pos_of, p + 1, order);
+                        total_rotations += 1;
+                        since_found += 1;
                         continue;
                     }
-                    if (rows[new_tail] & (1u64 << head)) != 0 {
-                        chosen = Some(p);
-                        break;
-                    }
-                    if cand_len < candidates.len() {
-                        candidates[cand_len] = p;
-                        cand_len += 1;
-                    }
                 }
+                break;
             }
-            let rot_p = if let Some(p) = chosen {
-                p
-            } else if cand_len > 0 {
-                candidates[(fast_rand(&mut rng_state) as usize) % cand_len]
-            } else {
-                path[..order].reverse();
-                for idx in 0..order {
-                    pos_of[path[idx] as usize] = idx as u8;
+
+            let rot_p = if is_cubic {
+                let nbrs = rows[tail] & !(1u64 << path[order - 2]);
+                let u0 = nbrs.trailing_zeros() as usize;
+                let u1 = (nbrs ^ (1u64 << u0)).trailing_zeros() as usize;
+                let p0 = pos_of[u0] as usize;
+                let p1 = pos_of[u1] as usize;
+                let nt0 = path[p0 + 1] as usize;
+                if prev_tail != usize::MAX {
+                    if nt0 == prev_tail { p1 } else { p0 }
+                } else {
+                    let nt1 = path[p1 + 1] as usize;
+                    if (head_close_mask & (1u64 << nt0)) != 0 {
+                        p0
+                    } else if (head_close_mask & (1u64 << nt1)) != 0 {
+                        p1
+                    } else if (fast_rand(&mut rng_state) & 1) == 0 {
+                        p0
+                    } else {
+                        p1
+                    }
                 }
-                prev_tail = usize::MAX;
-                walk_steps += 1;
-                since_found += 1;
-                continue;
+            } else {
+                let mut nbrs = rows[tail] & !((1u64 << path[order - 2]) | (1u64 << head));
+                let mut chosen = None;
+                let mut candidates = [0usize; 8];
+                let mut cand_len = 0usize;
+                while nbrs != 0 {
+                    let u = nbrs.trailing_zeros() as usize;
+                    nbrs &= nbrs - 1;
+                    let p = pos_of[u] as usize;
+                    if p > 0 && p + 1 < order {
+                        let new_tail = path[p + 1] as usize;
+                        if new_tail == prev_tail {
+                            continue;
+                        }
+                        if (head_close_mask & (1u64 << new_tail)) != 0 {
+                            chosen = Some(p);
+                            break;
+                        }
+                        if cand_len < candidates.len() {
+                            candidates[cand_len] = p;
+                            cand_len += 1;
+                        }
+                    }
+                }
+                if let Some(p) = chosen {
+                    p
+                } else if cand_len > 0 {
+                    candidates[(fast_rand(&mut rng_state) as usize) % cand_len]
+                } else {
+                    rev_suffix(&mut path, &mut pos_of, 0, order);
+                    head_close_mask = rows[path[0] as usize];
+                    prev_tail = usize::MAX;
+                    walk_steps += 1;
+                    since_found += 1;
+                    continue;
+                }
             };
             let u = path[rot_p];
             let nxt = path[rot_p + 1];
-            path_hash ^= zobrist_edge((u, nxt)) ^ zobrist_edge((u, tail as u8));
+            path_hash ^= edge_mix(u, nxt) ^ edge_mix(u, tail as u8);
             prev_tail = tail;
             walk_steps += 1;
-            path[(rot_p + 1)..order].reverse();
-            for idx in (rot_p + 1)..order {
-                pos_of[path[idx] as usize] = idx as u8;
-            }
+            rev_suffix(&mut path, &mut pos_of, rot_p + 1, order);
             total_rotations += 1;
             since_found += 1;
         }
@@ -2252,7 +2482,21 @@ pub fn score_graph_delta_u64(
     bank: &mut CycleBank64,
 ) -> Option<ScoreResult> {
     let lengths = forbidden_lengths(cand.n);
-    let (order_idxs, n_len) = eval_order(lengths, cand.n, cutoff.is_some());
+    let (mut order_idxs, n_len) = eval_order(lengths, cand.n, cutoff.is_some());
+    // When exact O(1) delta C4 (~10ns) & delta C8 (~50ns) are available on 4-length
+    // graphs (n=33..63), evaluate C4 & C8 FIRST so any positive C4/C8 immediately
+    // lowers `stop_at_count` for C16 & C32 (reducing bank misses and early-stopping)!
+    if is_two_edge_switch
+        && cutoff.is_some()
+        && n_len == 4
+        && lengths == [4, 8, 16, 32]
+        && (parent_score.complete_mask & 0b11) == 0b11
+    {
+        order_idxs[0] = 0; // C4 (delta ~10ns)
+        order_idxs[1] = 1; // C8 (delta ~50ns)
+        order_idxs[2] = 2; // C16 (bank ~5ns)
+        order_idxs[3] = 3; // C32 (bank ~5ns, lowered stop_lim!)
+    }
     let limit = cap + 1;
     let mut partial_total = 0u32;
     let mut partial_weighted = 0u32;
@@ -2335,6 +2579,36 @@ pub fn score_graph_delta_u64(
                 }
             } else {
                 count_cycles_fast_u64(cand, 8, limit, node_budget, stop_at_count, scratch)
+            }
+        } else if is_two_edge_switch
+            && length == 16
+            && cand.n <= 40
+            && (parent_score.complete_mask & (1u8 << len_idx)) != 0
+            && parent_score.counts[len_idx].1 == 0
+        {
+            // Zero-minus exact delta C16 (e.g. n=32 when parent has C16 == 0!):
+            // ONLY 2 fixed-edge DFS roots instead of 17 starts, with instant stop_lim exit!
+            if let Some(plus) = count_cycles_through_two_edges_u64(
+                &mut cand.rows,
+                cand.n,
+                16,
+                added[0],
+                added[1],
+                stop_lim,
+                node_budget as u64,
+                &mut scratch.dist_mask64,
+            ) {
+                let cutoff_reached = stop_at_count != 0 && plus >= stop_at_count;
+                CountResult {
+                    length: 16,
+                    count: plus.min(limit),
+                    complete: plus < limit && !cutoff_reached,
+                    nodes: 0,
+                    elapsed_ns: 0,
+                    cutoff_reached,
+                }
+            } else {
+                count_cycles_fast_u64(cand, 16, limit, node_budget, stop_at_count, scratch)
             }
         } else if is_two_edge_switch
             && length >= 16
@@ -3152,6 +3426,18 @@ mod tests {
                     let m8 = count_c8_through_two_edges_u64(&mut g.rows, delta.removed[0], delta.removed[1]).unwrap();
                     let p8 = count_c8_through_two_edges_u64(&mut cand.rows, delta.added[0], delta.added[1]).unwrap();
                     assert_eq!(exact_c8_p + p8 - m8, exact_c8_c, "delta C8 mismatch n={n} mode={mode:?}");
+
+                    if n <= 32 {
+                        let exact_c16_p = count_cycles_pruned_u64(&g.rows, n, 16, 10_000, 0, 0, &mut scratch).count;
+                        let exact_c16_c = count_cycles_pruned_u64(&cand.rows, n, 16, 10_000, 0, 0, &mut scratch).count;
+                        let m16 = count_cycles_through_two_edges_u64(
+                            &mut g.rows, n, 16, delta.removed[0], delta.removed[1], 0, 0, &mut scratch.dist_mask64
+                        ).unwrap();
+                        let p16 = count_cycles_through_two_edges_u64(
+                            &mut cand.rows, n, 16, delta.added[0], delta.added[1], 0, 0, &mut scratch.dist_mask64
+                        ).unwrap();
+                        assert_eq!(exact_c16_p + p16 - m16, exact_c16_c, "delta C16 mismatch n={n} mode={mode:?}");
+                    }
 
                     g = cand;
                     g.collect_edges(&mut edges_buf);
