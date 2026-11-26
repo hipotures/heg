@@ -1,6 +1,16 @@
 # Implementation Status
 
-Last implementation audit: **2026-11-26**.
+Last implementation audit: **2026-11-27**.
+
+## Overnight `/goal` Track 2 & Wave F: Triple-Certified $f_{\mathrm{cubic}}(5) \le 370$, $f_{\delta \ge 3}(5) \le 345$, $f_{\delta \ge 3}(4) \le 73$, and Sporadic Gadget $H_8^*$
+
+- **Wave F Engine Upgrades (`cc568bd`, `lns.rs`, `large_verify.rs`, `voltage_bipartite.rs`, `main.rs`)**: Added Record-to-Record Travel (`--rrt-slack <u32>`) and bipartition-preserving matching pruning (`--bipartite`) to `lns-polish` (`u64` + `u128`), added general-order (`n <= 512`) 16-core exact canonical MitM verifier (`verify-large`), and expanded `voltage-search` with `theta2`/`mobius10` bases and 12 additional non-abelian non-nilpotent groups ($A_5, SL(2,3), F_{42}, A_4 \times C_2, S_3 \times C_4, S_3 \times C_6, D_{12}, D_{18}, D_{20}, D_{21}, D_{24}, D_{30}$). `17/17` Rust release tests (`0` warnings) + `11/11` Python parity tests green.
+- **Track 2 World-Record Upper Bounds (`docs/reports/M6_GOAL_TRACK2_F5_H8STAR_WORLD_RECORDS_2026_11_27.md`, certificates under `docs/reports/certificates/`)**:
+  - **Sporadic 8-vertex gadget $H_8^*$ (`mins = (2, 3, 3)`)**: Discovered across `180.7M` C++17 gadget trials (`n = 6..15`): unique `{C4, C8, C16}`-free 8-vertex 3-port gadget (1 internal deg-4) achieving distance $\ge 3$ on 2 of 3 port pairs.
+  - **$f_{\mathrm{cubic}}(5) \le 370$ (`-80` vertices vs Exoo/García 2026 `450`)**: Strictly 3-regular, simple, 2-connected `Tutte–Coxeter(30) + 20·H_15 + 10·H_7` (`m = 555`), triple-certified (`Rust verify-large 9.5 ms`, independent C++17 exact DFS `35.8 ms`, exact window calculus `L <= 10`).
+  - **$f_{\delta \ge 3}(5) \le 345$ (`-105` vertices vs `450`)**: Simple, 2-connected `Tutte–Coxeter(30) + 15·H_15 + 15·H_8*` (`m = 525`, `{3: 330, 4: 15}`), triple-certified (`Rust verify-large 14.6 ms`, C++17 exact DFS `39.0 ms`).
+  - **$f_{\delta \ge 3}(4) \le 73$ (`-5` vs `78`, `-4` vs Wave E `77`)**: Simple, 2-connected `Petersen(10) + 3·H_8* + 7·H_7` (`m = 111`, `{3: 70, 4: 3}`), triple-certified (`M4 C++17 9.30 ms`, Rust `verify-exact 2.26 ms`, Pure Python exact DFS `None`).
+  - **Analytic bound $f_{\mathrm{cubic}}(6) \le 30,360$ (`-360` vs `30,720`)**: Replacing any maximal 4-packing ($|P| \ge \lceil 2048/46 \rceil = 45$) of the 2048-vertex girth-17 cubic graph by $H_7$ and the rest by $H_{15}$ guarantees $\min \text{len} \ge 4L - \lfloor L/5 \rfloor \ge 65 > 64$ unconditionally.
 
 ## 2-Hour Multi-Basin Elite-Archive ILS-LNS Campaign (`n = 76, 74, 70`, `42.63B` Exact `u128` LNS Leaves)
 
