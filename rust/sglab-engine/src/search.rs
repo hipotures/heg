@@ -5,8 +5,10 @@
 use std::thread;
 use std::time::Instant;
 
-use crate::cycles::{Cutoff, DfsScratch, ScoreResult, score_graph_fast, score_graph_fast_u64};
-use crate::graph::{BitGraph, BitGraph64, Edge, zobrist_edge};
+use crate::cycles::{
+    Cutoff, DfsScratch, ScoreResult, score_graph_delta_u64, score_graph_fast, score_graph_fast_u64,
+};
+use crate::graph::{BitGraph, BitGraph64, Edge, zobrist_edge, zobrist_edge64};
 use crate::mutation::{GraphMode, MutationDelta, WitnessCache, generate_seed, mutate, mutate_u64};
 use crate::rng::Rng;
 
@@ -196,9 +198,133 @@ impl TabuRing {
     }
 }
 
+/// Flat zero-SipHash O(1) tabu ring indexed directly by Zobrist u64 key (n <= 64).
+struct TabuRing64 {
+    capacity: usize,
+    ring: Vec<u64>,
+    ring_head: usize,
+    ring_len: usize,
+    table: Vec<(u64, u32)>,
+    mask: usize,
+}
+
+impl TabuRing64 {
+    fn new(capacity: usize) -> Self {
+        let cap = capacity.max(1);
+        let table_len = (cap * 4).next_power_of_two().max(16);
+        Self {
+            capacity: cap,
+            ring: vec![0u64; cap],
+            ring_head: 0,
+            ring_len: 0,
+            table: vec![(0u64, 0u32); table_len],
+            mask: table_len - 1,
+        }
+    }
+
+    #[inline]
+    fn norm(key: u64) -> u64 {
+        if key == 0 { 1 } else { key }
+    }
+
+    #[inline]
+    fn contains(&self, key: u64) -> bool {
+        let k = Self::norm(key);
+        let mut idx = (k as usize) & self.mask;
+        loop {
+            let (slot_k, cnt) = self.table[idx];
+            if slot_k == 0 {
+                return false;
+            }
+            if slot_k == k {
+                return cnt > 0;
+            }
+            idx = (idx + 1) & self.mask;
+        }
+    }
+
+    #[inline]
+    fn inc(&mut self, k: u64) {
+        let mut idx = (k as usize) & self.mask;
+        loop {
+            let (slot_k, cnt) = self.table[idx];
+            if slot_k == 0 {
+                self.table[idx] = (k, 1);
+                return;
+            }
+            if slot_k == k {
+                self.table[idx].1 = cnt + 1;
+                return;
+            }
+            idx = (idx + 1) & self.mask;
+        }
+    }
+
+    #[inline]
+    fn dec(&mut self, k: u64) {
+        let mut idx = (k as usize) & self.mask;
+        loop {
+            let (slot_k, cnt) = self.table[idx];
+            if slot_k == 0 {
+                return;
+            }
+            if slot_k == k {
+                if cnt > 1 {
+                    self.table[idx].1 = cnt - 1;
+                    return;
+                }
+                let mut hole = idx;
+                let mut next = (hole + 1) & self.mask;
+                loop {
+                    let (nk, nc) = self.table[next];
+                    if nk == 0 {
+                        self.table[hole] = (0, 0);
+                        return;
+                    }
+                    let natural = (nk as usize) & self.mask;
+                    let dist_hole = hole.wrapping_sub(natural) & self.mask;
+                    let dist_next = next.wrapping_sub(natural) & self.mask;
+                    if dist_hole < dist_next {
+                        self.table[hole] = (nk, nc);
+                        hole = next;
+                    }
+                    next = (next + 1) & self.mask;
+                }
+            }
+            idx = (idx + 1) & self.mask;
+        }
+    }
+
+    #[inline]
+    fn push(&mut self, key: u64) {
+        let k = Self::norm(key);
+        if self.ring_len == self.capacity {
+            let old = self.ring[self.ring_head];
+            self.dec(old);
+            self.ring[self.ring_head] = k;
+            self.ring_head += 1;
+            if self.ring_head == self.capacity {
+                self.ring_head = 0;
+            }
+        } else {
+            let pos = (self.ring_head + self.ring_len) % self.capacity;
+            self.ring[pos] = k;
+            self.ring_len += 1;
+        }
+        self.inc(k);
+    }
+}
+
 #[inline]
 fn patch_edges_in_place(edges_buf: &mut Vec<Edge>, delta: &MutationDelta) {
     if delta.removed_count == 2 && delta.added_count == 2 {
+        let i0 = delta.removed_idx[0] as usize;
+        let i1 = delta.removed_idx[1] as usize;
+        if i0 < edges_buf.len() && i1 < edges_buf.len() {
+            edges_buf[i0] = delta.added[0];
+            edges_buf[i1] = delta.added[1];
+            return;
+        }
         let r0 = delta.removed[0];
         let r1 = delta.removed[1];
         let mut replaced = 0u8;
@@ -220,6 +346,11 @@ fn patch_edges_in_place(edges_buf: &mut Vec<Edge>, delta: &MutationDelta) {
     } else if delta.removed_count == 0 && delta.added_count == 1 {
         edges_buf.push(delta.added[0]);
     } else if delta.removed_count == 1 && delta.added_count == 0 {
+        let i0 = delta.removed_idx[0] as usize;
+        if i0 < edges_buf.len() && edges_buf[i0] == delta.removed[0] {
+            edges_buf.swap_remove(i0);
+            return;
+        }
         if let Some(pos) = edges_buf.iter().position(|&e| e == delta.removed[0]) {
             edges_buf.swap_remove(pos);
         }
@@ -237,6 +368,17 @@ fn update_key(mut key: u128, delta: &MutationDelta) -> u128 {
     key
 }
 
+#[inline]
+fn update_key64(mut key: u64, delta: &MutationDelta) -> u64 {
+    for i in 0..(delta.removed_count as usize) {
+        key ^= zobrist_edge64(delta.removed[i]);
+    }
+    for i in 0..(delta.added_count as usize) {
+        key ^= zobrist_edge64(delta.added[i]);
+    }
+    key
+}
+
 fn run_lane_u64(params: &SearchParams, seed: u64) -> Result<LaneSummary, String> {
     let started = Instant::now();
     let mut rng = Rng::new(seed);
@@ -250,7 +392,7 @@ fn run_lane_u64(params: &SearchParams, seed: u64) -> Result<LaneSummary, String>
     };
     let mut graph = init_g;
     graph.collect_edges(&mut edges_buf);
-    let mut key = graph.zobrist_key();
+    let mut key = graph.zobrist_key64();
     let mut score = score_graph_fast_u64(
         &graph,
         params.witness_cap,
@@ -263,7 +405,7 @@ fn run_lane_u64(params: &SearchParams, seed: u64) -> Result<LaneSummary, String>
     let mut best_graph = graph;
     let mut best_score = score;
 
-    let mut tabu = TabuRing::new(params.tabu_tenure);
+    let mut tabu = TabuRing64::new(params.tabu_tenure);
     tabu.push(key);
 
     let mut evaluated = 0usize;
@@ -308,7 +450,7 @@ fn run_lane_u64(params: &SearchParams, seed: u64) -> Result<LaneSummary, String>
         {
             graph = BitGraph64::from_graph(&generate_seed(&mut rng, params.order, params.mode)?);
             graph.collect_edges(&mut edges_buf);
-            key = graph.zobrist_key();
+            key = graph.zobrist_key64();
             score = score_graph_fast_u64(
                 &graph,
                 params.witness_cap,
@@ -322,7 +464,7 @@ fn run_lane_u64(params: &SearchParams, seed: u64) -> Result<LaneSummary, String>
         }
 
         let targeted = params.targeted_prob > 0.0 && rng.next_f64() < params.targeted_prob;
-        let (cand, delta) = mutate_u64(
+        let (mut cand, delta) = mutate_u64(
             &graph,
             &edges_buf,
             &mut rng,
@@ -335,12 +477,14 @@ fn run_lane_u64(params: &SearchParams, seed: u64) -> Result<LaneSummary, String>
             continue;
         }
 
-        let cand_key = update_key(key, &delta);
+        let cand_key = update_key64(key, &delta);
+        let is_tabu = params.algorithm == Algorithm::IteratedLocalSearchTabu
+            && tabu.contains(cand_key);
         let cutoff = if params.algorithm == Algorithm::IteratedLocalSearchTabu {
             let perturb = params.perturbation_interval.max(1);
             if evaluated % perturb == 0 {
                 None
-            } else if tabu.contains(cand_key) {
+            } else if is_tabu {
                 Some(Cutoff {
                     total: best_score.total,
                     weighted: best_score.weighted_penalty,
@@ -359,8 +503,17 @@ fn run_lane_u64(params: &SearchParams, seed: u64) -> Result<LaneSummary, String>
             None
         };
 
-        let Some(cand_score) = score_graph_fast_u64(
-            &cand,
+        let is_two_edge_switch = delta.removed_count == 2 && delta.added_count == 2;
+        let cand_simplicity =
+            (edges_buf.len() + delta.added_count as usize - delta.removed_count as usize) as u32;
+        let Some(cand_score) = score_graph_delta_u64(
+            &mut graph,
+            &score,
+            &mut cand,
+            is_two_edge_switch,
+            delta.removed,
+            delta.added,
+            cand_simplicity,
             params.witness_cap,
             params.node_budget,
             cutoff,
@@ -384,8 +537,7 @@ fn run_lane_u64(params: &SearchParams, seed: u64) -> Result<LaneSummary, String>
             }
             Algorithm::IteratedLocalSearchTabu => {
                 let perturb = params.perturbation_interval.max(1);
-                let ok = (!tabu.contains(cand_key)
-                    && cand_score.ordering_key() <= score.ordering_key())
+                let ok = (!is_tabu && cand_score.ordering_key() <= score.ordering_key())
                     || (evaluated % perturb == 0);
                 if ok {
                     tabu.push(cand_key);

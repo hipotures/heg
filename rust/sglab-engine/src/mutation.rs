@@ -192,6 +192,7 @@ pub struct MutationDelta {
     pub changed: bool,
     pub removed_count: u8,
     pub removed: [Edge; 2],
+    pub removed_idx: [u16; 2],
     pub added_count: u8,
     pub added: [Edge; 2],
 }
@@ -201,6 +202,7 @@ impl MutationDelta {
         changed: false,
         removed_count: 0,
         removed: [(0, 0); 2],
+        removed_idx: [u16::MAX; 2],
         added_count: 0,
         added: [(0, 0); 2],
     };
@@ -210,7 +212,9 @@ impl MutationDelta {
 fn try_two_edge_switch_u64(
     graph: &BitGraph64,
     first: Edge,
+    first_idx: u16,
     second: Edge,
+    second_idx: u16,
     rng: &mut Rng,
     mode: GraphMode,
 ) -> Option<(BitGraph64, MutationDelta)> {
@@ -247,6 +251,7 @@ fn try_two_edge_switch_u64(
                 changed: true,
                 removed_count: 2,
                 removed: [normalize_edge(first.0, first.1), normalize_edge(second.0, second.1)],
+                removed_idx: [first_idx, second_idx],
                 added_count: 2,
                 added: [e1, e2],
             },
@@ -282,6 +287,7 @@ pub fn mutate_u64(
                             changed: true,
                             removed_count: 0,
                             removed: [(0, 0); 2],
+                            removed_idx: [u16::MAX; 2],
                             added_count: 1,
                             added: [e, (0, 0)],
                         },
@@ -291,15 +297,15 @@ pub fn mutate_u64(
         } else {
             let mut chosen = None;
             let mut seen = 0usize;
-            for &e in edges {
+            for (idx, &e) in edges.iter().enumerate() {
                 if graph.degree(e.0 as usize) > 3 && graph.degree(e.1 as usize) > 3 {
                     seen += 1;
                     if rng.gen_range(seen) == 0 {
-                        chosen = Some(e);
+                        chosen = Some((e, idx as u16));
                     }
                 }
             }
-            if let Some(e) = chosen {
+            if let Some((e, idx)) = chosen {
                 let mut cand = *graph;
                 cand.remove_edge(e.0 as usize, e.1 as usize);
                 if cand.is_connected() {
@@ -309,6 +315,7 @@ pub fn mutate_u64(
                             changed: true,
                             removed_count: 1,
                             removed: [e, (0, 0)],
+                            removed_idx: [idx, u16::MAX],
                             added_count: 0,
                             added: [(0, 0); 2],
                         },
@@ -336,9 +343,15 @@ pub fn mutate_u64(
         let group = &w.groups[g_idx][..g_len];
         for _ in 0..64 {
             let first = group[rng.gen_range(g_len)];
-            let remote = edges[rng.gen_range(m)];
-            if let Some(res) = try_two_edge_switch_u64(graph, first, remote, rng, mode) {
-                return res;
+            let j = rng.gen_range(m);
+            let remote = edges[j];
+            if let Some((cand, mut delta)) =
+                try_two_edge_switch_u64(graph, first, u16::MAX, remote, j as u16, rng, mode)
+            {
+                if let Some(pos) = edges.iter().position(|&e| e == delta.removed[0]) {
+                    delta.removed_idx[0] = pos as u16;
+                }
+                return (cand, delta);
             }
         }
         return (*graph, MutationDelta::NONE);
@@ -350,7 +363,9 @@ pub fn mutate_u64(
         if j >= i {
             j += 1;
         }
-        if let Some(res) = try_two_edge_switch_u64(graph, edges[i], edges[j], rng, mode) {
+        if let Some(res) =
+            try_two_edge_switch_u64(graph, edges[i], i as u16, edges[j], j as u16, rng, mode)
+        {
             return res;
         }
     }
@@ -398,6 +413,7 @@ fn try_two_edge_switch(
                 changed: true,
                 removed_count: 2,
                 removed: [normalize_edge(first.0, first.1), normalize_edge(second.0, second.1)],
+                removed_idx: [u16::MAX; 2],
                 added_count: 2,
                 added: [e1, e2],
             },
@@ -431,6 +447,7 @@ pub fn mutate(
                             changed: true,
                             removed_count: 0,
                             removed: [(0, 0); 2],
+                            removed_idx: [u16::MAX; 2],
                             added_count: 1,
                             added: [e, (0, 0)],
                         },
@@ -458,6 +475,7 @@ pub fn mutate(
                             changed: true,
                             removed_count: 1,
                             removed: [e, (0, 0)],
+                            removed_idx: [u16::MAX; 2],
                             added_count: 0,
                             added: [(0, 0); 2],
                         },

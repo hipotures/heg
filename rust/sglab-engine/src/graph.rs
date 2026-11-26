@@ -257,6 +257,11 @@ impl BitGraph64 {
         }
         h
     }
+
+    #[inline]
+    pub fn zobrist_key64(&self) -> u64 {
+        self.zobrist_key() as u64
+    }
 }
 
 impl BitGraph {
@@ -616,6 +621,11 @@ pub fn normalize_edge(a: u8, b: u8) -> Edge {
 pub fn zobrist_edge(e: Edge) -> u128 {
     let (u, v) = normalize_edge(e.0, e.1);
     zobrist_table()[(u as usize) * MAX_ORDER + (v as usize)]
+}
+
+#[inline]
+pub fn zobrist_edge64(e: Edge) -> u64 {
+    zobrist_edge(e) as u64
 }
 
 fn zobrist_table() -> &'static [u128; MAX_ORDER * MAX_ORDER] {

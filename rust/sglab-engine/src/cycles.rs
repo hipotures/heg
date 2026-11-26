@@ -61,6 +61,7 @@ pub struct ScoreResult {
     pub valid: bool,
     pub counts: [(u16, u32); 6],
     pub counts_len: u8,
+    pub complete_mask: u8,
     pub total: u32,
     pub weighted_penalty: u32,
     pub complete: bool,
@@ -406,6 +407,139 @@ pub fn evaluate_lengths(
 // ============================================================================
 // 2. ULTRA-FAST ALGORITHMIC SCORER
 // ============================================================================
+
+/// Exact count of simple C4 cycles containing edge `(u, v)` in `rows`.
+#[inline]
+fn count_c4_through_edge_u64(rows: &[u64; 64], u: usize, v: usize) -> u32 {
+    let nu = rows[u] & !(1u64 << v);
+    let mut nv = rows[v] & !(1u64 << u);
+    let mut c = 0u32;
+    while nv != 0 {
+        let x = nv.trailing_zeros() as usize;
+        nv &= nv - 1;
+        c += (rows[x] & nu).count_ones();
+    }
+    c
+}
+
+/// Exact count of simple C4 cycles containing at least one of two vertex-disjoint
+/// edges `e1`, `e2` present in `rows`.
+#[inline]
+pub fn count_c4_through_two_edges_u64(rows: &[u64; 64], e1: Edge, e2: Edge) -> u32 {
+    let (u1, v1) = (e1.0 as usize, e1.1 as usize);
+    let (u2, v2) = (e2.0 as usize, e2.1 as usize);
+    let c1 = count_c4_through_edge_u64(rows, u1, v1);
+    let c2 = count_c4_through_edge_u64(rows, u2, v2);
+    let c_both = u32::from(
+        (rows[v1] & (1u64 << u2)) != 0 && (rows[u1] & (1u64 << v2)) != 0,
+    ) + u32::from(
+        (rows[v1] & (1u64 << v2)) != 0 && (rows[u1] & (1u64 << u2)) != 0,
+    );
+    c1 + c2 - c_both
+}
+
+/// Exact count of simple C8 cycles containing edge `(u, v)` present in `rows`.
+/// Returns `None` only on extreme high-degree overflow (>128 depth-3 left paths).
+#[inline]
+fn count_c8_through_edge_raw_u64(rows: &[u64; 64], u: usize, v: usize) -> Option<u32> {
+    const MAX_SIDE: usize = 128;
+    let u_bit = 1u64 << u;
+    let v_bit = 1u64 << v;
+    let uv_mask = u_bit | v_bit;
+
+    let mut left_a3 = [0u8; MAX_SIDE];
+    let mut left_mask = [0u64; MAX_SIDE];
+    let mut left_len = 0usize;
+    let mut left_a3_bits = 0u64;
+
+    let mut a1_bits = rows[u] & !v_bit;
+    while a1_bits != 0 {
+        let a1 = a1_bits.trailing_zeros() as usize;
+        a1_bits &= a1_bits - 1;
+        let m1 = uv_mask | (1u64 << a1);
+        let mut a2_bits = rows[a1] & !m1;
+        while a2_bits != 0 {
+            let a2 = a2_bits.trailing_zeros() as usize;
+            a2_bits &= a2_bits - 1;
+            let m12 = m1 | (1u64 << a2);
+            let mut a3_bits = rows[a2] & !m12;
+            left_a3_bits |= a3_bits;
+            while a3_bits != 0 {
+                if left_len >= MAX_SIDE {
+                    return None;
+                }
+                let a3 = a3_bits.trailing_zeros() as usize;
+                a3_bits &= a3_bits - 1;
+                left_a3[left_len] = a3 as u8;
+                left_mask[left_len] = (m12 | (1u64 << a3)) & !uv_mask;
+                left_len += 1;
+            }
+        }
+    }
+    if left_len == 0 {
+        return Some(0);
+    }
+
+    let mut adj_to_left_a3 = 0u64;
+    let mut m = left_a3_bits;
+    while m != 0 {
+        let x = m.trailing_zeros() as usize;
+        m &= m - 1;
+        adj_to_left_a3 |= rows[x];
+    }
+    adj_to_left_a3 &= !uv_mask;
+    if adj_to_left_a3 == 0 {
+        return Some(0);
+    }
+
+    let mut count = 0u32;
+    let mut b1_bits = rows[v] & !u_bit;
+    while b1_bits != 0 {
+        let b1 = b1_bits.trailing_zeros() as usize;
+        b1_bits &= b1_bits - 1;
+        let mb1 = uv_mask | (1u64 << b1);
+        let mut b2_bits = rows[b1] & !mb1;
+        while b2_bits != 0 {
+            let b2 = b2_bits.trailing_zeros() as usize;
+            b2_bits &= b2_bits - 1;
+            let mb12 = mb1 | (1u64 << b2);
+            let mut b3_bits = rows[b2] & !mb12 & adj_to_left_a3;
+            while b3_bits != 0 {
+                let b3 = b3_bits.trailing_zeros() as usize;
+                b3_bits &= b3_bits - 1;
+                let mb123 = (mb12 | (1u64 << b3)) & !uv_mask;
+                let adj_b3 = rows[b3] & left_a3_bits & !mb123;
+                if adj_b3 != 0 {
+                    for i in 0..left_len {
+                        if (adj_b3 & (1u64 << left_a3[i])) != 0
+                            && (left_mask[i] & mb123) == 0
+                        {
+                            count += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Some(count)
+}
+
+/// Exact count of simple C8 cycles containing at least one of two vertex-disjoint
+/// edges `e1`, `e2` present in `rows` (temporarily toggles `e1` in-place to avoid
+/// double counting without branches).
+#[inline]
+pub fn count_c8_through_two_edges_u64(rows: &mut [u64; 64], e1: Edge, e2: Edge) -> Option<u32> {
+    let (u1, v1) = (e1.0 as usize, e1.1 as usize);
+    let (u2, v2) = (e2.0 as usize, e2.1 as usize);
+    let c1 = count_c8_through_edge_raw_u64(rows, u1, v1)?;
+    // Temporarily mask out e1 so c2 counts ONLY C8 cycles containing e2 and NOT e1.
+    rows[u1] ^= 1u64 << v1;
+    rows[v1] ^= 1u64 << u1;
+    let c2 = count_c8_through_edge_raw_u64(rows, u2, v2);
+    rows[u1] ^= 1u64 << v1;
+    rows[v1] ^= 1u64 << u1;
+    Some(c1 + c2?)
+}
 
 /// Exact analytic C4 count on u64 (zero DFS, ~0.15 us for n=64).
 #[inline]
@@ -1989,6 +2123,7 @@ pub fn score_graph_fast_u64(
     let mut partial_total = 0u32;
     let mut partial_weighted = 0u32;
     let mut complete = true;
+    let mut complete_mask = 0u8;
     let mut counts_arr = [(0u16, 0u32); 6];
 
     for pos in 0..n_len {
@@ -2022,7 +2157,11 @@ pub fn score_graph_fast_u64(
         };
         partial_total += effective_count;
         partial_weighted += effective_count * weight;
-        complete = complete && res.count <= cap && res.complete;
+        let is_len_exact = res.count <= cap && res.complete;
+        if is_len_exact {
+            complete_mask |= 1u8 << len_idx;
+        }
+        complete = complete && is_len_exact;
         counts_arr[len_idx] = (length, effective_count);
         if res.cutoff_reached {
             return None;
@@ -2038,6 +2177,141 @@ pub fn score_graph_fast_u64(
         valid: true,
         counts: counts_arr,
         counts_len: n_len as u8,
+        complete_mask,
+        total: partial_total,
+        weighted_penalty: partial_weighted,
+        complete,
+        simplicity,
+    })
+}
+
+/// Exact delta-accelerated scorer for 2-edge switch candidates on `n <= 64`.
+/// Uses O(1) exact delta C4 (~10 ns) and exact delta C8 (~60 ns) whenever the
+/// parent graph has complete counts for C4/C8, preserving 100% mathematical exactness.
+pub fn score_graph_delta_u64(
+    parent: &mut BitGraph64,
+    parent_score: &ScoreResult,
+    cand: &mut BitGraph64,
+    is_two_edge_switch: bool,
+    removed: [Edge; 2],
+    added: [Edge; 2],
+    simplicity: u32,
+    cap: u32,
+    node_budget: u32,
+    cutoff: Option<Cutoff>,
+    scratch: &mut DfsScratch,
+) -> Option<ScoreResult> {
+    let lengths = forbidden_lengths(cand.n);
+    let (order_idxs, n_len) = eval_order(lengths, cand.n, cutoff.is_some());
+    let limit = cap + 1;
+    let mut partial_total = 0u32;
+    let mut partial_weighted = 0u32;
+    let mut complete = true;
+    let mut complete_mask = 0u8;
+    let mut counts_arr = [(0u16, 0u32); 6];
+
+    for pos in 0..n_len {
+        let len_idx = order_idxs[pos];
+        let length = lengths[len_idx];
+        if let Some(co) = cutoff {
+            if co.reached(partial_total, partial_weighted, simplicity) {
+                return None;
+            }
+        }
+        let weight = (64u32 / (length as u32)).max(1);
+        let mut stop_at_count = 0u32;
+        if let Some(co) = cutoff {
+            for c in 1..=limit {
+                let bounded = c.min(cap);
+                if co.reached(
+                    partial_total + bounded,
+                    partial_weighted + bounded * weight,
+                    simplicity,
+                ) {
+                    stop_at_count = c;
+                    break;
+                }
+            }
+        }
+        let res = if is_two_edge_switch
+            && length == 4
+            && (parent_score.complete_mask & (1u8 << len_idx)) != 0
+        {
+            let p_c4 = parent_score.counts[len_idx].1;
+            let minus = if p_c4 == 0 {
+                0
+            } else {
+                count_c4_through_two_edges_u64(&parent.rows, removed[0], removed[1])
+            };
+            let plus = count_c4_through_two_edges_u64(&cand.rows, added[0], added[1]);
+            let exact = p_c4 + plus - minus;
+            let cutoff_reached = stop_at_count != 0 && exact >= stop_at_count;
+            CountResult {
+                length: 4,
+                count: exact.min(limit),
+                complete: exact < limit && !cutoff_reached,
+                nodes: 0,
+                elapsed_ns: 0,
+                cutoff_reached,
+            }
+        } else if is_two_edge_switch
+            && length == 8
+            && (parent_score.complete_mask & (1u8 << len_idx)) != 0
+        {
+            let p_c8 = parent_score.counts[len_idx].1;
+            let minus_opt = if p_c8 == 0 {
+                Some(0)
+            } else {
+                count_c8_through_two_edges_u64(&mut parent.rows, removed[0], removed[1])
+            };
+            let plus_opt = minus_opt
+                .and_then(|_| count_c8_through_two_edges_u64(&mut cand.rows, added[0], added[1]));
+            if let (Some(minus), Some(plus)) = (minus_opt, plus_opt) {
+                let exact = p_c8 + plus - minus;
+                let cutoff_reached = stop_at_count != 0 && exact >= stop_at_count;
+                CountResult {
+                    length: 8,
+                    count: exact.min(limit),
+                    complete: exact < limit && !cutoff_reached,
+                    nodes: 0,
+                    elapsed_ns: 0,
+                    cutoff_reached,
+                }
+            } else {
+                count_cycles_fast_u64(cand, 8, limit, node_budget, stop_at_count, scratch)
+            }
+        } else {
+            count_cycles_fast_u64(cand, length, limit, node_budget, stop_at_count, scratch)
+        };
+
+        let effective_count = if !res.complete && !res.cutoff_reached {
+            cap
+        } else {
+            res.count.min(cap)
+        };
+        partial_total += effective_count;
+        partial_weighted += effective_count * weight;
+        let is_len_exact = res.count <= cap && res.complete;
+        if is_len_exact {
+            complete_mask |= 1u8 << len_idx;
+        }
+        complete = complete && is_len_exact;
+        counts_arr[len_idx] = (length, effective_count);
+        if res.cutoff_reached {
+            return None;
+        }
+        if let Some(co) = cutoff {
+            if co.reached(partial_total, partial_weighted, simplicity) {
+                return None;
+            }
+        }
+    }
+
+    Some(ScoreResult {
+        valid: true,
+        counts: counts_arr,
+        counts_len: n_len as u8,
+        complete_mask,
         total: partial_total,
         weighted_penalty: partial_weighted,
         complete,
@@ -2064,6 +2338,7 @@ pub fn score_graph_fast(
     let mut partial_total = 0u32;
     let mut partial_weighted = 0u32;
     let mut complete = true;
+    let mut complete_mask = 0u8;
     let mut counts_arr = [(0u16, 0u32); 6];
 
     for pos in 0..n_len {
@@ -2097,7 +2372,11 @@ pub fn score_graph_fast(
         };
         partial_total += effective_count;
         partial_weighted += effective_count * weight;
-        complete = complete && res.count <= cap && res.complete;
+        let is_len_exact = res.count <= cap && res.complete;
+        if is_len_exact {
+            complete_mask |= 1u8 << len_idx;
+        }
+        complete = complete && is_len_exact;
         counts_arr[len_idx] = (length, effective_count);
         if res.cutoff_reached {
             return None;
@@ -2113,6 +2392,7 @@ pub fn score_graph_fast(
         valid: true,
         counts: counts_arr,
         counts_len: n_len as u8,
+        complete_mask,
         total: partial_total,
         weighted_penalty: partial_weighted,
         complete,
@@ -2513,5 +2793,41 @@ mod tests {
             }
         }
         assert!(hits >= 8, "expected Posa to certify >=8/10 random cubic n=64, got {hits}");
+    }
+
+    #[test]
+    fn delta_c4_and_c8_match_exact_counts() {
+        use crate::mutation::{WitnessCache, mutate_u64};
+        let mut rng = Rng::new(20261127);
+        let mut scratch = DfsScratch::new();
+        let mut wc = WitnessCache::new();
+        let mut edges_buf = Vec::new();
+        for &mode in &[GraphMode::CubicFirst, GraphMode::MinimalStructureMixedDegree] {
+            for &n in &[16usize, 32, 50, 64] {
+                let mut g = BitGraph64::from_graph(&generate_seed(&mut rng, n, mode).unwrap());
+                g.collect_edges(&mut edges_buf);
+                for _ in 0..40 {
+                    let exact_c4_p = count_c4_u64(&g.rows, n, 10_000, 0).count;
+                    let exact_c8_p = count_c8_mitm_u64(&g.rows, n, 10_000, 0, 0, &mut scratch).count;
+                    let (mut cand, delta) = mutate_u64(&g, &edges_buf, &mut rng, mode, false, &mut wc, &mut scratch);
+                    if !delta.changed || delta.removed_count != 2 || delta.added_count != 2 {
+                        continue;
+                    }
+                    let exact_c4_c = count_c4_u64(&cand.rows, n, 10_000, 0).count;
+                    let exact_c8_c = count_c8_mitm_u64(&cand.rows, n, 10_000, 0, 0, &mut scratch).count;
+
+                    let m4 = count_c4_through_two_edges_u64(&g.rows, delta.removed[0], delta.removed[1]);
+                    let p4 = count_c4_through_two_edges_u64(&cand.rows, delta.added[0], delta.added[1]);
+                    assert_eq!(exact_c4_p + p4 - m4, exact_c4_c, "delta C4 mismatch n={n} mode={mode:?}");
+
+                    let m8 = count_c8_through_two_edges_u64(&mut g.rows, delta.removed[0], delta.removed[1]).unwrap();
+                    let p8 = count_c8_through_two_edges_u64(&mut cand.rows, delta.added[0], delta.added[1]).unwrap();
+                    assert_eq!(exact_c8_p + p8 - m8, exact_c8_c, "delta C8 mismatch n={n} mode={mode:?}");
+
+                    g = cand;
+                    g.collect_edges(&mut edges_buf);
+                }
+            }
+        }
     }
 }
