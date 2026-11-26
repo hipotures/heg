@@ -2,6 +2,13 @@
 
 Last implementation audit: **2026-11-26**.
 
+## Deep `/goal` Research Campaign (Wave A + B + C + `LexCutoff`, 1.97B evaluations)
+
+- **Exact `LexCutoff` & ILS return-to-best (`rust/sglab-engine/src/cycles.rs`, `search.rs`, commit `2436da2`)**: Added exact ascending-length short-cycle early pruning under `--objective lex_short` (aborting in ~10–60 ns when `C4 > 0` or `C8 > 0`, yielding `11×` speedup on `n = 64` and `16.68M ev/s` peak on `single_block_41`) plus classic ILS return-to-best intensification after `10 × perturbation_interval` stagnant steps.
+- **1.97-billion-evaluation 4-phase campaign (`docs/reports/M6_DEEP_CAMPAIGN_WAVE_ABC_2026_11_26.md`)**: Executed `1,965,629,664` evaluations in `579.5 s` across 16 cores with full dual M4 + `verify-exact` certification and 2-connectivity structural audit:
+  - Strictly 2-connected cubic (`bridges = 0`, `C4 = C8 = 0`): drove exact `C16` down to **`71`** (`n=54`), **`65`** (`n=60`), **`44`** (`n=62`), **`32`** (`n=64`, `43.8×` below random), **`4` with `C64 = 0`** (`n=70`), and **`0`** (`n=78`, autonomous Exoo $G_{78}$), each verified in `0.4–0.8 ms`.
+  - Strictly legal `single_block_41` (`k = 21..37`, odd `n = 41..73`, `biconn = True, bridges = 0`): M4-certified **`C8 = C16 = C32 = C64 = 0`** (`total = 3` per block) at `n = 65` and `n = 69`, and down to `C16 = 111..126` inside `C4 = C8 = 0`. No counterexample was found.
+
 ## Wave C: Exact Bitset MitM `C16`, Forced-Edge Branch-and-Reduce `C_n`, and Single-Pass Frontier DP
 
 - **Exact Bitset Meet-in-the-Middle for `C16` (`rust/sglab-engine/src/cycles.rs`)**: Added `count_c16_mitm_u64` (canonical min-vertex 8-edge half-paths, `<= 384`/vertex in cubic graphs, disjoint bitmask pairing `(m1 & m2) == 0`) wired into `count_cycles_fast_u64`, eliminating `node_budget` exhaustion on `C16` while keeping `--serve` protocol v2 untouched and bit-for-bit parity-tested.
