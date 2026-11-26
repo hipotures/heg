@@ -1,3 +1,4 @@
+mod bank;
 mod cycles;
 mod graph;
 mod mutation;

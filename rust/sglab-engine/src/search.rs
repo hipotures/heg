@@ -5,6 +5,7 @@
 use std::thread;
 use std::time::Instant;
 
+use crate::bank::CycleBank64;
 use crate::cycles::{
     Cutoff, DfsScratch, ScoreResult, score_graph_delta_u64, score_graph_fast, score_graph_fast_u64,
 };
@@ -385,6 +386,7 @@ fn run_lane_u64(params: &SearchParams, seed: u64) -> Result<LaneSummary, String>
     let mut scratch = DfsScratch::new();
     let mut witness_cache = WitnessCache::new();
     let mut edges_buf: Vec<Edge> = Vec::with_capacity(params.order * 3);
+    let mut cycle_bank = CycleBank64::new(seed);
 
     let init_g = match params.initial_graph {
         Some(g) => BitGraph64::from_graph(&g),
@@ -392,6 +394,7 @@ fn run_lane_u64(params: &SearchParams, seed: u64) -> Result<LaneSummary, String>
     };
     let mut graph = init_g;
     graph.collect_edges(&mut edges_buf);
+    cycle_bank.reset_for_graph(&edges_buf);
     let mut key = graph.zobrist_key64();
     let mut score = score_graph_fast_u64(
         &graph,
@@ -450,6 +453,7 @@ fn run_lane_u64(params: &SearchParams, seed: u64) -> Result<LaneSummary, String>
         {
             graph = BitGraph64::from_graph(&generate_seed(&mut rng, params.order, params.mode)?);
             graph.collect_edges(&mut edges_buf);
+            cycle_bank.reset_for_graph(&edges_buf);
             key = graph.zobrist_key64();
             score = score_graph_fast_u64(
                 &graph,
@@ -512,12 +516,14 @@ fn run_lane_u64(params: &SearchParams, seed: u64) -> Result<LaneSummary, String>
             &mut cand,
             is_two_edge_switch,
             delta.removed,
+            delta.removed_idx,
             delta.added,
             cand_simplicity,
             params.witness_cap,
             params.node_budget,
             cutoff,
             &mut scratch,
+            &mut cycle_bank,
         ) else {
             cutoffs += 1;
             continue;
@@ -555,6 +561,11 @@ fn run_lane_u64(params: &SearchParams, seed: u64) -> Result<LaneSummary, String>
         if accept {
             graph = cand;
             patch_edges_in_place(&mut edges_buf, &delta);
+            if is_two_edge_switch {
+                cycle_bank.apply_accepted_switch(delta.removed, delta.removed_idx, delta.added);
+            } else {
+                cycle_bank.reset_for_graph(&edges_buf);
+            }
             key = cand_key;
             score = cand_score;
             accepted += 1;

@@ -11,6 +11,7 @@
 
 use std::time::Instant;
 
+use crate::bank::CycleBank64;
 use crate::graph::{BitGraph, BitGraph64, Edge, MAX_ORDER, normalize_edge, zobrist_edge};
 
 pub const FORBIDDEN_ALL: [u16; 6] = [4, 8, 16, 32, 64, 128];
@@ -2185,21 +2186,26 @@ pub fn score_graph_fast_u64(
     })
 }
 
-/// Exact delta-accelerated scorer for 2-edge switch candidates on `n <= 64`.
-/// Uses O(1) exact delta C4 (~10 ns) and exact delta C8 (~60 ns) whenever the
-/// parent graph has complete counts for C4/C8, preserving 100% mathematical exactness.
+/// Exact delta + orientation-aware cycle-bank accelerated scorer for 2-edge switches (`n <= 64`).
+/// - C4/C8: O(1) exact delta when parent count is complete (< cap).
+/// - C16/C32/C64: O(1) transposed bitset lower-bound proof (`CycleBank64`) when parent
+///   is saturated at `cap`, falling back to exact fast scorer whenever `proven < stop_lim`.
+/// Preserves 100% mathematical soundness and exactness.
+#[allow(clippy::too_many_arguments)]
 pub fn score_graph_delta_u64(
     parent: &mut BitGraph64,
     parent_score: &ScoreResult,
     cand: &mut BitGraph64,
     is_two_edge_switch: bool,
     removed: [Edge; 2],
+    removed_idx: [u16; 2],
     added: [Edge; 2],
     simplicity: u32,
     cap: u32,
     node_budget: u32,
     cutoff: Option<Cutoff>,
     scratch: &mut DfsScratch,
+    bank: &mut CycleBank64,
 ) -> Option<ScoreResult> {
     let lengths = forbidden_lengths(cand.n);
     let (order_idxs, n_len) = eval_order(lengths, cand.n, cutoff.is_some());
@@ -2233,6 +2239,12 @@ pub fn score_graph_delta_u64(
                 }
             }
         }
+        let stop_lim = if stop_at_count != 0 {
+            stop_at_count.min(limit)
+        } else {
+            limit
+        };
+
         let res = if is_two_edge_switch
             && length == 4
             && (parent_score.complete_mask & (1u8 << len_idx)) != 0
@@ -2279,6 +2291,30 @@ pub fn score_graph_delta_u64(
                 }
             } else {
                 count_cycles_fast_u64(cand, 8, limit, node_budget, stop_at_count, scratch)
+            }
+        } else if is_two_edge_switch
+            && length >= 16
+            && (parent_score.complete_mask & (1u8 << len_idx)) == 0
+            && parent_score.counts[len_idx].1 >= cap
+            && stop_lim <= 384
+        {
+            if let Some(proven) =
+                bank.query_or_refill(parent, length, removed, removed_idx, added)
+            {
+                if proven >= stop_lim {
+                    CountResult {
+                        length,
+                        count: proven.min(limit),
+                        complete: false,
+                        nodes: 0,
+                        elapsed_ns: 0,
+                        cutoff_reached: stop_at_count != 0 && proven >= stop_at_count,
+                    }
+                } else {
+                    count_cycles_fast_u64(cand, length, limit, node_budget, stop_at_count, scratch)
+                }
+            } else {
+                count_cycles_fast_u64(cand, length, limit, node_budget, stop_at_count, scratch)
             }
         } else {
             count_cycles_fast_u64(cand, length, limit, node_budget, stop_at_count, scratch)
