@@ -1,0 +1,15 @@
+[package]
+name = "sglab-engine"
+version = "0.2.0"
+edition = "2024"
+description = "Native Rust search engine and v2 score worker for Structural Graph Conjecture Lab"
+
+[[bin]]
+name = "sglab-rust-engine"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"

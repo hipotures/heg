@@ -1,0 +1,2517 @@
+//! Ultra-fast cycle counting & scoring:
+//! 1. Parity-exact DFS (`count_cycles`) for `--serve` v2 protocol (with u64 fast path).
+//! 2. Fast exact/pruned engine for native Rust search:
+//!    - Analytic bitwise C4 (zero DFS, ~0.15 us for n=64)
+//!    - Exact Meet-in-the-Middle C8 (~1-2 us for n=64)
+//!    - Dedicated forced-vertex + dead-end pruned Hamiltonian counter (`target == n`)
+//!      for C32 (n=32) and C64 (n=64)
+//!    - Register-resident recursive u64 DFS with pre-filled `dist_mask` and
+//!      2-level `popcnt` leaf collapse for C16/C32/C64/C128
+//! 3. Zero-allocation stack-only witness-cycle discovery with distance pruning.
+
+use std::time::Instant;
+
+use crate::graph::{BitGraph, BitGraph64, Edge, MAX_ORDER, normalize_edge, zobrist_edge};
+
+pub const FORBIDDEN_ALL: [u16; 6] = [4, 8, 16, 32, 64, 128];
+
+#[inline]
+pub fn forbidden_lengths(n: usize) -> &'static [u16] {
+    let mut count = 0;
+    while count < FORBIDDEN_ALL.len() && (FORBIDDEN_ALL[count] as usize) <= n {
+        count += 1;
+    }
+    &FORBIDDEN_ALL[..count]
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CountResult {
+    pub length: u16,
+    pub count: u32,
+    pub complete: bool,
+    pub nodes: u64,
+    pub elapsed_ns: u64,
+    pub cutoff_reached: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Cutoff {
+    pub total: u32,
+    pub weighted: u32,
+    pub simplicity: u32,
+    pub inclusive: bool,
+}
+
+impl Cutoff {
+    #[inline]
+    pub fn reached(&self, total: u32, weighted: u32, simplicity: u32) -> bool {
+        let greater = total > self.total
+            || (total == self.total
+                && (weighted > self.weighted
+                    || (weighted == self.weighted && simplicity > self.simplicity)));
+        let equal =
+            total == self.total && weighted == self.weighted && simplicity == self.simplicity;
+        greater || (self.inclusive && equal)
+    }
+}
+
+/// Stack-allocated Copy score (zero heap allocations in the search hot loop).
+#[derive(Clone, Copy, Debug)]
+pub struct ScoreResult {
+    pub valid: bool,
+    pub counts: [(u16, u32); 6],
+    pub counts_len: u8,
+    pub total: u32,
+    pub weighted_penalty: u32,
+    pub complete: bool,
+    pub simplicity: u32,
+}
+
+impl ScoreResult {
+    #[inline]
+    pub fn counts_slice(&self) -> &[(u16, u32)] {
+        &self.counts[..(self.counts_len as usize)]
+    }
+
+    #[inline]
+    pub fn ordering_key(&self) -> (u8, u32, u32, u32) {
+        (
+            if self.valid { 0 } else { 1 },
+            self.total,
+            self.weighted_penalty,
+            self.simplicity,
+        )
+    }
+
+    #[inline]
+    pub fn scalar(&self) -> f64 {
+        let invalid = if self.valid { 0.0 } else { 1.0 };
+        invalid * 2_000_000.0
+            + (self.total as f64)
+            + (self.weighted_penalty as f64) / 2_000_000.0
+            + (self.simplicity as f64) / 80_000_000_000_000_000.0
+    }
+}
+
+/// Reusable DFS scratch buffers (zero heap allocations in the hot loop).
+pub struct DfsScratch {
+    pub seen_at: [u128; MAX_ORDER],
+    pub available_at: [u128; MAX_ORDER],
+    pub seen_at64: [u64; 64],
+    pub available_at64: [u64; 64],
+    pub dist_mask64: [u64; 65],
+    pub dist_mask128: [u128; MAX_ORDER + 1],
+    pub path: [u8; MAX_ORDER],
+    pub mitm_left_mid: [u8; 64],
+    pub mitm_left_mask: [u64; 64],
+}
+
+impl DfsScratch {
+    pub fn new() -> Self {
+        Self {
+            seen_at: [0u128; MAX_ORDER],
+            available_at: [0u128; MAX_ORDER],
+            seen_at64: [0u64; 64],
+            available_at64: [0u64; 64],
+            dist_mask64: [0u64; 65],
+            dist_mask128: [0u128; MAX_ORDER + 1],
+            path: [0u8; MAX_ORDER],
+            mitm_left_mid: [0u8; 64],
+            mitm_left_mask: [0u64; 64],
+        }
+    }
+}
+
+// ============================================================================
+// 1. PARITY-EXACT DFS FOR `--serve` v2 PROTOCOL (matches cpp/sglab_score_worker.cpp)
+// ============================================================================
+
+#[inline]
+fn count_cycles_parity_u64(
+    rows: &[u64; 64],
+    order: usize,
+    length: u16,
+    limit: u32,
+    node_budget: u32,
+    stop_at_count: u32,
+    scratch: &mut DfsScratch,
+    measure_time: bool,
+) -> CountResult {
+    let started = if measure_time {
+        Some(Instant::now())
+    } else {
+        None
+    };
+    let mut result = CountResult {
+        length,
+        ..Default::default()
+    };
+    let mut budget_exhausted = false;
+    let target = length as usize;
+    let budget = node_budget as u64;
+    let seen_at = &mut scratch.seen_at64;
+    let available_at = &mut scratch.available_at64;
+
+    for start in 0..order {
+        let start_bit = 1u64 << start;
+        let greater_mask: u64 = if start >= 63 {
+            0
+        } else {
+            !((1u64 << (start + 1)) - 1)
+        };
+        seen_at[0] = start_bit;
+        available_at[0] = rows[start] & greater_mask;
+        result.nodes += 1;
+        if budget != 0 && result.nodes > budget {
+            budget_exhausted = true;
+            break;
+        }
+
+        let mut depth: usize = 1;
+        let mut first_neighbor: usize = 0;
+        while depth != 0 {
+            let parent_index = depth - 1;
+            let bits = available_at[parent_index];
+            if bits == 0 {
+                depth -= 1;
+                continue;
+            }
+            let vertex = bits.trailing_zeros() as usize;
+            let bit = 1u64 << vertex;
+            available_at[parent_index] = bits ^ bit;
+            if depth == 1 {
+                first_neighbor = vertex;
+            }
+            let seen = seen_at[parent_index] | bit;
+            seen_at[depth] = seen;
+            result.nodes += 1;
+            if budget != 0 && result.nodes > budget {
+                budget_exhausted = true;
+                break;
+            }
+
+            let child_depth = depth + 1;
+            if child_depth == target {
+                if (rows[vertex] & start_bit) != 0 && first_neighbor < vertex {
+                    result.count += 1;
+                    if stop_at_count != 0 && result.count >= stop_at_count {
+                        result.cutoff_reached = true;
+                        break;
+                    }
+                    if result.count >= limit {
+                        break;
+                    }
+                }
+                continue;
+            }
+            available_at[depth] = rows[vertex] & !seen & greater_mask;
+            depth = child_depth;
+        }
+        if result.count >= limit || budget_exhausted || result.cutoff_reached {
+            break;
+        }
+    }
+
+    result.complete = !budget_exhausted && !result.cutoff_reached && result.count < limit;
+    if let Some(t0) = started {
+        result.elapsed_ns = t0.elapsed().as_nanos() as u64;
+    }
+    result
+}
+
+/// Exact bit-for-bit equivalent of `count_cycles` in `cpp/sglab_score_worker.cpp`.
+pub fn count_cycles(
+    graph: &BitGraph,
+    length: u16,
+    limit: u32,
+    node_budget: u32,
+    stop_at_count: u32,
+    scratch: &mut DfsScratch,
+    measure_time: bool,
+) -> CountResult {
+    if graph.n <= 64 {
+        let g64 = BitGraph64::from_graph(graph);
+        return count_cycles_parity_u64(
+            &g64.rows,
+            g64.n,
+            length,
+            limit,
+            node_budget,
+            stop_at_count,
+            scratch,
+            measure_time,
+        );
+    }
+    let started = if measure_time {
+        Some(Instant::now())
+    } else {
+        None
+    };
+    let mut result = CountResult {
+        length,
+        ..Default::default()
+    };
+    let mut budget_exhausted = false;
+    let order = graph.n;
+    let target = length as usize;
+    let budget = node_budget as u64;
+
+    let rows = &graph.rows;
+    let seen_at = &mut scratch.seen_at;
+    let available_at = &mut scratch.available_at;
+
+    for start in 0..order {
+        let start_bit = 1u128 << start;
+        let greater_mask: u128 = if start >= 127 {
+            0
+        } else {
+            !((1u128 << (start + 1)) - 1)
+        };
+        seen_at[0] = start_bit;
+        available_at[0] = rows[start] & greater_mask;
+        result.nodes += 1;
+        if budget != 0 && result.nodes > budget {
+            budget_exhausted = true;
+            break;
+        }
+
+        let mut depth: usize = 1;
+        let mut first_neighbor: usize = 0;
+        while depth != 0 {
+            let parent_index = depth - 1;
+            let bits = available_at[parent_index];
+            if bits == 0 {
+                depth -= 1;
+                continue;
+            }
+            let vertex = bits.trailing_zeros() as usize;
+            let bit = 1u128 << vertex;
+            available_at[parent_index] = bits ^ bit;
+            if depth == 1 {
+                first_neighbor = vertex;
+            }
+            let seen = seen_at[parent_index] | bit;
+            seen_at[depth] = seen;
+            result.nodes += 1;
+            if budget != 0 && result.nodes > budget {
+                budget_exhausted = true;
+                break;
+            }
+
+            let child_depth = depth + 1;
+            if child_depth == target {
+                if (rows[vertex] & start_bit) != 0 && first_neighbor < vertex {
+                    result.count += 1;
+                    if stop_at_count != 0 && result.count >= stop_at_count {
+                        result.cutoff_reached = true;
+                        break;
+                    }
+                    if result.count >= limit {
+                        break;
+                    }
+                }
+                continue;
+            }
+            available_at[depth] = rows[vertex] & !seen & greater_mask;
+            depth = child_depth;
+        }
+        if result.count >= limit || budget_exhausted || result.cutoff_reached {
+            break;
+        }
+    }
+
+    result.complete = !budget_exhausted && !result.cutoff_reached && result.count < limit;
+    if let Some(t0) = started {
+        result.elapsed_ns = t0.elapsed().as_nanos() as u64;
+    }
+    result
+}
+
+/// Parity-exact length evaluator used by `--serve` v2 protocol.
+pub fn evaluate_lengths(
+    graph: &BitGraph,
+    lengths: &[u16],
+    cap: u32,
+    node_budget: u32,
+    cutoff: Option<Cutoff>,
+    longest_first: bool,
+    scratch: &mut DfsScratch,
+    measure_time: bool,
+) -> (bool, Vec<CountResult>) {
+    let limit = cap + 1;
+    let simplicity = graph.size();
+    let mut partial_total = 0u32;
+    let mut partial_weighted = 0u32;
+    let mut dominated = false;
+    let mut results = Vec::with_capacity(lengths.len());
+
+    for eval_idx in 0..lengths.len() {
+        let len_idx = if longest_first {
+            lengths.len() - 1 - eval_idx
+        } else {
+            eval_idx
+        };
+        let length = lengths[len_idx];
+        if let Some(co) = cutoff {
+            if co.reached(partial_total, partial_weighted, simplicity) {
+                dominated = true;
+                break;
+            }
+        }
+        let weight = (64u32 / (length as u32)).max(1);
+        let mut stop_at_count = 0u32;
+        if let Some(co) = cutoff {
+            for c in 1..=limit {
+                let bounded = c.min(cap);
+                if co.reached(
+                    partial_total + bounded,
+                    partial_weighted + bounded * weight,
+                    simplicity,
+                ) {
+                    stop_at_count = c;
+                    break;
+                }
+            }
+        }
+        let res = count_cycles(
+            graph,
+            length,
+            limit,
+            node_budget,
+            stop_at_count,
+            scratch,
+            measure_time,
+        );
+        let effective_count = if !res.complete && !res.cutoff_reached {
+            cap
+        } else {
+            res.count.min(cap)
+        };
+        partial_total += effective_count;
+        partial_weighted += effective_count * weight;
+        let hit_cutoff = res.cutoff_reached
+            || cutoff
+                .map(|co| co.reached(partial_total, partial_weighted, simplicity))
+                .unwrap_or(false);
+        results.push(res);
+        if hit_cutoff {
+            dominated = true;
+            break;
+        }
+    }
+
+    (dominated, results)
+}
+
+// ============================================================================
+// 2. ULTRA-FAST ALGORITHMIC SCORER
+// ============================================================================
+
+/// Exact analytic C4 count on u64 (zero DFS, ~0.15 us for n=64).
+#[inline]
+pub fn count_c4_u64(rows: &[u64; 64], order: usize, limit: u32, stop_at_count: u32) -> CountResult {
+    let mut count = 0u32;
+    let stop_lim = if stop_at_count != 0 {
+        stop_at_count.min(limit)
+    } else {
+        limit
+    };
+    let max_start = order.saturating_sub(3);
+    for start in 0..max_start {
+        let greater_mask = !((1u64 << (start + 1)) - 1);
+        let mut nbrs = rows[start] & greater_mask;
+        if nbrs.count_ones() < 2 {
+            continue;
+        }
+        while nbrs != 0 {
+            let a = nbrs.trailing_zeros() as usize;
+            nbrs &= nbrs - 1;
+            let ra = rows[a] & greater_mask;
+            let mut rest = nbrs;
+            while rest != 0 {
+                let c = rest.trailing_zeros() as usize;
+                rest &= rest - 1;
+                count += (ra & rows[c]).count_ones();
+                if count >= stop_lim {
+                    let cutoff_reached = stop_at_count != 0 && count >= stop_at_count;
+                    return CountResult {
+                        length: 4,
+                        count: count.min(limit),
+                        complete: false,
+                        nodes: 0,
+                        elapsed_ns: 0,
+                        cutoff_reached,
+                    };
+                }
+            }
+        }
+    }
+    CountResult {
+        length: 4,
+        count,
+        complete: count < limit,
+        nodes: 0,
+        elapsed_ns: 0,
+        cutoff_reached: false,
+    }
+}
+
+/// Exact analytic C4 count on u128.
+#[inline]
+pub fn count_c4_u128(
+    rows: &[u128; MAX_ORDER],
+    order: usize,
+    limit: u32,
+    stop_at_count: u32,
+) -> CountResult {
+    let mut count = 0u32;
+    let stop_lim = if stop_at_count != 0 {
+        stop_at_count.min(limit)
+    } else {
+        limit
+    };
+    let max_start = order.saturating_sub(3);
+    for start in 0..max_start {
+        let greater_mask = !((1u128 << (start + 1)) - 1);
+        let mut nbrs = rows[start] & greater_mask;
+        if nbrs.count_ones() < 2 {
+            continue;
+        }
+        while nbrs != 0 {
+            let a = nbrs.trailing_zeros() as usize;
+            nbrs &= nbrs - 1;
+            let ra = rows[a] & greater_mask;
+            let mut rest = nbrs;
+            while rest != 0 {
+                let c = rest.trailing_zeros() as usize;
+                rest &= rest - 1;
+                count += (ra & rows[c]).count_ones();
+                if count >= stop_lim {
+                    let cutoff_reached = stop_at_count != 0 && count >= stop_at_count;
+                    return CountResult {
+                        length: 4,
+                        count: count.min(limit),
+                        complete: false,
+                        nodes: 0,
+                        elapsed_ns: 0,
+                        cutoff_reached,
+                    };
+                }
+            }
+        }
+    }
+    CountResult {
+        length: 4,
+        count,
+        complete: count < limit,
+        nodes: 0,
+        elapsed_ns: 0,
+        cutoff_reached: false,
+    }
+}
+
+/// Exact Meet-in-the-Middle C8 counter on u64.
+pub fn count_c8_mitm_u64(
+    rows: &[u64; 64],
+    order: usize,
+    limit: u32,
+    node_budget: u32,
+    stop_at_count: u32,
+    scratch: &mut DfsScratch,
+) -> CountResult {
+    const MAX_LEFT_PATHS: usize = 64;
+
+    let mut count = 0u32;
+    let stop_lim = if stop_at_count != 0 {
+        stop_at_count.min(limit)
+    } else {
+        limit
+    };
+    let max_start = order.saturating_sub(7);
+
+    for start in 0..max_start {
+        let greater_mask = !((1u64 << (start + 1)) - 1);
+        let nbrs = rows[start] & greater_mask;
+        if nbrs.count_ones() < 2 {
+            continue;
+        }
+        let max_nbr_bit = 1u64 << (63 - nbrs.leading_zeros());
+        let mut a1_choices = nbrs ^ max_nbr_bit;
+
+        while a1_choices != 0 {
+            let a1 = a1_choices.trailing_zeros() as usize;
+            a1_choices &= a1_choices - 1;
+            let a1_bit = 1u64 << a1;
+            let gt_a1 = if a1 >= 63 { 0 } else { !((1u64 << (a1 + 1)) - 1) };
+            let b1_set = nbrs & gt_a1;
+            if b1_set == 0 {
+                continue;
+            }
+
+            let mut left_len = 0usize;
+            let mut left_mids_mask = 0u64;
+            let mut overflow = false;
+
+            let mut a2_bits = rows[a1] & greater_mask;
+            while a2_bits != 0 {
+                let a2 = a2_bits.trailing_zeros() as usize;
+                a2_bits &= a2_bits - 1;
+                let m12 = a1_bit | (1u64 << a2);
+                let mut a3_bits = rows[a2] & greater_mask & !m12;
+                while a3_bits != 0 {
+                    let a3 = a3_bits.trailing_zeros() as usize;
+                    a3_bits &= a3_bits - 1;
+                    let m123 = m12 | (1u64 << a3);
+                    let mut mid_bits = rows[a3] & greater_mask & !m123;
+                    left_mids_mask |= mid_bits;
+                    while mid_bits != 0 {
+                        if left_len >= MAX_LEFT_PATHS {
+                            overflow = true;
+                            break;
+                        }
+                        let mid = mid_bits.trailing_zeros() as u8;
+                        mid_bits &= mid_bits - 1;
+                        scratch.mitm_left_mid[left_len] = mid;
+                        scratch.mitm_left_mask[left_len] = m123;
+                        left_len += 1;
+                    }
+                    if overflow {
+                        break;
+                    }
+                }
+                if overflow {
+                    break;
+                }
+            }
+
+            if overflow {
+                return count_cycles_pruned_u64(
+                    rows,
+                    order,
+                    8,
+                    limit,
+                    node_budget,
+                    stop_at_count,
+                    scratch,
+                );
+            }
+            if left_len == 0 {
+                continue;
+            }
+
+            let mut r1 = 0u64;
+            let mut m = left_mids_mask;
+            while m != 0 {
+                let u = m.trailing_zeros() as usize;
+                m &= m - 1;
+                r1 |= rows[u];
+            }
+            r1 &= greater_mask;
+
+            let mut r2 = 0u64;
+            let mut m = r1;
+            while m != 0 {
+                let u = m.trailing_zeros() as usize;
+                m &= m - 1;
+                r2 |= rows[u];
+            }
+            r2 &= greater_mask;
+
+            let base_avail = greater_mask & !a1_bit;
+            let mut b1_bits = b1_set;
+            while b1_bits != 0 {
+                let b1 = b1_bits.trailing_zeros() as usize;
+                b1_bits &= b1_bits - 1;
+                let b1_bit = 1u64 << b1;
+                let mut b2_bits = rows[b1] & base_avail & r2;
+                while b2_bits != 0 {
+                    let b2 = b2_bits.trailing_zeros() as usize;
+                    b2_bits &= b2_bits - 1;
+                    let rb12 = b1_bit | (1u64 << b2);
+                    let mut b3_bits = rows[b2] & base_avail & !rb12 & r1;
+                    while b3_bits != 0 {
+                        let b3 = b3_bits.trailing_zeros() as usize;
+                        b3_bits &= b3_bits - 1;
+                        let rb123 = rb12 | (1u64 << b3);
+                        let mut mid_bits = rows[b3] & base_avail & !rb123 & left_mids_mask;
+                        while mid_bits != 0 {
+                            let mid = mid_bits.trailing_zeros() as u8;
+                            mid_bits &= mid_bits - 1;
+                            for i in 0..left_len {
+                                if scratch.mitm_left_mid[i] == mid
+                                    && (scratch.mitm_left_mask[i] & rb123) == 0
+                                {
+                                    count += 1;
+                                    if count >= stop_lim {
+                                        let cutoff_reached =
+                                            stop_at_count != 0 && count >= stop_at_count;
+                                        return CountResult {
+                                            length: 8,
+                                            count: count.min(limit),
+                                            complete: false,
+                                            nodes: 0,
+                                            elapsed_ns: 0,
+                                            cutoff_reached,
+                                        };
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    CountResult {
+        length: 8,
+        count,
+        complete: count < limit,
+        nodes: 0,
+        elapsed_ns: 0,
+        cutoff_reached: false,
+    }
+}
+
+/// Fast sound Posa extension + Thomason lollipop witness harvester for
+/// Hamiltonian cycles (`target == order`).
+/// If it finds `target_count` pairwise-distinct, edge-verified simple Hamiltonian
+/// cycles within a small rotation budget, that mathematically proves the true
+/// count is >= `target_count`. Otherwise returns `None` so exact DFS runs.
+fn posa_hamiltonian_fast_cert_u64(
+    rows: &[u64; 64],
+    order: usize,
+    target_count: u32,
+) -> Option<u32> {
+    if order < 8 || order > 64 || target_count == 0 || target_count > 128 {
+        return None;
+    }
+    let full_mask: u64 = if order == 64 {
+        !0u64
+    } else {
+        (1u64 << order) - 1
+    };
+
+    let mut seen_hashes = [0u128; 128];
+    let mut found = 0u32;
+    let mut path = [0u8; 64];
+    let mut pos_of = [255u8; 64];
+    let mut rng_state: u64 = 0x9e37_79b9_7f4a_7c15 ^ (order as u64);
+
+    #[inline]
+    fn fast_rand(s: &mut u64) -> u64 {
+        *s ^= *s << 13;
+        *s ^= *s >> 7;
+        *s ^= *s << 17;
+        *s
+    }
+
+    let mut total_rotations = 0usize;
+    let max_total_rotations = 5_000usize;
+
+    for restart in 0..4usize {
+        if total_rotations >= max_total_rotations {
+            break;
+        }
+        // Phase 1: Build a Hamiltonian path via Warnsdorff + Posa extension + subcycle opening.
+        let start = (restart * 13) % order;
+        path[0] = start as u8;
+        let mut len = 1usize;
+        let mut in_path: u64 = 1u64 << start;
+        pos_of.fill(255);
+        pos_of[start] = 0;
+
+        let mut local_stuck = 0usize;
+        let mut prev_tail_p1: usize = usize::MAX;
+        while len < order && total_rotations < max_total_rotations && local_stuck < 200 {
+            let tail = path[len - 1] as usize;
+            let unvis = rows[tail] & !in_path;
+            if unvis != 0 {
+                let mut best_v = unvis.trailing_zeros() as usize;
+                let mut best_d = (rows[best_v] & !in_path).count_ones();
+                let mut b = unvis & (unvis - 1);
+                while b != 0 {
+                    let v = b.trailing_zeros() as usize;
+                    b &= b - 1;
+                    let d = (rows[v] & !in_path).count_ones();
+                    if d < best_d {
+                        best_d = d;
+                        best_v = v;
+                    }
+                }
+                path[len] = best_v as u8;
+                pos_of[best_v] = len as u8;
+                in_path |= 1u64 << best_v;
+                len += 1;
+                local_stuck = 0;
+                prev_tail_p1 = usize::MAX;
+                continue;
+            }
+            let head = path[0] as usize;
+            if (rows[head] & !in_path) != 0 {
+                path[..len].reverse();
+                for idx in 0..len {
+                    pos_of[path[idx] as usize] = idx as u8;
+                }
+                prev_tail_p1 = usize::MAX;
+                continue;
+            }
+            // If current path is a closed subcycle (len < order), rotate it so a vertex
+            // with an unvisited neighbor becomes tail -> guaranteed extension!
+            if len >= 3 && (rows[tail] & (1u64 << head)) != 0 {
+                let mut ext_idx = None;
+                for idx in 0..len {
+                    if (rows[path[idx] as usize] & !in_path) != 0 {
+                        ext_idx = Some(idx);
+                        break;
+                    }
+                }
+                if let Some(idx) = ext_idx {
+                    let shift = (idx + 1) % len;
+                    if shift != 0 {
+                        path[..len].rotate_left(shift);
+                        for k in 0..len {
+                            pos_of[path[k] as usize] = k as u8;
+                        }
+                    }
+                    prev_tail_p1 = usize::MAX;
+                    continue;
+                } else {
+                    break; // Disconnected component
+                }
+            }
+            // Non-backtracking Posa rotation on tail.
+            let mut nbrs = rows[tail] & in_path;
+            if len >= 2 {
+                nbrs &= !(1u64 << path[len - 2]);
+            }
+            if nbrs == 0 {
+                break;
+            }
+            let mut chosen_pos = None;
+            let mut fallback = [0usize; 8];
+            let mut fb_len = 0usize;
+            while nbrs != 0 {
+                let u = nbrs.trailing_zeros() as usize;
+                nbrs &= nbrs - 1;
+                let p = pos_of[u] as usize;
+                if p + 1 < len {
+                    let new_tail = path[p + 1] as usize;
+                    if (rows[new_tail] & !in_path) != 0 {
+                        chosen_pos = Some(p);
+                        break;
+                    }
+                    if new_tail != prev_tail_p1 && fb_len < fallback.len() {
+                        fallback[fb_len] = p;
+                        fb_len += 1;
+                    }
+                }
+            }
+            let rot_p = match chosen_pos {
+                Some(p) => p,
+                None if fb_len > 0 => fallback[(fast_rand(&mut rng_state) as usize) % fb_len],
+                None => break,
+            };
+            prev_tail_p1 = tail;
+            path[(rot_p + 1)..len].reverse();
+            for idx in (rot_p + 1)..len {
+                pos_of[path[idx] as usize] = idx as u8;
+            }
+            total_rotations += 1;
+            local_stuck += 1;
+        }
+
+        if len < order || in_path != full_mask {
+            continue;
+        }
+
+        // Compute initial path edge hash once; maintained in O(1) per Posa rotation!
+        let mut path_hash = 0u128;
+        for i in 0..(order - 1) {
+            path_hash ^= zobrist_edge((path[i], path[i + 1]));
+        }
+
+        // Phase 2: Thomason lollipop walks with incremental O(1) edge hashing.
+        let mut since_found = 0usize;
+        let mut walk_steps = 0usize;
+        let mut prev_tail: usize = usize::MAX;
+        let mut cycle_basis = [0u8; 64];
+        let mut cycle_basis_hash = 0u128;
+        let mut have_cycle = false;
+
+        while total_rotations < max_total_rotations && since_found < 320 {
+            let head = path[0] as usize;
+            let tail = path[order - 1] as usize;
+            let is_closed = (rows[tail] & (1u64 << head)) != 0;
+            let timed_out = !is_closed && have_cycle && walk_steps >= 80;
+
+            if is_closed {
+                let h = path_hash ^ zobrist_edge((path[order - 1], path[0]));
+                let mut dup = false;
+                for j in 0..(found as usize) {
+                    if seen_hashes[j] == h {
+                        dup = true;
+                        break;
+                    }
+                }
+                if !dup {
+                    debug_assert!({
+                        let mut ok = true;
+                        for i in 0..order {
+                            if (rows[path[i] as usize] & (1u64 << path[(i + 1) % order])) == 0 {
+                                ok = false;
+                                break;
+                            }
+                        }
+                        ok
+                    });
+                    seen_hashes[found as usize] = h;
+                    found += 1;
+                    since_found = 0;
+                    cycle_basis = path;
+                    cycle_basis_hash = h;
+                    have_cycle = true;
+                    if found >= target_count {
+                        return Some(found);
+                    }
+                }
+            }
+
+            if is_closed || timed_out {
+                // On timeout, ALWAYS reset to the verified closed `cycle_basis`!
+                // On closed cycle, stay on the newly closed cycle (or jump to cycle_basis).
+                let base_cycle_hash = if timed_out {
+                    path = cycle_basis;
+                    cycle_basis_hash
+                } else {
+                    path_hash ^ zobrist_edge((path[order - 1], path[0]))
+                };
+                if (fast_rand(&mut rng_state) & 1) != 0 {
+                    path[..order].reverse();
+                }
+                let shift = 1 + ((fast_rand(&mut rng_state) as usize) % (order - 1));
+                path[..order].rotate_left(shift);
+                for idx in 0..order {
+                    pos_of[path[idx] as usize] = idx as u8;
+                }
+                // Opening edge (new_tail, new_head) removes that edge from the cycle hash.
+                let new_tail = path[order - 1] as usize;
+                let new_head = path[0] as usize;
+                path_hash = base_cycle_hash ^ zobrist_edge((new_tail as u8, new_head as u8));
+
+                let mut open_nbrs =
+                    rows[new_tail] & !((1u64 << path[order - 2]) | (1u64 << new_head));
+                let mut open_p = None;
+                while open_nbrs != 0 {
+                    let u = open_nbrs.trailing_zeros() as usize;
+                    open_nbrs &= open_nbrs - 1;
+                    let p = pos_of[u] as usize;
+                    if p > 0 && p + 1 < order {
+                        open_p = Some(p);
+                        break;
+                    }
+                }
+                if let Some(p) = open_p {
+                    let u = path[p];
+                    let nxt = path[p + 1];
+                    path_hash ^= zobrist_edge((u, nxt)) ^ zobrist_edge((u, new_tail as u8));
+                    prev_tail = new_tail;
+                    walk_steps = 1;
+                    path[(p + 1)..order].reverse();
+                    for idx in (p + 1)..order {
+                        pos_of[path[idx] as usize] = idx as u8;
+                    }
+                    total_rotations += 1;
+                    since_found += 1;
+                    continue;
+                } else {
+                    break;
+                }
+            }
+
+            // Non-backtracking Thomason lollipop step.
+            let mut nbrs = rows[tail] & !((1u64 << path[order - 2]) | (1u64 << head));
+            let mut chosen = None;
+            let mut candidates = [0usize; 8];
+            let mut cand_len = 0usize;
+            while nbrs != 0 {
+                let u = nbrs.trailing_zeros() as usize;
+                nbrs &= nbrs - 1;
+                let p = pos_of[u] as usize;
+                if p > 0 && p + 1 < order {
+                    let new_tail = path[p + 1] as usize;
+                    if new_tail == prev_tail {
+                        continue;
+                    }
+                    if (rows[new_tail] & (1u64 << head)) != 0 {
+                        chosen = Some(p);
+                        break;
+                    }
+                    if cand_len < candidates.len() {
+                        candidates[cand_len] = p;
+                        cand_len += 1;
+                    }
+                }
+            }
+            let rot_p = if let Some(p) = chosen {
+                p
+            } else if cand_len > 0 {
+                candidates[(fast_rand(&mut rng_state) as usize) % cand_len]
+            } else {
+                path[..order].reverse();
+                for idx in 0..order {
+                    pos_of[path[idx] as usize] = idx as u8;
+                }
+                prev_tail = usize::MAX;
+                walk_steps += 1;
+                since_found += 1;
+                continue;
+            };
+            let u = path[rot_p];
+            let nxt = path[rot_p + 1];
+            path_hash ^= zobrist_edge((u, nxt)) ^ zobrist_edge((u, tail as u8));
+            prev_tail = tail;
+            walk_steps += 1;
+            path[(rot_p + 1)..order].reverse();
+            for idx in (rot_p + 1)..order {
+                pos_of[path[idx] as usize] = idx as u8;
+            }
+            total_rotations += 1;
+            since_found += 1;
+        }
+    }
+
+    None
+}
+
+/// Bitset connectivity check on `unvisited` starting from `seed` (at least one
+/// vertex in `unvisited`). Returns true iff all bits of `unvisited` are connected.
+#[inline]
+fn is_subset_connected_u64(rows: &[u64; 64], unvisited: u64, seed: u64) -> bool {
+    let mut seen = seed;
+    let mut frontier = seed;
+    while frontier != 0 {
+        let mut next = 0u64;
+        let mut f = frontier;
+        while f != 0 {
+            let u = f.trailing_zeros() as usize;
+            f &= f - 1;
+            next |= rows[u];
+        }
+        frontier = (next & unvisited) & !seen;
+        seen |= frontier;
+    }
+    seen == unvisited
+}
+
+/// Ultra-fast 2-bit register-only Hamiltonian counter for max-degree <= 3 graphs
+/// (e.g. all connected cubic graphs up to n=64!).
+/// Stores unvisited degree of ALL 64 vertices in two u64 registers `(hi, lo)`,
+/// eliminating all per-node array loops and backtracking restoration, while
+/// adding Warnsdorff minimum-degree ordering and periodic connectivity pruning!
+fn count_hamiltonian_cubic_u64(
+    rows: &[u64; 64],
+    order: usize,
+    limit: u32,
+    node_budget: u32,
+    stop_at_count: u32,
+) -> CountResult {
+    let mut count = 0u32;
+    let mut nodes = 0u64;
+    let mut budget_exhausted = false;
+    let mut cutoff_reached = false;
+    let budget = node_budget as u64;
+    let stop_lim = if stop_at_count != 0 {
+        stop_at_count.min(limit)
+    } else {
+        limit
+    };
+
+    let full_mask: u64 = if order == 64 {
+        !0u64
+    } else {
+        (1u64 << order) - 1
+    };
+    let nbrs = rows[0];
+    if nbrs.count_ones() < 2 {
+        return CountResult {
+            length: order as u16,
+            complete: true,
+            ..Default::default()
+        };
+    }
+
+    struct CubicHamState<'a> {
+        rows: &'a [u64; 64],
+        closing_set: u64,
+        count: u32,
+        nodes: u64,
+        budget: u64,
+        stop_lim: u32,
+        stop_at_count: u32,
+        budget_exhausted: bool,
+        cutoff_reached: bool,
+    }
+
+    fn dfs_cubic(
+        st: &mut CubicHamState<'_>,
+        vertex: usize,
+        unvisited: u64,
+        rem_left: usize,
+        hi: u64,
+        lo: u64,
+        mut next_avail: u64,
+    ) {
+        if rem_left == 1 {
+            if (st.rows[vertex] & st.closing_set & unvisited) != 0 {
+                st.count += 1;
+                if st.count >= st.stop_lim {
+                    st.cutoff_reached = st.stop_at_count != 0 && st.count >= st.stop_at_count;
+                }
+            }
+            return;
+        }
+
+        let rem_closing = st.closing_set & unvisited;
+        if rem_closing == 0 {
+            return;
+        }
+        if (rem_closing & (rem_closing - 1)) == 0 {
+            next_avail &= !rem_closing;
+            if next_avail == 0 {
+                return;
+            }
+        }
+
+        // Warnsdorff ordering: if two choices exist, explore the lower-degree vertex first!
+        let mut ordered = [0usize; 3];
+        let mut ord_len = 0usize;
+        // First push vertices with deg <= 2 (bit !(hi & lo)), then deg == 3 (hi & lo).
+        let low_deg = next_avail & !(hi & lo);
+        let high_deg = next_avail & (hi & lo);
+        let mut b = low_deg;
+        while b != 0 {
+            let v = b.trailing_zeros() as usize;
+            b &= b - 1;
+            ordered[ord_len] = v;
+            ord_len += 1;
+        }
+        let mut b = high_deg;
+        while b != 0 {
+            let v = b.trailing_zeros() as usize;
+            b &= b - 1;
+            ordered[ord_len] = v;
+            ord_len += 1;
+        }
+
+        for i in 0..ord_len {
+            let v = ordered[i];
+            let v_bit = 1u64 << v;
+            let next_unvisited = unvisited ^ v_bit;
+
+            st.nodes += 1;
+            if st.budget != 0 && st.nodes > st.budget {
+                st.budget_exhausted = true;
+                return;
+            }
+
+            if rem_left == 2 {
+                if (st.rows[v] & st.closing_set & next_unvisited) != 0 {
+                    st.count += 1;
+                    if st.count >= st.stop_lim {
+                        st.cutoff_reached =
+                            st.stop_at_count != 0 && st.count >= st.stop_at_count;
+                        return;
+                    }
+                }
+                continue;
+            }
+
+            // Subtract 1 from 2-bit degree counters (hi, lo) for all w in adj_u — ZERO LOOPS!
+            let adj_u = st.rows[v] & next_unvisited;
+            let borrow = adj_u & !lo;
+            let new_lo = lo ^ adj_u;
+            let new_hi = hi ^ borrow;
+
+            // Any neighbor in adj_u dropping to degree 0 is immediately fatal (rem_left - 1 >= 2).
+            if (adj_u & !(new_hi | new_lo)) != 0 {
+                continue;
+            }
+            // Any non-closing neighbor dropping to degree 1 is FORCED to be visited next!
+            let forced = adj_u & !st.closing_set & !new_hi & new_lo;
+            if (forced & forced.wrapping_sub(1)) != 0 {
+                // Two forced vertices simultaneously -> impossible!
+                continue;
+            }
+            let child_avail = if forced != 0 { forced } else { adj_u };
+            if child_avail != 0 {
+                dfs_cubic(
+                    st,
+                    v,
+                    next_unvisited,
+                    rem_left - 1,
+                    new_hi,
+                    new_lo,
+                    child_avail,
+                );
+                if st.budget_exhausted || st.cutoff_reached || st.count >= st.stop_lim {
+                    return;
+                }
+            }
+        }
+    }
+
+    let max_nbr_bit = 1u64 << (63 - nbrs.leading_zeros());
+    let mut first_choices = nbrs ^ max_nbr_bit;
+
+    while first_choices != 0 {
+        let first = first_choices.trailing_zeros() as usize;
+        first_choices &= first_choices - 1;
+        let first_bit = 1u64 << first;
+        let gt_first = if first >= 63 {
+            0
+        } else {
+            !((1u64 << (first + 1)) - 1)
+        };
+        let closing_set = nbrs & gt_first;
+        if closing_set == 0 {
+            continue;
+        }
+
+        let unvisited = full_mask ^ (1u64 | first_bit);
+        let adj_first = rows[first] & unvisited;
+        if adj_first == 0 {
+            continue;
+        }
+
+        let mut hi = 0u64;
+        let mut lo = 0u64;
+        let mut feasible = true;
+        let mut forced = 0u64;
+        let mut rem_bits = unvisited;
+        while rem_bits != 0 {
+            let u = rem_bits.trailing_zeros() as usize;
+            rem_bits &= rem_bits - 1;
+            let d = (rows[u] & unvisited).count_ones();
+            let u_bit = 1u64 << u;
+            if (d & 1) != 0 {
+                lo |= u_bit;
+            }
+            if (d & 2) != 0 {
+                hi |= u_bit;
+            }
+            if (closing_set & u_bit) == 0 {
+                if (adj_first & u_bit) == 0 {
+                    if d < 2 {
+                        feasible = false;
+                        break;
+                    }
+                } else if d == 0 {
+                    feasible = false;
+                    break;
+                } else if d == 1 {
+                    forced |= u_bit;
+                }
+            } else if d == 0 {
+                feasible = false;
+                break;
+            }
+        }
+        if !feasible || (forced & forced.wrapping_sub(1)) != 0 {
+            continue;
+        }
+        if !is_subset_connected_u64(rows, unvisited, closing_set & closing_set.wrapping_neg()) {
+            continue;
+        }
+
+        let init_avail = if forced != 0 { forced } else { adj_first };
+        let mut st = CubicHamState {
+            rows,
+            closing_set,
+            count,
+            nodes,
+            budget,
+            stop_lim,
+            stop_at_count,
+            budget_exhausted,
+            cutoff_reached,
+        };
+        dfs_cubic(&mut st, first, unvisited, order - 2, hi, lo, init_avail);
+        count = st.count;
+        nodes = st.nodes;
+        budget_exhausted = st.budget_exhausted;
+        cutoff_reached = st.cutoff_reached;
+
+        if count >= stop_lim || budget_exhausted || cutoff_reached {
+            break;
+        }
+    }
+
+    CountResult {
+        length: order as u16,
+        count: count.min(limit),
+        complete: !budget_exhausted && !cutoff_reached && count < limit,
+        nodes,
+        elapsed_ns: 0,
+        cutoff_reached,
+    }
+}
+
+/// Exact forced-vertex & dead-end pruned Hamiltonian cycle counter (`target == order`, n <= 64).
+pub fn count_hamiltonian_u64(
+    rows: &[u64; 64],
+    order: usize,
+    limit: u32,
+    node_budget: u32,
+    stop_at_count: u32,
+) -> CountResult {
+    let stop_lim = if stop_at_count != 0 {
+        stop_at_count.min(limit)
+    } else {
+        limit
+    };
+    // For large Hamiltonian targets (e.g. C64 on n=64), try ultra-fast sound
+    // Posa rotation harvesting first: proves `count >= stop_lim` in ~15 us when
+    // Hamiltonian cycles are abundant, and falls back to exact DFS otherwise!
+    if order >= 48 && stop_lim <= 128 {
+        if let Some(found) = posa_hamiltonian_fast_cert_u64(rows, order, stop_lim) {
+            return CountResult {
+                length: order as u16,
+                count: found.min(limit),
+                complete: false,
+                nodes: 0,
+                elapsed_ns: 0,
+                cutoff_reached: stop_at_count != 0 && found >= stop_at_count,
+            };
+        }
+    }
+    if order >= 4 && order <= 64 {
+        let mut max_deg = 0u32;
+        for u in 0..order {
+            let d = rows[u].count_ones();
+            if d > max_deg {
+                max_deg = d;
+            }
+        }
+        if max_deg <= 3 {
+            return count_hamiltonian_cubic_u64(rows, order, limit, node_budget, stop_at_count);
+        }
+    }
+    let mut count = 0u32;
+    let mut nodes = 0u64;
+    let mut budget_exhausted = false;
+    let mut cutoff_reached = false;
+    let budget = node_budget as u64;
+    let stop_lim = if stop_at_count != 0 {
+        stop_at_count.min(limit)
+    } else {
+        limit
+    };
+
+    if order < 4 || order > 64 {
+        return CountResult {
+            length: order as u16,
+            complete: true,
+            ..Default::default()
+        };
+    }
+
+    let full_mask: u64 = if order == 64 {
+        !0u64
+    } else {
+        (1u64 << order) - 1
+    };
+    let nbrs = rows[0];
+    if nbrs.count_ones() < 2 {
+        return CountResult {
+            length: order as u16,
+            complete: true,
+            ..Default::default()
+        };
+    }
+
+    struct HamState<'a> {
+        rows: &'a [u64; 64],
+        closing_set: u64,
+        deg: [u8; 64],
+        count: u32,
+        nodes: u64,
+        budget: u64,
+        stop_lim: u32,
+        stop_at_count: u32,
+        budget_exhausted: bool,
+        cutoff_reached: bool,
+    }
+
+    fn ham_dfs(st: &mut HamState<'_>, vertex: usize, unvisited: u64, rem_left: usize, mut next_avail: u64) {
+        if rem_left == 1 {
+            // Only 1 unvisited vertex remains; it must be adjacent to vertex AND in closing_set!
+            if (st.rows[vertex] & st.closing_set & unvisited) != 0 {
+                st.count += 1;
+                if st.count >= st.stop_lim {
+                    st.cutoff_reached = st.stop_at_count != 0 && st.count >= st.stop_at_count;
+                }
+            }
+            return;
+        }
+
+        // If only 1 closing vertex remains unvisited and rem_left > 1, we cannot visit it early.
+        let rem_closing = st.closing_set & unvisited;
+        if rem_closing == 0 {
+            return;
+        }
+        if (rem_closing & (rem_closing - 1)) == 0 {
+            next_avail &= !rem_closing;
+        }
+
+        while next_avail != 0 {
+            let v = next_avail.trailing_zeros() as usize;
+            next_avail &= next_avail - 1;
+            let v_bit = 1u64 << v;
+            let next_unvisited = unvisited ^ v_bit;
+
+            st.nodes += 1;
+            if st.budget != 0 && st.nodes > st.budget {
+                st.budget_exhausted = true;
+                return;
+            }
+
+            if rem_left == 2 {
+                // Only 1 vertex left in next_unvisited!
+                if (st.rows[v] & st.closing_set & next_unvisited) != 0 {
+                    st.count += 1;
+                    if st.count >= st.stop_lim {
+                        st.cutoff_reached =
+                            st.stop_at_count != 0 && st.count >= st.stop_at_count;
+                        return;
+                    }
+                }
+                continue;
+            }
+
+            // Decrement deg for all unvisited neighbors of v; detect dead-ends and forced moves.
+            let adj_u = st.rows[v] & next_unvisited;
+            let mut dead = false;
+            let mut forced: u64 = 0;
+            let mut bits = adj_u;
+            while bits != 0 {
+                let w = bits.trailing_zeros() as usize;
+                bits &= bits - 1;
+                st.deg[w] -= 1;
+                let d = st.deg[w];
+                let w_bit = 1u64 << w;
+                if (st.closing_set & w_bit) == 0 {
+                    if d == 0 {
+                        dead = true;
+                    } else if d == 1 {
+                        forced |= w_bit;
+                    }
+                } else if d == 0 {
+                    // rem_left - 1 >= 2, so a closing vertex with deg 0 in next_unvisited cannot be reached.
+                    dead = true;
+                }
+            }
+
+            if !dead && (forced & (forced.wrapping_sub(1))) == 0 {
+                let child_avail = if forced != 0 { forced } else { adj_u };
+                if child_avail != 0 {
+                    ham_dfs(st, v, next_unvisited, rem_left - 1, child_avail);
+                }
+            }
+
+            // Restore deg for backtracking.
+            let mut bits = adj_u;
+            while bits != 0 {
+                let w = bits.trailing_zeros() as usize;
+                bits &= bits - 1;
+                st.deg[w] += 1;
+            }
+
+            if st.budget_exhausted || st.cutoff_reached || st.count >= st.stop_lim {
+                return;
+            }
+        }
+    }
+
+    let max_nbr_bit = 1u64 << (63 - nbrs.leading_zeros());
+    let mut first_choices = nbrs ^ max_nbr_bit;
+
+    while first_choices != 0 {
+        let first = first_choices.trailing_zeros() as usize;
+        first_choices &= first_choices - 1;
+        let first_bit = 1u64 << first;
+        let gt_first = if first >= 63 {
+            0
+        } else {
+            !((1u64 << (first + 1)) - 1)
+        };
+        let closing_set = nbrs & gt_first;
+        if closing_set == 0 {
+            continue;
+        }
+
+        let unvisited = full_mask ^ (1u64 | first_bit);
+        let adj_first = rows[first] & unvisited;
+        if adj_first == 0 {
+            continue;
+        }
+
+        let mut deg = [0u8; 64];
+        let mut feasible = true;
+        let mut forced = 0u64;
+        let mut rem_bits = unvisited;
+        while rem_bits != 0 {
+            let u = rem_bits.trailing_zeros() as usize;
+            rem_bits &= rem_bits - 1;
+            let d = (rows[u] & unvisited).count_ones() as u8;
+            deg[u] = d;
+            let u_bit = 1u64 << u;
+            if (closing_set & u_bit) == 0 {
+                if (adj_first & u_bit) == 0 {
+                    if d < 2 {
+                        feasible = false;
+                        break;
+                    }
+                } else if d == 0 {
+                    feasible = false;
+                    break;
+                } else if d == 1 {
+                    forced |= u_bit;
+                }
+            } else if d == 0 {
+                feasible = false;
+                break;
+            }
+        }
+        if !feasible || (forced & (forced.wrapping_sub(1))) != 0 {
+            continue;
+        }
+
+        let init_avail = if forced != 0 { forced } else { adj_first };
+        let mut st = HamState {
+            rows,
+            closing_set,
+            deg,
+            count,
+            nodes,
+            budget,
+            stop_lim,
+            stop_at_count,
+            budget_exhausted,
+            cutoff_reached,
+        };
+        ham_dfs(&mut st, first, unvisited, order - 2, init_avail);
+        count = st.count;
+        nodes = st.nodes;
+        budget_exhausted = st.budget_exhausted;
+        cutoff_reached = st.cutoff_reached;
+
+        if count >= stop_lim || budget_exhausted || cutoff_reached {
+            break;
+        }
+    }
+
+    CountResult {
+        length: order as u16,
+        count: count.min(limit),
+        complete: !budget_exhausted && !cutoff_reached && count < limit,
+        nodes,
+        elapsed_ns: 0,
+        cutoff_reached,
+    }
+}
+
+/// Register-resident recursive u64 DFS with pre-filled `dist_mask` and
+/// 2-level `popcnt` leaf collapse (`rem == 2`) for C16, C32, etc.
+pub fn count_cycles_pruned_u64(
+    rows: &[u64; 64],
+    order: usize,
+    length: u16,
+    limit: u32,
+    node_budget: u32,
+    stop_at_count: u32,
+    scratch: &mut DfsScratch,
+) -> CountResult {
+    let target = length as usize;
+    if target < 4 || target > order {
+        return CountResult {
+            length,
+            complete: true,
+            ..Default::default()
+        };
+    }
+    if target == order {
+        return count_hamiltonian_u64(rows, order, limit, node_budget, stop_at_count);
+    }
+
+    struct PrunedState<'a> {
+        rows: &'a [u64; 64],
+        dist_mask: &'a [u64; 65],
+        adj_to_closing: u64,
+        closing_set: u64,
+        count: u32,
+        nodes: u64,
+        budget: u64,
+        stop_lim: u32,
+        stop_at_count: u32,
+        budget_exhausted: bool,
+        cutoff_reached: bool,
+    }
+
+    fn dfs(st: &mut PrunedState<'_>, vertex: usize, seen: u64, rem: usize) {
+        if rem == 2 {
+            // Two edges left: vertex -> w -> last (in closing_set) -> start.
+            let closing_avail = st.closing_set & !seen;
+            if closing_avail == 0 {
+                return;
+            }
+            let mut w_bits = st.rows[vertex] & !seen & st.adj_to_closing;
+            while w_bits != 0 {
+                let w = w_bits.trailing_zeros() as usize;
+                w_bits &= w_bits - 1;
+                // rows[w] has no self-loop, so bit w is already 0 in rows[w]!
+                let c = (st.rows[w] & closing_avail).count_ones();
+                if c != 0 {
+                    st.count += c;
+                    if st.count >= st.stop_lim {
+                        st.cutoff_reached =
+                            st.stop_at_count != 0 && st.count >= st.stop_at_count;
+                        return;
+                    }
+                }
+            }
+            return;
+        }
+
+        let mut next_bits = st.rows[vertex] & !seen & st.dist_mask[rem];
+        let next_rem = rem - 1;
+        while next_bits != 0 {
+            let v = next_bits.trailing_zeros() as usize;
+            next_bits &= next_bits - 1;
+            st.nodes += 1;
+            if st.budget != 0 && st.nodes > st.budget {
+                st.budget_exhausted = true;
+                return;
+            }
+            let next_seen = seen | (1u64 << v);
+            if (st.closing_set & !next_seen) == 0 {
+                continue;
+            }
+            dfs(st, v, next_seen, next_rem);
+            if st.budget_exhausted || st.cutoff_reached || st.count >= st.stop_lim {
+                return;
+            }
+        }
+    }
+
+    let mut count = 0u32;
+    let mut nodes = 0u64;
+    let mut budget_exhausted = false;
+    let mut cutoff_reached = false;
+    let budget = node_budget as u64;
+    let stop_lim = if stop_at_count != 0 {
+        stop_at_count.min(limit)
+    } else {
+        limit
+    };
+
+    let dist_mask = &mut scratch.dist_mask64;
+    let max_start = order - target + 1;
+    let max_r = target - 2;
+
+    for start in 0..max_start {
+        let start_bit = 1u64 << start;
+        let greater_mask = !((1u64 << (start + 1)) - 1);
+        let nbrs = rows[start] & greater_mask;
+        if nbrs.count_ones() < 2 {
+            continue;
+        }
+        let max_nbr_bit = 1u64 << (63 - nbrs.leading_zeros());
+        let mut first_choices = nbrs ^ max_nbr_bit;
+
+        while first_choices != 0 {
+            let first = first_choices.trailing_zeros() as usize;
+            first_choices &= first_choices - 1;
+            let first_bit = 1u64 << first;
+            let gt_first = if first >= 63 {
+                0
+            } else {
+                !((1u64 << (first + 1)) - 1)
+            };
+            let closing_set = nbrs & gt_first;
+            if closing_set == 0 {
+                continue;
+            }
+
+            // Build cumulative distance masks inside `greater_mask & !first_bit`
+            // and pre-fill up to `max_r` so DFS has zero bounds branch!
+            let allowed_domain = greater_mask & !first_bit;
+            let mut reached = closing_set;
+            let mut frontier = closing_set;
+            let mut adj_to_closing = 0u64;
+            dist_mask[1] = reached;
+            let mut built_r = 1usize;
+            while built_r < max_r && frontier != 0 {
+                let mut next = 0u64;
+                let mut f = frontier;
+                while f != 0 {
+                    let u = f.trailing_zeros() as usize;
+                    f &= f - 1;
+                    next |= rows[u];
+                }
+                if built_r == 1 {
+                    adj_to_closing = next & allowed_domain;
+                }
+                frontier = (next & allowed_domain) & !reached;
+                reached |= frontier;
+                built_r += 1;
+                dist_mask[built_r] = reached;
+            }
+            for r in (built_r + 1)..=max_r {
+                dist_mask[r] = reached;
+            }
+
+            if adj_to_closing == 0 || (rows[first] & dist_mask[max_r]) == 0 {
+                continue;
+            }
+
+            let mut st = PrunedState {
+                rows,
+                dist_mask,
+                adj_to_closing,
+                closing_set,
+                count,
+                nodes,
+                budget,
+                stop_lim,
+                stop_at_count,
+                budget_exhausted,
+                cutoff_reached,
+            };
+            dfs(&mut st, first, start_bit | first_bit, max_r);
+            count = st.count;
+            nodes = st.nodes;
+            budget_exhausted = st.budget_exhausted;
+            cutoff_reached = st.cutoff_reached;
+
+            if count >= stop_lim || budget_exhausted || cutoff_reached {
+                break;
+            }
+        }
+        if count >= stop_lim || budget_exhausted || cutoff_reached {
+            break;
+        }
+    }
+
+    CountResult {
+        length,
+        count: count.min(limit),
+        complete: !budget_exhausted && !cutoff_reached && count < limit,
+        nodes,
+        elapsed_ns: 0,
+        cutoff_reached,
+    }
+}
+
+/// Register-resident recursive u128 DFS with pre-filled `dist_mask` and
+/// 2-level `popcnt` leaf collapse for n > 64.
+pub fn count_cycles_pruned_u128(
+    rows: &[u128; MAX_ORDER],
+    order: usize,
+    length: u16,
+    limit: u32,
+    node_budget: u32,
+    stop_at_count: u32,
+    scratch: &mut DfsScratch,
+) -> CountResult {
+    let target = length as usize;
+    if target < 4 || target > order {
+        return CountResult {
+            length,
+            complete: true,
+            ..Default::default()
+        };
+    }
+
+    struct PrunedState128<'a> {
+        rows: &'a [u128; MAX_ORDER],
+        dist_mask: &'a [u128; MAX_ORDER + 1],
+        closing_set: u128,
+        count: u32,
+        nodes: u64,
+        budget: u64,
+        stop_lim: u32,
+        stop_at_count: u32,
+        budget_exhausted: bool,
+        cutoff_reached: bool,
+    }
+
+    fn dfs128(st: &mut PrunedState128<'_>, vertex: usize, seen: u128, rem: usize) {
+        if rem == 2 {
+            let closing_avail = st.closing_set & !seen;
+            if closing_avail == 0 {
+                return;
+            }
+            let mut w_bits = st.rows[vertex] & !seen & st.dist_mask[2];
+            while w_bits != 0 {
+                let w = w_bits.trailing_zeros() as usize;
+                w_bits &= w_bits - 1;
+                let c = (st.rows[w] & closing_avail).count_ones();
+                if c != 0 {
+                    st.count += c;
+                    if st.count >= st.stop_lim {
+                        st.cutoff_reached =
+                            st.stop_at_count != 0 && st.count >= st.stop_at_count;
+                        return;
+                    }
+                }
+            }
+            return;
+        }
+
+        let mut next_bits = st.rows[vertex] & !seen & st.dist_mask[rem];
+        let next_rem = rem - 1;
+        while next_bits != 0 {
+            let v = next_bits.trailing_zeros() as usize;
+            next_bits &= next_bits - 1;
+            st.nodes += 1;
+            if st.budget != 0 && st.nodes > st.budget {
+                st.budget_exhausted = true;
+                return;
+            }
+            let next_seen = seen | (1u128 << v);
+            if (st.closing_set & !next_seen) == 0 {
+                continue;
+            }
+            dfs128(st, v, next_seen, next_rem);
+            if st.budget_exhausted || st.cutoff_reached || st.count >= st.stop_lim {
+                return;
+            }
+        }
+    }
+
+    let mut count = 0u32;
+    let mut nodes = 0u64;
+    let mut budget_exhausted = false;
+    let mut cutoff_reached = false;
+    let budget = node_budget as u64;
+    let stop_lim = if stop_at_count != 0 {
+        stop_at_count.min(limit)
+    } else {
+        limit
+    };
+
+    let dist_mask = &mut scratch.dist_mask128;
+    let max_start = order - target + 1;
+    let max_r = target - 2;
+
+    for start in 0..max_start {
+        let start_bit = 1u128 << start;
+        let greater_mask = !((1u128 << (start + 1)) - 1);
+        let nbrs = rows[start] & greater_mask;
+        if nbrs.count_ones() < 2 {
+            continue;
+        }
+        let max_nbr_bit = 1u128 << (127 - nbrs.leading_zeros());
+        let mut first_choices = nbrs ^ max_nbr_bit;
+
+        while first_choices != 0 {
+            let first = first_choices.trailing_zeros() as usize;
+            first_choices &= first_choices - 1;
+            let first_bit = 1u128 << first;
+            let gt_first = if first >= 127 {
+                0
+            } else {
+                !((1u128 << (first + 1)) - 1)
+            };
+            let closing_set = nbrs & gt_first;
+            if closing_set == 0 {
+                continue;
+            }
+
+            let allowed_domain = greater_mask & !first_bit;
+            let mut reached = closing_set;
+            let mut frontier = closing_set;
+            dist_mask[1] = reached;
+            let mut built_r = 1usize;
+            while built_r < max_r && frontier != 0 {
+                let mut next = 0u128;
+                let mut f = frontier;
+                while f != 0 {
+                    let u = f.trailing_zeros() as usize;
+                    f &= f - 1;
+                    next |= rows[u];
+                }
+                frontier = (next & allowed_domain) & !reached;
+                reached |= frontier;
+                built_r += 1;
+                dist_mask[built_r] = reached;
+            }
+            for r in (built_r + 1)..=max_r {
+                dist_mask[r] = reached;
+            }
+
+            if (rows[first] & dist_mask[max_r]) == 0 {
+                continue;
+            }
+
+            let mut st = PrunedState128 {
+                rows,
+                dist_mask,
+                closing_set,
+                count,
+                nodes,
+                budget,
+                stop_lim,
+                stop_at_count,
+                budget_exhausted,
+                cutoff_reached,
+            };
+            dfs128(&mut st, first, start_bit | first_bit, max_r);
+            count = st.count;
+            nodes = st.nodes;
+            budget_exhausted = st.budget_exhausted;
+            cutoff_reached = st.cutoff_reached;
+
+            if count >= stop_lim || budget_exhausted || cutoff_reached {
+                break;
+            }
+        }
+        if count >= stop_lim || budget_exhausted || cutoff_reached {
+            break;
+        }
+    }
+
+    CountResult {
+        length,
+        count: count.min(limit),
+        complete: !budget_exhausted && !cutoff_reached && count < limit,
+        nodes,
+        elapsed_ns: 0,
+        cutoff_reached,
+    }
+}
+
+#[inline]
+pub fn count_cycles_fast_u64(
+    g: &BitGraph64,
+    length: u16,
+    limit: u32,
+    node_budget: u32,
+    stop_at_count: u32,
+    scratch: &mut DfsScratch,
+) -> CountResult {
+    match length {
+        4 => count_c4_u64(&g.rows, g.n, limit, stop_at_count),
+        8 => count_c8_mitm_u64(&g.rows, g.n, limit, node_budget, stop_at_count, scratch),
+        _ => count_cycles_pruned_u64(
+            &g.rows,
+            g.n,
+            length,
+            limit,
+            node_budget,
+            stop_at_count,
+            scratch,
+        ),
+    }
+}
+
+#[inline]
+pub fn count_cycles_fast_u128(
+    g: &BitGraph,
+    length: u16,
+    limit: u32,
+    node_budget: u32,
+    stop_at_count: u32,
+    scratch: &mut DfsScratch,
+) -> CountResult {
+    match length {
+        4 => count_c4_u128(&g.rows, g.n, limit, stop_at_count),
+        _ => count_cycles_pruned_u128(
+            &g.rows,
+            g.n,
+            length,
+            limit,
+            node_budget,
+            stop_at_count,
+            scratch,
+        ),
+    }
+}
+
+#[inline]
+fn eval_order(lengths: &[u16], order: usize, has_cutoff: bool) -> ([usize; 6], usize) {
+    let n_len = lengths.len();
+    let mut idxs = [0usize; 6];
+    if !has_cutoff {
+        for i in 0..n_len {
+            idxs[i] = i;
+        }
+        return (idxs, n_len);
+    }
+    let last = n_len - 1;
+    if n_len >= 2 && (lengths[last] as usize) == order && lengths[last] >= 32 {
+        // Non-Hamiltonian lengths first (C32/C16 hit CAP fast, C4/C8 are ~1 us),
+        // Hamiltonian length last so cutoff stops early whenever possible!
+        let mut pos = 0usize;
+        for i in (0..last).rev() {
+            idxs[pos] = i;
+            pos += 1;
+        }
+        idxs[pos] = last;
+        return (idxs, n_len);
+    }
+    if n_len == 4 && lengths == [4, 8, 16, 32] {
+        idxs[0] = 2; // C16 (weight 4, fast CAP)
+        idxs[1] = 3; // C32 (weight 2, fast CAP)
+        idxs[2] = 0; // C4  (weight 16, 0.15 us)
+        idxs[3] = 1; // C8  (weight 8, 1.5 us)
+        return (idxs, 4);
+    }
+    for i in 0..n_len {
+        idxs[i] = n_len - 1 - i;
+    }
+    (idxs, n_len)
+}
+
+/// Ultra-fast hot-loop scorer for n <= 64 (zero heap allocation, u64).
+pub fn score_graph_fast_u64(
+    graph: &BitGraph64,
+    cap: u32,
+    node_budget: u32,
+    cutoff: Option<Cutoff>,
+    scratch: &mut DfsScratch,
+) -> Option<ScoreResult> {
+    let lengths = forbidden_lengths(graph.n);
+    let (order_idxs, n_len) = eval_order(lengths, graph.n, cutoff.is_some());
+    let limit = cap + 1;
+    let simplicity = graph.size();
+    let mut partial_total = 0u32;
+    let mut partial_weighted = 0u32;
+    let mut complete = true;
+    let mut counts_arr = [(0u16, 0u32); 6];
+
+    for pos in 0..n_len {
+        let len_idx = order_idxs[pos];
+        let length = lengths[len_idx];
+        if let Some(co) = cutoff {
+            if co.reached(partial_total, partial_weighted, simplicity) {
+                return None;
+            }
+        }
+        let weight = (64u32 / (length as u32)).max(1);
+        let mut stop_at_count = 0u32;
+        if let Some(co) = cutoff {
+            for c in 1..=limit {
+                let bounded = c.min(cap);
+                if co.reached(
+                    partial_total + bounded,
+                    partial_weighted + bounded * weight,
+                    simplicity,
+                ) {
+                    stop_at_count = c;
+                    break;
+                }
+            }
+        }
+        let res = count_cycles_fast_u64(graph, length, limit, node_budget, stop_at_count, scratch);
+        let effective_count = if !res.complete && !res.cutoff_reached {
+            cap
+        } else {
+            res.count.min(cap)
+        };
+        partial_total += effective_count;
+        partial_weighted += effective_count * weight;
+        complete = complete && res.count <= cap && res.complete;
+        counts_arr[len_idx] = (length, effective_count);
+        if res.cutoff_reached {
+            return None;
+        }
+        if let Some(co) = cutoff {
+            if co.reached(partial_total, partial_weighted, simplicity) {
+                return None;
+            }
+        }
+    }
+
+    Some(ScoreResult {
+        valid: true,
+        counts: counts_arr,
+        counts_len: n_len as u8,
+        total: partial_total,
+        weighted_penalty: partial_weighted,
+        complete,
+        simplicity,
+    })
+}
+
+/// Fast hot-loop scorer for general n <= 128 (dispatches to u64 when n <= 64).
+pub fn score_graph_fast(
+    graph: &BitGraph,
+    cap: u32,
+    node_budget: u32,
+    cutoff: Option<Cutoff>,
+    scratch: &mut DfsScratch,
+) -> Option<ScoreResult> {
+    if graph.n <= 64 {
+        let g64 = BitGraph64::from_graph(graph);
+        return score_graph_fast_u64(&g64, cap, node_budget, cutoff, scratch);
+    }
+    let lengths = forbidden_lengths(graph.n);
+    let (order_idxs, n_len) = eval_order(lengths, graph.n, cutoff.is_some());
+    let limit = cap + 1;
+    let simplicity = graph.size();
+    let mut partial_total = 0u32;
+    let mut partial_weighted = 0u32;
+    let mut complete = true;
+    let mut counts_arr = [(0u16, 0u32); 6];
+
+    for pos in 0..n_len {
+        let len_idx = order_idxs[pos];
+        let length = lengths[len_idx];
+        if let Some(co) = cutoff {
+            if co.reached(partial_total, partial_weighted, simplicity) {
+                return None;
+            }
+        }
+        let weight = (64u32 / (length as u32)).max(1);
+        let mut stop_at_count = 0u32;
+        if let Some(co) = cutoff {
+            for c in 1..=limit {
+                let bounded = c.min(cap);
+                if co.reached(
+                    partial_total + bounded,
+                    partial_weighted + bounded * weight,
+                    simplicity,
+                ) {
+                    stop_at_count = c;
+                    break;
+                }
+            }
+        }
+        let res = count_cycles_fast_u128(graph, length, limit, node_budget, stop_at_count, scratch);
+        let effective_count = if !res.complete && !res.cutoff_reached {
+            cap
+        } else {
+            res.count.min(cap)
+        };
+        partial_total += effective_count;
+        partial_weighted += effective_count * weight;
+        complete = complete && res.count <= cap && res.complete;
+        counts_arr[len_idx] = (length, effective_count);
+        if res.cutoff_reached {
+            return None;
+        }
+        if let Some(co) = cutoff {
+            if co.reached(partial_total, partial_weighted, simplicity) {
+                return None;
+            }
+        }
+    }
+
+    Some(ScoreResult {
+        valid: true,
+        counts: counts_arr,
+        counts_len: n_len as u8,
+        total: partial_total,
+        weighted_penalty: partial_weighted,
+        complete,
+        simplicity,
+    })
+}
+
+// ============================================================================
+// 3. ZERO-ALLOCATION STACK-ONLY WITNESS-CYCLE DISCOVERY
+// ============================================================================
+
+pub struct StackWitnesses {
+    pub groups: [[Edge; MAX_ORDER]; 6],
+    pub lens: [u8; 6],
+    pub count: usize,
+}
+
+impl StackWitnesses {
+    pub fn new() -> Self {
+        Self {
+            groups: [[(0, 0); MAX_ORDER]; 6],
+            lens: [0u8; 6],
+            count: 0,
+        }
+    }
+}
+
+pub fn find_witness_edge_groups_u64(
+    graph: &BitGraph64,
+    node_budget: u32,
+    scratch: &mut DfsScratch,
+    out: &mut StackWitnesses,
+) {
+    out.count = 0;
+    let lengths = forbidden_lengths(graph.n);
+    let rows = &graph.rows;
+    let order = graph.n;
+    let budget = node_budget as u64;
+
+    for &length in lengths {
+        let target = length as usize;
+        let max_start = order - target + 1;
+        let close_depth = target - 2;
+        let mut nodes = 0u64;
+
+        'starts: for start in 0..max_start {
+            let start_bit = 1u64 << start;
+            let greater_mask = !((1u64 << (start + 1)) - 1);
+            let nbrs = rows[start] & greater_mask;
+            if nbrs.count_ones() < 2 {
+                continue;
+            }
+            let max_nbr_bit = 1u64 << (63 - nbrs.leading_zeros());
+            let mut first_choices = nbrs ^ max_nbr_bit;
+
+            while first_choices != 0 {
+                let first = first_choices.trailing_zeros() as usize;
+                first_choices &= first_choices - 1;
+                let first_bit = 1u64 << first;
+                let gt_first = if first >= 63 {
+                    0
+                } else {
+                    !((1u64 << (first + 1)) - 1)
+                };
+                let closing_set = nbrs & gt_first;
+                if closing_set == 0 {
+                    continue;
+                }
+
+                let allowed_domain = greater_mask & !first_bit;
+                let mut reached = closing_set;
+                let mut frontier = closing_set;
+                scratch.dist_mask64[1] = reached;
+                let max_r = target - 2;
+                let mut built_r = 1usize;
+                while built_r < max_r && frontier != 0 {
+                    let mut next = 0u64;
+                    let mut f = frontier;
+                    while f != 0 {
+                        let u = f.trailing_zeros() as usize;
+                        f &= f - 1;
+                        next |= rows[u];
+                    }
+                    frontier = (next & allowed_domain) & !reached;
+                    reached |= frontier;
+                    built_r += 1;
+                    scratch.dist_mask64[built_r] = reached;
+                }
+
+                let init_avail = rows[first]
+                    & allowed_domain
+                    & if target - 2 <= built_r {
+                        scratch.dist_mask64[target - 2]
+                    } else {
+                        reached
+                    };
+                if init_avail == 0 {
+                    continue;
+                }
+
+                scratch.path[0] = start as u8;
+                scratch.path[1] = first as u8;
+                scratch.seen_at64[1] = start_bit | first_bit;
+                scratch.available_at64[1] = init_avail;
+                nodes += 1;
+                if budget != 0 && nodes > budget {
+                    break 'starts;
+                }
+
+                let mut depth = 2usize;
+                while depth >= 2 {
+                    let parent_idx = depth - 1;
+                    let bits = scratch.available_at64[parent_idx];
+                    if bits == 0 {
+                        depth -= 1;
+                        continue;
+                    }
+                    let vertex = bits.trailing_zeros() as usize;
+                    let bit = 1u64 << vertex;
+                    scratch.available_at64[parent_idx] = bits ^ bit;
+                    scratch.path[depth] = vertex as u8;
+                    let seen = scratch.seen_at64[parent_idx] | bit;
+                    nodes += 1;
+                    if budget != 0 && nodes > budget {
+                        break 'starts;
+                    }
+
+                    if depth == close_depth {
+                        let valid_close = rows[vertex] & closing_set & !seen;
+                        if valid_close != 0 {
+                            let last = valid_close.trailing_zeros() as u8;
+                            scratch.path[target - 1] = last;
+                            let slot = out.count;
+                            for i in 0..target {
+                                let a = scratch.path[i];
+                                let b = scratch.path[(i + 1) % target];
+                                out.groups[slot][i] = normalize_edge(a, b);
+                            }
+                            out.lens[slot] = target as u8;
+                            out.count += 1;
+                            break 'starts;
+                        }
+                        continue;
+                    }
+                    if (closing_set & !seen) == 0 {
+                        continue;
+                    }
+                    let rem = target - 1 - depth;
+                    let dmask = if rem <= built_r {
+                        scratch.dist_mask64[rem]
+                    } else {
+                        reached
+                    };
+                    let next_avail = rows[vertex] & !seen & allowed_domain & dmask;
+                    if next_avail != 0 {
+                        scratch.seen_at64[depth] = seen;
+                        scratch.available_at64[depth] = next_avail;
+                        depth += 1;
+                    }
+                }
+            }
+        }
+    }
+}
+
+pub fn find_witness_edge_groups(
+    graph: &BitGraph,
+    node_budget: u32,
+    scratch: &mut DfsScratch,
+    out: &mut StackWitnesses,
+) {
+    if graph.n <= 64 {
+        let g64 = BitGraph64::from_graph(graph);
+        return find_witness_edge_groups_u64(&g64, node_budget, scratch, out);
+    }
+    out.count = 0;
+    let lengths = forbidden_lengths(graph.n);
+    let rows = &graph.rows;
+    let order = graph.n;
+    let budget = node_budget as u64;
+
+    for &length in lengths {
+        let target = length as usize;
+        let max_start = order - target + 1;
+        let close_depth = target - 2;
+        let mut nodes = 0u64;
+
+        'starts: for start in 0..max_start {
+            let start_bit = 1u128 << start;
+            let greater_mask = !((1u128 << (start + 1)) - 1);
+            let nbrs = rows[start] & greater_mask;
+            if nbrs.count_ones() < 2 {
+                continue;
+            }
+            let max_nbr_bit = 1u128 << (127 - nbrs.leading_zeros());
+            let mut first_choices = nbrs ^ max_nbr_bit;
+
+            while first_choices != 0 {
+                let first = first_choices.trailing_zeros() as usize;
+                first_choices &= first_choices - 1;
+                let first_bit = 1u128 << first;
+                let gt_first = if first >= 127 {
+                    0
+                } else {
+                    !((1u128 << (first + 1)) - 1)
+                };
+                let closing_set = nbrs & gt_first;
+                if closing_set == 0 {
+                    continue;
+                }
+
+                let allowed_domain = greater_mask & !first_bit;
+                let mut reached = closing_set;
+                let mut frontier = closing_set;
+                scratch.dist_mask128[1] = reached;
+                let max_r = target - 2;
+                let mut built_r = 1usize;
+                while built_r < max_r && frontier != 0 {
+                    let mut next = 0u128;
+                    let mut f = frontier;
+                    while f != 0 {
+                        let u = f.trailing_zeros() as usize;
+                        f &= f - 1;
+                        next |= rows[u];
+                    }
+                    frontier = (next & allowed_domain) & !reached;
+                    reached |= frontier;
+                    built_r += 1;
+                    scratch.dist_mask128[built_r] = reached;
+                }
+
+                let init_avail = rows[first]
+                    & allowed_domain
+                    & if target - 2 <= built_r {
+                        scratch.dist_mask128[target - 2]
+                    } else {
+                        reached
+                    };
+                if init_avail == 0 {
+                    continue;
+                }
+
+                scratch.path[0] = start as u8;
+                scratch.path[1] = first as u8;
+                scratch.seen_at[1] = start_bit | first_bit;
+                scratch.available_at[1] = init_avail;
+                nodes += 1;
+                if budget != 0 && nodes > budget {
+                    break 'starts;
+                }
+
+                let mut depth = 2usize;
+                while depth >= 2 {
+                    let parent_idx = depth - 1;
+                    let bits = scratch.available_at[parent_idx];
+                    if bits == 0 {
+                        depth -= 1;
+                        continue;
+                    }
+                    let vertex = bits.trailing_zeros() as usize;
+                    let bit = 1u128 << vertex;
+                    scratch.available_at[parent_idx] = bits ^ bit;
+                    scratch.path[depth] = vertex as u8;
+                    let seen = scratch.seen_at[parent_idx] | bit;
+                    nodes += 1;
+                    if budget != 0 && nodes > budget {
+                        break 'starts;
+                    }
+
+                    if depth == close_depth {
+                        let valid_close = rows[vertex] & closing_set & !seen;
+                        if valid_close != 0 {
+                            let last = valid_close.trailing_zeros() as u8;
+                            scratch.path[target - 1] = last;
+                            let slot = out.count;
+                            for i in 0..target {
+                                let a = scratch.path[i];
+                                let b = scratch.path[(i + 1) % target];
+                                out.groups[slot][i] = normalize_edge(a, b);
+                            }
+                            out.lens[slot] = target as u8;
+                            out.count += 1;
+                            break 'starts;
+                        }
+                        continue;
+                    }
+                    if (closing_set & !seen) == 0 {
+                        continue;
+                    }
+                    let rem = target - 1 - depth;
+                    let dmask = if rem <= built_r {
+                        scratch.dist_mask128[rem]
+                    } else {
+                        reached
+                    };
+                    let next_avail = rows[vertex] & !seen & allowed_domain & dmask;
+                    if next_avail != 0 {
+                        scratch.seen_at[depth] = seen;
+                        scratch.available_at[depth] = next_avail;
+                        depth += 1;
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mutation::{GraphMode, generate_seed};
+    use crate::rng::Rng;
+
+    #[test]
+    fn fast_c4_c8_c16_match_parity_dfs_exactly() {
+        let mut rng = Rng::new(20261126);
+        let mut scratch = DfsScratch::new();
+        for &mode in &[
+            GraphMode::CubicFirst,
+            GraphMode::MinimalStructureMixedDegree,
+            GraphMode::UnrestrictedMinDegree3,
+        ] {
+            for &n in &[6usize, 10, 16, 20, 24, 32, 50, 64] {
+                if mode == GraphMode::CubicFirst && n % 2 != 0 {
+                    continue;
+                }
+                for _ in 0..4 {
+                    let g = generate_seed(&mut rng, n, mode).unwrap();
+                    let g64 = BitGraph64::from_graph(&g);
+                    for &len in &[4u16, 8, 16] {
+                        if (len as usize) > n {
+                            continue;
+                        }
+                        let limit = if len <= 8 { 10_000 } else { 500 };
+                        let budget = if len <= 8 { 500_000 } else { 200_000 };
+                        let ref_res = count_cycles(&g, len, limit, budget, 0, &mut scratch, false);
+                        let fast_u64 =
+                            count_cycles_fast_u64(&g64, len, limit, budget, 0, &mut scratch);
+                        let fast_u128 =
+                            count_cycles_fast_u128(&g, len, limit, budget, 0, &mut scratch);
+                        if ref_res.complete {
+                            assert!(
+                                fast_u64.complete,
+                                "u64 incomplete for n={n} len={len} mode={mode:?}"
+                            );
+                            assert_eq!(
+                                fast_u64.count, ref_res.count,
+                                "u64 mismatch for n={n} len={len} mode={mode:?}"
+                            );
+                            assert!(
+                                fast_u128.complete,
+                                "u128 incomplete for n={n} len={len} mode={mode:?}"
+                            );
+                            assert_eq!(
+                                fast_u128.count, ref_res.count,
+                                "u128 mismatch for n={n} len={len} mode={mode:?}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn hamiltonian_pruned_matches_parity_dfs_exactly() {
+        let mut rng = Rng::new(777);
+        let mut scratch = DfsScratch::new();
+        for &mode in &[
+            GraphMode::CubicFirst,
+            GraphMode::MinimalStructureMixedDegree,
+        ] {
+            for &n in &[8usize, 16, 20, 32] {
+                for _ in 0..8 {
+                    let g = generate_seed(&mut rng, n, mode).unwrap();
+                    let g64 = BitGraph64::from_graph(&g);
+                    let ref_res = count_cycles(&g, n as u16, 10_000, 0, 0, &mut scratch, false);
+                    let ham = count_hamiltonian_u64(&g64.rows, n, 10_000, 0, 0);
+                    assert_eq!(
+                        ham.count, ref_res.count,
+                        "Hamiltonian count mismatch for n={n} mode={mode:?}"
+                    );
+                    assert_eq!(ham.complete, ref_res.complete);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn posa_certifies_hamiltonian_cubic_64_fast() {
+        let mut rng = Rng::new(20261126);
+        let mut hits = 0;
+        for _ in 0..10 {
+            let g = generate_seed(&mut rng, 64, GraphMode::CubicFirst).unwrap();
+            let g64 = BitGraph64::from_graph(&g);
+            if posa_hamiltonian_fast_cert_u64(&g64.rows, 64, 65).is_some() {
+                hits += 1;
+            }
+        }
+        assert!(hits >= 8, "expected Posa to certify >=8/10 random cubic n=64, got {hits}");
+    }
+}
