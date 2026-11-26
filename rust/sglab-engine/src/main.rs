@@ -955,11 +955,24 @@ fn cmd_verify_large(args: &[String]) -> i32 {
             }
             "--lengths" => {
                 i += 1;
-                if let Some(s) = args.get(i) {
-                    lengths = s
-                        .split(',')
-                        .filter_map(|p| p.trim().parse::<usize>().ok())
-                        .collect();
+                let Some(s) = args.get(i) else {
+                    eprintln!("missing value for --lengths");
+                    return 2;
+                };
+                lengths.clear();
+                for part in s.split(',') {
+                    let trimmed = part.trim();
+                    match trimmed.parse::<usize>() {
+                        Ok(v) if v >= 4 && v % 2 == 0 => lengths.push(v),
+                        _ => {
+                            eprintln!("invalid --lengths token: '{trimmed}' (must be even integer >= 4)");
+                            return 2;
+                        }
+                    }
+                }
+                if lengths.is_empty() {
+                    eprintln!("--lengths cannot be empty");
+                    return 2;
                 }
             }
             "--workers" => {
@@ -990,7 +1003,13 @@ fn cmd_verify_large(args: &[String]) -> i32 {
             return 2;
         }
     };
-    let summary = crate::large_verify::verify_large_graph(&graph, &lengths, workers);
+    let summary = match crate::large_verify::verify_large_graph(&graph, &lengths, workers) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("verify-large error: {e}");
+            return 2;
+        }
+    };
     let mut len_entries = Vec::new();
     let mut ms_entries = Vec::new();
     for (len, found, witness, ms) in &summary.results {

@@ -1,6 +1,6 @@
 # Research Status and Target Selection
 
-**Status check date:** 2026-07-23
+**Status check date:** 2026-11-26 (updated from 2026-07-23)
 
 ## 1. Clarification
 
@@ -33,25 +33,30 @@ A counterexample is a finite simple graph `G` such that:
 - `delta(G) >= 3`, and
 - `G` contains no cycle of length `4, 8, 16, 32, ...` up to `|V(G)|`.
 
-### Current status
+### Current status (updated 2026-11-26)
 
-A May 2026 preprint explicitly treats the conjecture as open and proves structural restrictions on a minimal counterexample:
+As of late November 2026, the Erdős–Gyárfás conjecture remains **open**, with substantially sharper computational lower bounds and extremal upper bounds:
 
-- vertices of degree at least 4 form an independent set;
-- a minimal counterexample has degree-3 vertices;
-- every vertex is adjacent to a degree-3 vertex;
-- at least `4/7` of the vertices have degree exactly 3;
-- every regular minimal counterexample is cubic.
-
-A recent public GitHub repository claims a SAT-based exhaustive verification through 31 vertices. It reports SAT Modulo Symmetries as the main path and an independent CEGAR-SAT cross-check through 19 vertices. This result should be treated as a strong active computational claim, but it is not a substitute for independent reproduction.
+- **General $\delta(G) \ge 3$ exhaustive lower bound**: `n <= 40` (Ducoffe & Dumitru, Sept 2026, `arXiv:2609.28594`, SAT Modulo Symmetries; previously `n <= 31` by Balaji 2026). Even minimal counterexamples must be strictly 2-connected; odd minimal counterexamples are either 2-connected or symmetric equal-order, equal-edge 1-clique-sums of two 2-degenerate blocks sharing a degree-4 cut-vertex (Theorem 2.3 / Corollary 2.4 / Conjecture 4.1).
+- **Cubic (3-regular) exhaustive lower bound**: `n <= 48` (Ducoffe & Dumitru, `arXiv:2609.28594`).
+- **Bipartite exhaustive lower bounds**: `n <= 66` for general bipartite $\delta \ge 3$ (`arXiv:2609.28594`); `n <= 58` for cubic bipartite (Tranquilli, Aug 2026, `arXiv:2608.02675`); Zenodo artifact extending cubic bipartite to `n <= 68` (Zhuge, `zenodo.21981786`, unrefereed). Girth-10 cubic bipartite cages first appear at `n = 70`.
+- **Structural / algebraic subclasses closed (2023–2026)**: large average degree (Liu–Montgomery, *JAMS* 2023), $P_{13}$-free graphs (Hegde–Sandeep–Shashank 2024/2025), diameter 2 (Carr, `arXiv:2508.19302`), 3-connected cubic planar/projective with large edge-width (Culus 2026), Cayley graphs of odd-order and finite nilpotent groups (Burkhart, Nov 2026, `arXiv:2611.05060`).
+- **Extremal avoidance function $f(k)$ (smallest graph avoiding $\{C_4, C_8, \dots, C_{2^k}\}$)**:
+  - $f(2) = 10$ (Petersen), $f(3) = 24$ (Markström 2004 / García `arXiv:2609.04686`).
+  - **$f_{\mathrm{cubic}}(4) = 78$ (computationally)**: A. V. Ripatti (*Faster approach for exhaustive search over graphs with certain properties*, BAIKAL 2017) computationally reported that the smallest **cubic** graphs avoiding $\{C_4, C_8, C_{16}\}$ have **78 vertices** (Exoo's $G_{78}$ plus 5 others; note the conference abstract mentions probabilistic node checking, so independent verification of full exhaustiveness remains useful, **but heuristic cubic searches for $\{4, 8, 16\}$-free graphs at `n < 78` must NOT be run as `f_cubic(4)` record hunts**).
+  - **$f_{\delta \ge 3}(4) \le 73$** (this project, `docs/reports/certificates/f4_delta3_n73_Petersen_3H8star_7H7.g6`, independently verified): strictly smaller than the cubic minimum `78`, proving separation between $f_{\delta \ge 3}(4)$ and $f_{\mathrm{cubic}}(4)$ (conditional on Ripatti 2017).
+  - **$f_{\mathrm{cubic}}(5)$**: Exoo (2014, `arXiv:1403.5636`) / repaired by García (Sept 2026, `arXiv:2609.04686`) gave `<= 450`. This project established and independently verified **`f_cubic(5) <= 370`** (`Tutte–Coxeter + 20·H_15 + 10·H_7`) and **`f_{delta>=3}(5) <= 345`** (`Tutte–Coxeter + 15·H_15 + 15·H_8*`).
+  - **$f_{\mathrm{cubic}}(6)$**: García (`arXiv:2609.04686`) states `<= 32,640` (`15 * 2176`); combining García's theorem with Exoo–Goedgebeur et al. (`arXiv:2511.07247`, Nov 2025, `n(3, 17) <= 2048`) gives `<= 30,720`, and our maximal 4-packing $H_7$ refinement yields the conditional analytic bound `<= 30,360`.
 
 ### Consequence for this project
 
-- `n <= 19`: independent local reproduction gate;
-- `20 <= n <= 31`: optional reproduction frontier, not novelty;
-- `n >= 32`: heuristic research frontier;
-- any exhaustive claim requires a proof artifact and independent verification;
-- any heuristic failure is only `NO_RESULT_WITHIN_BUDGET`.
+- **Do NOT spend compute searching for cubic $\{C_4, C_8, C_{16}\}$-free graphs at `n < 78`** (closed computationally by Ripatti 2017).
+- **High-value open targets**:
+  1. General $\delta(G) \ge 3$ $\{C_4, C_8, C_{16}\}$-free graphs at **`n <= 72`** (strictly below our `n = 73` witness);
+  2. Exact optimality / further reductions for **$f_{\mathrm{cubic}}(5)$ (`< 370`)** and **$f_{\delta \ge 3}(5)$ (`< 345`)** using exact CSP/SAT and non-Tutte–Coxeter girth-7/8 bases;
+  3. **Bipartite cubic `n >= 70`** EGC frontier (including cubic bipartite $\{4,8,16\}$-free at `n >= 78`, non-nilpotent voltage lifts, and girth-10 cages);
+  4. **Ducoffe–Dumitru Conjecture 4.1 (`single_block_41`, `k in [21, 31]`, odd `n in [41, 61]`)** where `C32 = C64 = 0` holds automatically by Theorem 4.2.
+- Any exhaustive claim requires a deterministic proof artifact and independent verification; any heuristic failure is only `NO_RESULT_WITHIN_BUDGET`.
 
 ## 4. Why this is a suitable engineering target
 
@@ -97,6 +102,14 @@ Before announcing a result:
 
 ## 7. Sources
 
+- A. V. Ripatti, *Faster approach for exhaustive search over graphs with certain properties*, BAIKAL 2017. https://isem.irk.ru/conferences/mopt2017/Abstracts/BAIKAL_2017_paper_138.pdf
+- G. Exoo, *Three graphs and the Erdős–Gyárfás conjecture*, arXiv:1403.5636, 2014. https://arxiv.org/abs/1403.5636
+- G. Exoo, J. Goedgebeur, J. Jooken, T. Stubbe, T. Van den Eede, *New small regular graphs of given girth*, arXiv:2511.07247, Nov 2025. https://arxiv.org/abs/2511.07247
+- D. García, *Small graphs without power-of-two cycles: a lower bound of 24, a correction to a construction of Exoo, and explicit bounds for $f(k)$*, arXiv:2609.04686, Sept 2026. https://arxiv.org/abs/2609.04686
+- G. Ducoffe, A. Dumitru, *Towards a more structured search for Erdős–Gyárfás counterexamples*, arXiv:2609.28594, Sept 2026. https://arxiv.org/abs/2609.28594
+- L. Tranquilli, *A 60-Vertex Lower Bound for Cubic Bipartite Counterexamples to the Erdős–Gyárfás Conjecture*, arXiv:2608.02675, Aug 2026. https://arxiv.org/abs/2608.02675
+- Z. Zhuge, *Reproducibility Artifact for a 70-Vertex Lower Bound for Cubic Bipartite Counterexamples*, Zenodo, Aug 2026. https://zenodo.org/records/21981786
+- C. Burkhart, *Odd-ordered Cayley graphs satisfy Erdős–Gyárfás*, arXiv:2611.05060, Nov 2026. https://arxiv.org/abs/2611.05060
 - Avery Carr, *Every Minimal Counterexample to the Erdős–Gyárfás Conjecture is Predominantly Cubic*, arXiv:2605.22844, 2026. https://arxiv.org/abs/2605.22844
 - Hegde, Sandeep, Shashank, *Erdős–Gyárfás conjecture on graphs without long induced paths*, arXiv:2410.22842. https://arxiv.org/abs/2410.22842
 - Public SAT repository claiming verification through 31 vertices: https://github.com/ArjunBalaji79/erdos-gyarfas-min-degree-3

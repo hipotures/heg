@@ -1,6 +1,11 @@
 # Implementation Status
 
-Last implementation audit: **2026-11-27**.
+Last implementation audit: **2026-11-26**.
+
+## Peer-Review Remediation (`REVIEW_M6_WAVES_D_F_TRACK2_2026_11_26.md` & Erratum)
+
+- **Hardened `verify-large` (`rust/sglab-engine/src/large_verify.rs`, `main.rs`)**: Removed dead BFS `dist`/`queue` code and updated comments accurately, added release-mode runtime witness verification (`verify_witness_runtime`), enforced strict CLI validation on `--lengths` (rejecting malformed/odd tokens with exit code 2) and strict `graph6` byte-length validation, and expanded unit tests to cover multi-word `[u64; 8]` graphs (`n = 24, 300, 512`, touching bit 511) cross-checked against an independent canonical DFS.
+- **Reproducibility & Research Status (`tools/extremal/`, `docs/00_RESEARCH_STATUS.md`, `docs/reports/ERRATUM_2026_11_26_WAVES_D_F_TRACK2.md`)**: Imported Track 2 C++17/Python tools (`sglab_cyclecheck_large.cpp`, `f5_gadget_hunter.cpp`, `f5_multideg4_gadgets.cpp`, `f5_h8star_solver.cpp`, `test_h8star_petersen_f4.py`, `track2_certify_all_f5.py`) and missing `docs/reports/certificates/f4_delta3_n77_G78_contract.g6` into the repo; updated `docs/00_RESEARCH_STATUS.md` with Ripatti (2017, BAIKAL: computational `f_cubic(4) = 78`), García (`arXiv:2609.04686`), and Exoo et al. (`arXiv:2511.07247`); published a formal Erratum correcting Wave E's pigeonhole proof, gadget sampling vs. exhaustiveness wording, `30,720`/`30,360` attribution, and Wave D2 table wording. Terminated cubic `n < 78` LNS hunts.
 
 ## Overnight `/goal` Track 2 & Wave F: Triple-Certified $f_{\mathrm{cubic}}(5) \le 370$, $f_{\delta \ge 3}(5) \le 345$, $f_{\delta \ge 3}(4) \le 73$, and Sporadic Gadget $H_8^*$
 
