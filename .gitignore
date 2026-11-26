@@ -8,4 +8,5 @@ build/
 dist/
 workspace/
 _build/
+rust/sglab-engine/target/
 

@@ -110,8 +110,12 @@ DFS nodes and elapsed nanoseconds. The
 process starts once per lane, has a separate memory limit and a bounded
 protocol, and is included in lane process-tree RSS. A protocol error, timeout,
 malformed response or crash is never interpreted as a zero count: the lane
-restarts the worker once and then fails closed. There is no alternate
-heuristic scorer, shadow mode or runtime backend selection.
+restarts the worker once and then fails closed. Likewise, when a bounded DFS
+exhausts `node_budget` before exhausting a forbidden cycle length (`complete=false`),
+both the C++ cutoff accounting and Python score assembly charge the conservative
+upper bound `witness_cap` rather than a false zero, preventing search from
+reward-hacking truncated traversals while keeping `complete=false` explicit.
+There is no alternate heuristic scorer, shadow mode or runtime backend selection.
 
 For non-perturbation ILS/tabu moves, an optional monotone cutoff may stop after
 the partial lexicographic penalty already proves that the move cannot be

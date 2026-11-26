@@ -1,6 +1,51 @@
 # Implementation Status
 
-Last implementation audit: **2026-08-04**.
+Last implementation audit: **2026-11-26**.
+
+## Native Rust search engine, campaign wiring, and Ducoffe–Dumitru filter
+
+Added an optional zero-dependency Rust crate (`rust/sglab-engine/`, built via
+`make rust-engine` into `_build/sglab-rust-engine`) while preserving the entire
+legacy Python + C++ stack (`src/sglab/`, `cpp/sglab_score_worker.cpp`,
+`cpp/sglab_cyclecheck.cpp`) intact for direct comparison and parity checks.
+The Rust binary implements both the exact binary protocol v2 `--serve` scorer
+(bit-for-bit parity-tested against `sglab-score-worker` across orders 4..128,
+including budget-exhaustion cutoffs) and a native multi-threaded inner search
+loop (`simulated_annealing`, `iterated_local_search_tabu`, `random_restart`)
+with stack-allocated `[u128; 128]` graphs, native witness caching, checkpoint
+continuation (`--initial-graph6`), and `graph6` export compatible with M4
+verification.
+
+Campaigns and lanes can now opt into the Rust backend via
+`--engine-backend rust|rust_scorer` on `research-campaign prepare`,
+`[search].engine_backend = "rust"` in `experiment.toml`, or
+`SGLAB_ENGINE_BACKEND=rust`, while keeping `cpp` as the unchanged default.
+Missing binaries or unknown backends fail closed. `sglab doctor` reports
+`rust_engine` availability alongside `cyclecheck` and `score_worker`.
+
+The `minimal_structure_mixed_degree` (`predominantly_cubic`) structural prior
+in both Python and Rust now enforces the sharpened Ducoffe–Dumitru
+(`arXiv:2609.28594`) necessary conditions for minimal counterexamples: strictly
+more than `2n/3` vertices of degree 3 (`3 * degree_three > 2 * n`), independent
+high-degree vertices, every vertex adjacent to a degree-3 vertex, and at most
+two biconnected blocks (biconnected or a 1-clique-sum of two biconnected graphs).
+
+## Conservative budget-exhaustion scoring and 16-core concurrency
+
+Bounded C++ cycle-count evaluations that exhaust `node_budget` without
+completing (`complete=false`) now charge the conservative cap penalty
+(`witness_cap`) in both `sglab-score-worker` cutoff accounting and
+`ErdosGyarfasPlugin.score_from_cycle_counts`, rather than scoring truncated
+traversals as false zeros. Raw C++ `(length, count, complete)` responses remain
+exact and parity-checked against `find_cycles_of_length_bounded`, and M4 remains
+the sole certification authority.
+
+Production lane concurrency (`PRODUCTION_MAX_ACTIVE_LANES`) and default
+`LaneManager`/`DecisionContext`/fallback limits are raised from 8 to 16, and
+`recommended_workers()` defaults to all available logical CPUs (`reserve_threads=0`
+by default, while still honoring an explicit `reserve_threads` argument). On
+16-core hosts, prepared campaigns and multi-worker search runs now utilize up to
+16 concurrent lanes/workers.
 
 ## Mandatory C++ scorer contract re-audit
 

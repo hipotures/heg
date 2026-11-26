@@ -38,6 +38,7 @@ class ExperimentConfig:
     proposal_ranking: str | None
     proposal_ranking_explicit: bool
     codex_home: Path
+    engine_backend: str = "cpp"
 
 
 def _table(payload: dict[str, Any], name: str) -> dict[str, Any]:
@@ -206,7 +207,13 @@ def load_experiment_config(path: str | Path) -> ExperimentConfig:
             raise ExperimentConfigError(
                 "the experiment contract fixes the reviewed Director effort"
             )
-    unknown_search = set(search) - {"proposal_ranking"}
+    engine_backend = _optional_string(search, "engine_backend", default="cpp")
+    assert engine_backend is not None
+    if engine_backend not in {"cpp", "rust", "rust_scorer"}:
+        raise ExperimentConfigError(
+            "engine_backend must be one of: cpp, rust, rust_scorer"
+        )
+    unknown_search = set(search) - {"proposal_ranking", "engine_backend"}
     if unknown_search:
         raise ExperimentConfigError(
             "unsupported [search] keys: "
@@ -223,4 +230,5 @@ def load_experiment_config(path: str | Path) -> ExperimentConfig:
         proposal_ranking=proposal_ranking,
         proposal_ranking_explicit=proposal_ranking_explicit,
         codex_home=codex_home,
+        engine_backend=engine_backend,
     )

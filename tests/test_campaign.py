@@ -93,6 +93,15 @@ class CampaignOperatorContractTests(unittest.TestCase):
                 plan["search_limits"]["maximum_aggregate_resource_share"],
                 float(plan["search_limits"]["maximum_active_lanes"]),
             )
+            expected_lanes = max(2, min(16, os.cpu_count() or 1))
+            self.assertEqual(
+                plan["search_limits"]["maximum_active_lanes"],
+                expected_lanes,
+            )
+            self.assertEqual(
+                plan["search_limits"]["cpu_workers"],
+                expected_lanes,
+            )
             self.assertFalse(
                 plan["scientific_contract"]["fixed_experiment_sequence"]
             )

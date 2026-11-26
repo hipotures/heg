@@ -299,6 +299,25 @@ class ValidatedScoreAssemblyTests(unittest.TestCase):
                 validation_context=context,
             )
 
+    def test_budget_exhaustion_charges_cap_instead_of_false_zero(self) -> None:
+        graph = PLUGIN.generate_seed(
+            Random(71), {"order": 32, "mode": "cubic_first"}
+        )
+        results = (
+            CycleCountResult(length=4, count=0, complete=True, nodes=100, elapsed_ns=10),
+            CycleCountResult(length=8, count=2, complete=True, nodes=200, elapsed_ns=20),
+            CycleCountResult(length=16, count=65, complete=False, nodes=500, elapsed_ns=30),
+            CycleCountResult(length=32, count=0, complete=False, nodes=50_001, elapsed_ns=40),
+        )
+        score = PLUGIN.score_from_cycle_counts(graph, 64, results, None)
+        self.assertFalse(score.complete)
+        self.assertEqual(
+            dict(score.witness_counts),
+            {4: 0, 8: 2, 16: 64, 32: 64},
+        )
+        expected_weighted = 0 * 16 + 2 * 8 + 64 * 4 + 64 * 2
+        self.assertEqual(score.weighted_penalty, expected_weighted)
+
 
 @unittest.skipUnless(
     score_worker_path().is_file(), "C++ score worker has not been built"
@@ -496,6 +515,55 @@ class PersistentScoreWorkerTests(unittest.TestCase):
         self.assertEqual(
             tuple(result.length for result in ascending.results),
             (4, 8, 16),
+        )
+
+    def test_worker_cutoff_matches_conservative_budget_exhaustion_score(self) -> None:
+        graph = PLUGIN.generate_seed(
+            Random(64), {"order": 64, "mode": "cubic_first"}
+        )
+        lengths = forbidden_lengths(graph.n)
+        with PersistentScoreWorker() as worker:
+            full = worker.score(
+                graph,
+                lengths=lengths,
+                limit=65,
+                node_budget=50_000,
+            )
+            self.assertTrue(
+                any(
+                    not result.complete and result.count < 64
+                    for result in full.results
+                )
+            )
+            score = PLUGIN.score_from_cycle_counts(
+                graph, 64, full.results, None
+            )
+            cutoff = (
+                sum(count for _, count in score.witness_counts),
+                score.weighted_penalty,
+                score.simplicity,
+            )
+            inclusive = worker.score(
+                graph,
+                lengths=lengths,
+                limit=65,
+                node_budget=50_000,
+                cutoff=cutoff,
+                cutoff_inclusive=True,
+            )
+            exclusive = worker.score(
+                graph,
+                lengths=lengths,
+                limit=65,
+                node_budget=50_000,
+                cutoff=cutoff,
+                cutoff_inclusive=False,
+            )
+        self.assertTrue(inclusive.dominated)
+        self.assertFalse(exclusive.dominated)
+        self.assertEqual(
+            PLUGIN.score_from_cycle_counts(graph, 64, exclusive.results, None),
+            score,
         )
 
     def test_worker_rejects_compact_response_without_cutoff(self) -> None:

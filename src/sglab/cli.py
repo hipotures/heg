@@ -37,7 +37,7 @@ from .comparisons import (
 from .comparison_worker import ComparisonWorker
 from .db import connect
 from .external import TOOLS
-from .locations import asset_path, cyclecheck_path, score_worker_path
+from .locations import asset_path, cyclecheck_path, rust_engine_path, score_worker_path
 from .resources import run_bounded
 from .research.app_server_protocol import generate_protocol_preflight
 from .research.auth import (
@@ -280,6 +280,16 @@ def cmd_doctor(_: Namespace) -> int:
         if score_worker.is_file()
         else None
     )
+    rust_engine = rust_engine_path()
+    rust_engine_version = (
+        run_bounded(
+            [str(rust_engine), "--version"],
+            timeout_seconds=5,
+            output_limit_bytes=4096,
+        )
+        if rust_engine.is_file()
+        else None
+    )
     report = {
         "python": platform.python_version(),
         "python_supported": tuple(map(int, platform.python_version_tuple()[:2]))
@@ -305,6 +315,18 @@ def cmd_doctor(_: Namespace) -> int:
                 ).strip()
                 if score_worker_version is not None
                 and score_worker_version.status == "OK"
+                else None
+            ),
+        },
+        "rust_engine": {
+            "path": str(rust_engine),
+            "available": rust_engine.is_file(),
+            "version": (
+                rust_engine_version.stdout.decode(
+                    "utf-8", errors="replace"
+                ).strip()
+                if rust_engine_version is not None
+                and rust_engine_version.status == "OK"
                 else None
             ),
         },
@@ -1102,6 +1124,7 @@ def cmd_experiment(args: Namespace) -> int:
                 duration_seconds=duration,
                 director_mode=config.director_mode,
                 proposal_ranking=config.proposal_ranking,
+                engine_backend=config.engine_backend,
             )
             if config.director_mode == "llm":
                 import_authorized_auth(
@@ -1329,6 +1352,7 @@ def cmd_research_campaign(args: Namespace) -> int:
             director_mode=args.director_mode,
             passive_seed=args.passive_seed,
             proposal_ranking=args.proposal_ranking,
+            engine_backend=args.engine_backend,
         )
         print(json.dumps(report, indent=2, sort_keys=True))
         return 0
@@ -1827,6 +1851,11 @@ def build_parser() -> ArgumentParser:
     campaign_prepare.add_argument(
         "--proposal-ranking",
         choices=["mutation_forge_stage4r_v1"],
+    )
+    campaign_prepare.add_argument(
+        "--engine-backend",
+        choices=["cpp", "rust", "rust_scorer"],
+        default=None,
     )
     campaign_prepare.set_defaults(func=cmd_research_campaign)
     campaign_auth = campaign_commands.add_parser("auth-import")

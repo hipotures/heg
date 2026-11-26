@@ -398,11 +398,19 @@ int serve() {
                     seen_at,
                     available_at,
                     stop_at_count);
-                partial_total += std::min(result.count, cap);
-                partial_weighted += (
-                    std::min(result.count, cap) * weight);
+                const std::uint32_t effective_count =
+                    (!result.complete && !result.cutoff_reached)
+                        ? cap
+                        : std::min(result.count, cap);
+                partial_total += effective_count;
+                partial_weighted += (effective_count * weight);
                 results.push_back(result);
-                if (result.cutoff_reached) {
+                if (result.cutoff_reached
+                    || cutoff_reached(
+                        request,
+                        partial_total,
+                        partial_weighted,
+                        simplicity)) {
                     response_status = kStatusDominated;
                     break;
                 }

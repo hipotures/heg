@@ -107,7 +107,7 @@ class CampaignResources:
                     "cpu_workers",
                     search.get(
                         "maximum_active_lanes",
-                        max(1, min(8, os.cpu_count() or 1)),
+                        max(1, min(16, os.cpu_count() or 1)),
                     ),
                 ),
             )

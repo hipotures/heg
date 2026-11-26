@@ -43,3 +43,17 @@ def score_worker_path() -> Path:
         if installed is not None
         else Path("sglab-score-worker")
     )
+
+
+def rust_engine_path() -> Path:
+    root = source_root()
+    if root is not None:
+        source_binary = root / "_build" / "sglab-rust-engine"
+        if source_binary.is_file():
+            return source_binary
+    installed = which("sglab-rust-engine")
+    return (
+        Path(installed)
+        if installed is not None
+        else Path("sglab-rust-engine")
+    )

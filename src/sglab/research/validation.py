@@ -75,7 +75,7 @@ class DecisionContext:
     checkpoint_ids: frozenset[str]
     candidate_ids: frozenset[str]
     hypothesis_ids: frozenset[str] = frozenset()
-    max_active_lanes: int = 8
+    max_active_lanes: int = 16
     advisory_target_ids: frozenset[str] | None = None
     executable_target_ids: frozenset[str] | None = None
     diagnostic_subject_ids: frozenset[str] | None = None

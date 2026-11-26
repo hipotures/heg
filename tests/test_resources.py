@@ -1,10 +1,19 @@
 import sys
 import unittest
+from unittest.mock import patch
 
-from sglab.resources import run_bounded
+from sglab.resources import recommended_workers, run_bounded
 
 
 class ResourceSafetyTests(unittest.TestCase):
+    def test_recommended_workers_uses_all_logical_cpus_by_default(self) -> None:
+        with patch("os.cpu_count", return_value=16):
+            self.assertEqual(recommended_workers(), 16)
+            self.assertEqual(recommended_workers(16), 16)
+            self.assertEqual(recommended_workers(32), 16)
+            self.assertEqual(recommended_workers(8), 8)
+            self.assertEqual(recommended_workers(None, reserve_threads=2), 14)
+
     def test_subprocess_timeout_is_unknown_and_kills_group(self) -> None:
         result = run_bounded(
             [sys.executable, "-c", "import time; time.sleep(2)"],

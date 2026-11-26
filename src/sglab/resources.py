@@ -20,10 +20,12 @@ class ProcessResult:
     stderr: bytes
 
 
-def recommended_workers(requested: int | None = None, reserve_threads: int = 2) -> int:
-    available = max(1, (os.cpu_count() or 1) - max(2, reserve_threads))
-    conservative_default = min(12, available)
-    return max(1, min(requested or conservative_default, available))
+def recommended_workers(requested: int | None = None, reserve_threads: int = 0) -> int:
+    logical_cpus = max(1, os.cpu_count() or 1)
+    available = max(1, logical_cpus - max(0, reserve_threads))
+    if requested is None:
+        return available
+    return max(1, min(requested, available))
 
 
 def set_address_space_limit(limit_bytes: int | None) -> None:

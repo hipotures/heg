@@ -13,9 +13,12 @@ import dataclasses
 import hashlib
 import json
 import math
+import os
 import resource
+import subprocess
 import time
 
+from ..locations import rust_engine_path
 from ..model import BitGraph
 from ..resources import set_address_space_limit
 from ..score_worker import (
@@ -41,6 +44,22 @@ from .telemetry import TelemetrySeries
 
 
 ANCESTRY_LIMIT = 64
+ENGINE_BACKENDS = ("cpp", "rust", "rust_scorer")
+
+
+def normalize_engine_backend(value: str | None) -> str:
+    raw = value if value is not None else os.environ.get("SGLAB_ENGINE_BACKEND")
+    if raw is None or not str(raw).strip():
+        return "cpp"
+    normalized = str(raw).strip().lower()
+    if normalized not in ENGINE_BACKENDS:
+        raise ValueError(
+            f"unsupported engine backend: {value!r} "
+            f"(expected one of {', '.join(ENGINE_BACKENDS)})"
+        )
+    return normalized
+
+
 TIMING_COUNTER_NAMES = (
     "mutation_generation",
     "graph_validation",
@@ -576,11 +595,13 @@ class _LaneKernel:
         independent_sample_provenance: bool = True,
         mutation_witness_cache: bool = True,
         proposal_ranking_profile_enabled: bool = False,
+        engine_backend: str | None = None,
     ):
         self.spec = spec
         self.plugin = TARGETS[spec.target]
         self.parameters = dict(spec.parameters)
         self.mode = GRAPH_FAMILIES[spec.graph_family]
+        self.engine_backend = normalize_engine_backend(engine_backend)
         self.proposal_ranking_catalog_id = self.parameters.get("proposal_ranking")
         self.proposal_ranking = None
         self._last_policy_ranking_started_ns: int | None = None
@@ -658,8 +679,17 @@ class _LaneKernel:
             "cpp_requests": 0,
             "worker_restarts": 0,
         }
+        worker_binary: Path | None = None
+        if self.engine_backend in {"rust", "rust_scorer"}:
+            worker_binary = rust_engine_path()
+            if not worker_binary.is_file():
+                raise ScoreWorkerError(
+                    f"rust engine backend requested but binary is unavailable: {worker_binary}"
+                )
+        self.rust_binary = worker_binary if self.engine_backend == "rust" else None
         self.score_worker = PersistentScoreWorker(
-            memory_limit_bytes=score_worker_memory_bytes
+            binary=worker_binary,
+            memory_limit_bytes=score_worker_memory_bytes,
         )
         try:
             self.score_worker.start()
@@ -1030,6 +1060,17 @@ class _LaneKernel:
             raise ValueError("batch evaluation limit must be positive")
         if max_wall_seconds is not None and max_wall_seconds <= 0:
             raise ValueError("batch wall limit must be positive")
+        if (
+            self.engine_backend == "rust"
+            and self.spec.target == "erdos_gyarfas"
+            and self.proposal_ranking is None
+        ):
+            return self._run_rust_micro_batch(
+                stop_event,
+                target=target,
+                max_wall_seconds=max_wall_seconds,
+                source_checkpoint_id=source_checkpoint_id,
+            )
         self.batch_source_checkpoint_id = source_checkpoint_id
         if self.timing_ns is not None:
             for name in self.timing_ns:
@@ -1467,7 +1508,11 @@ class _LaneKernel:
             "termination_reason": termination_reason,
             "end_high_water": self.high_water,
             "score_backend": {
-                "implementation": "cpp",
+                "implementation": (
+                    self.engine_backend
+                    if self.engine_backend != "cpp"
+                    else "cpp"
+                ),
                 "early_exit_enabled": self.score_early_exit_enabled,
                 "duplicate_key_scheme": self.tabu_key_scheme,
                 "score_worker_protocol_version": PROTOCOL_VERSION,
@@ -1608,6 +1653,378 @@ class _LaneKernel:
     @property
     def algorithm(self) -> str:
         return self.spec.algorithm
+
+    def _run_rust_micro_batch(
+        self,
+        stop_event: Any,
+        *,
+        target: int,
+        max_wall_seconds: float | None,
+        source_checkpoint_id: str | None,
+    ) -> dict[str, Any]:
+        if self.rust_binary is None or not self.rust_binary.is_file():
+            raise ScoreWorkerError("rust engine binary is unavailable")
+        if stop_event.is_set():
+            return self._empty_rust_batch_result(source_checkpoint_id)
+        self.batch_source_checkpoint_id = source_checkpoint_id
+        if self.timing_ns is not None:
+            for name in self.timing_ns:
+                self.timing_ns[name] = 0
+        if self.score_profile is not None:
+            self.score_profile.reset()
+        if self.mutation_profile is not None:
+            self.mutation_profile.reset()
+        for name in self.score_backend_batch:
+            self.score_backend_batch[name] = 0
+
+        initial_score = self.score
+        cap = int(self.parameters["witness_cap"])
+        node_budget = max(4_096, min(50_000, cap * 1_024))
+        weights = self.parameters.get(MUTATION_WEIGHTS_PARAMETER)
+        targeted_prob = 0.0
+        if isinstance(weights, dict):
+            total_w = sum(float(v) for v in weights.values())
+            if total_w > 0:
+                targeted_prob = (
+                    float(weights.get("forbidden_cycle_break_switch", 0.0))
+                    / total_w
+                )
+        batch_seed = self.rng.randrange(2**63)
+        cmd = [
+            str(self.rust_binary),
+            "search",
+            "--initial-graph6",
+            self.graph.to_graph6(),
+            "--mode",
+            self.mode,
+            "--algorithm",
+            self.algorithm,
+            "--evals",
+            str(target),
+            "--workers",
+            "1",
+            "--cap",
+            str(cap),
+            "--node-budget",
+            str(node_budget),
+            "--seed",
+            str(batch_seed),
+            "--targeted-prob",
+            f"{targeted_prob:.6f}",
+            "--temperature",
+            str(float(self.parameters.get("temperature", 8.0))),
+            "--cooling",
+            str(float(self.parameters.get("cooling", 0.9995))),
+            "--restart-threshold",
+            str(int(self.parameters.get("restart_threshold", 50_000))),
+            "--tabu-tenure",
+            str(int(self.parameters.get("tabu_tenure", 128))),
+            "--perturbation-interval",
+            str(int(self.parameters.get("perturbation_interval", 64))),
+            "--json",
+        ]
+        if max_wall_seconds is not None:
+            cmd.extend(["--wall-seconds", f"{float(max_wall_seconds):.6f}"])
+
+        timeout = (
+            max(10.0, float(max_wall_seconds) + 10.0)
+            if max_wall_seconds is not None
+            else 300.0
+        )
+        started = time.perf_counter()
+        try:
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise ScoreWorkerError(
+                f"rust engine micro-batch execution failed: {error}"
+            ) from error
+        if proc.returncode != 0:
+            raise ScoreWorkerError(
+                "rust engine micro-batch exited with status "
+                f"{proc.returncode}: {proc.stderr.strip()}"
+            )
+        try:
+            payload = json.loads(proc.stdout)
+        except json.JSONDecodeError as error:
+            raise ScoreWorkerError(
+                "rust engine returned malformed JSON output"
+            ) from error
+        elapsed = max(1e-9, time.perf_counter() - started)
+
+        evaluated = int(payload["total_evaluations"])
+        accepted = int(payload["accepted"])
+        improvements_local = int(payload["improvements"])
+        cutoffs = int(payload["cutoffs"])
+        final_graph = BitGraph.from_graph6(str(payload["final_graph6"]))
+        best_graph_batch = BitGraph.from_graph6(str(payload["best_graph6"]))
+        final_score = ScoreResult(
+            valid=True,
+            witness_counts=tuple(
+                sorted(
+                    (int(k), int(v))
+                    for k, v in payload["final_witness_counts"].items()
+                )
+            ),
+            weighted_penalty=int(payload["final_weighted_penalty"]),
+            complete=bool(payload["final_complete"]),
+            simplicity=final_graph.size(),
+        )
+        best_score_batch = ScoreResult(
+            valid=True,
+            witness_counts=tuple(
+                sorted(
+                    (int(k), int(v))
+                    for k, v in payload["best_witness_counts"].items()
+                )
+            ),
+            weighted_penalty=int(payload["best_weighted_penalty"]),
+            complete=bool(payload["best_complete"]),
+            simplicity=best_graph_batch.size(),
+        )
+
+        self.high_water += evaluated
+        self.algorithm_evaluated += evaluated
+        self.total_accepted += accepted
+        self.graph = final_graph
+        self.score = final_score
+        self.current_graph_key = self._full_search_key(self.graph)
+        self.current_candidate_id = self._candidate_id(self.graph)
+        self.current_evaluation_index = self.high_water
+        if self.mutation_context is not None:
+            self.mutation_context.invalidate()
+
+        improvements = 0
+        trajectory: list[dict[str, Any]] = []
+        if best_score_batch.ordering_key < self.best_score.ordering_key:
+            self.best_graph = best_graph_batch
+            self.best_score = best_score_batch
+            self.best_candidate_id = self._candidate_id(self.best_graph)
+            self.best_evaluation_index = self.high_water
+            self.total_improvements += max(1, improvements_local)
+            improvements = max(1, improvements_local)
+            trajectory.append(
+                {
+                    "evaluation": evaluated,
+                    "ordering_key": list(self.best_score.ordering_key),
+                    "scalar": _score_scalar(self.best_score),
+                }
+            )
+            if self.algorithm == "random_restart":
+                self.best_provenance = self._independent_sample_provenance(
+                    graph_sha256=self._graph_sha256(self.best_graph),
+                    score=self.best_score,
+                    evaluation_index=self.high_water,
+                    record_status="global_record",
+                )
+
+        legal = max(evaluated, accepted + cutoffs)
+        termination_reason = (
+            "evaluation_limit"
+            if evaluated >= target
+            else "wall_limit"
+        )
+        plateau_evaluations = 0 if improvements > 0 else evaluated
+        plateau_threshold = max(
+            1, int(self.parameters.get("batch_candidates", target))
+        )
+        score_counts_truncated = (
+            not initial_score.complete
+            or not final_score.complete
+            or not self.best_score.complete
+        )
+        result: dict[str, Any] = {
+            "evaluated": evaluated,
+            "accepted": accepted,
+            "legal": legal,
+            "improvements": improvements,
+            "duplicates": 0,
+            "early_rejected": cutoffs,
+            "elapsed_seconds": elapsed,
+            "candidates_per_second": evaluated / elapsed,
+            "acceptance_rate": accepted / max(1, legal),
+            "duplicate_rate": 0.0,
+            "diversity": 1.0,
+            "operator_yield": improvements / max(1, legal),
+            "best_score": list(self.best_score.ordering_key),
+            "best_scalar": _score_scalar(self.best_score),
+            "initial_score": _score_payload(initial_score),
+            "final_score": _score_payload(self.score),
+            "score_trajectory_summary": {
+                "initial": list(initial_score.ordering_key),
+                "final": list(self.score.ordering_key),
+                "best": list(self.best_score.ordering_key),
+                "improvement_count": improvements,
+                "improvement_samples": trajectory,
+                "samples_truncated": improvements > len(trajectory),
+            },
+            "operator_statistics": {
+                "accepted": accepted,
+                "legal": legal,
+                "improvements": improvements,
+                "duplicates": 0,
+                "acceptance_rate": accepted / max(1, legal),
+                "duplicate_rate": 0.0,
+                "operator_yield": improvements / max(1, legal),
+                "mutation_operators": {
+                    "rust_native_batch": {
+                        "uses": evaluated,
+                        "accepted": accepted,
+                        "global_records": improvements,
+                    }
+                },
+            },
+            "best_evaluation": evaluated if improvements > 0 else 0,
+            "plateau_evaluations": plateau_evaluations,
+            "plateau_signal": {
+                "plateau": False,
+                "evaluations_since_last_global_record": plateau_evaluations,
+                "accepted_moves_since_last_global_record": accepted,
+                "diversity": 1.0,
+                "remaining_evaluation_budget": max(0, target - evaluated),
+                "evaluation_threshold": plateau_threshold,
+                "telemetry_only": True,
+            },
+            "global_record_count": improvements,
+            "actual_restart_occurred": self.actual_restarts > 0,
+            "actual_restart_count": self.actual_restarts,
+            "score_counts_truncated_by_witness_cap": score_counts_truncated,
+            "mutation_ancestry": _ancestry_payload(
+                global_records=[],
+                final_best_ancestry=self.best_ancestry,
+                current_accepted_ancestry=list(self.accepted_ancestry),
+                maximum_evaluations=target,
+            ),
+            "candidate_provenance": (
+                dict(self.best_provenance)
+                if self.best_provenance is not None
+                else None
+            ),
+            "termination_reason": termination_reason,
+            "end_high_water": self.high_water,
+            "score_backend": {
+                "implementation": "rust",
+                "early_exit_enabled": self.score_early_exit_enabled,
+                "duplicate_key_scheme": self.tabu_key_scheme,
+                "score_worker_protocol_version": PROTOCOL_VERSION,
+                "mutation_witness_cache_enabled": (
+                    self.mutation_witness_cache_enabled
+                ),
+                "score_worker_sha256": self.score_worker.binary_sha256,
+                "cpp_requests": 0,
+                "rust_batches": 1,
+                "worker_restarts": 0,
+            },
+        }
+        if self.timing_ns is not None:
+            result["timing"] = _timing_payload(
+                self.timing_ns,
+                search_loop_seconds=elapsed,
+                score_profile=None,
+                mutation_profile=None,
+            )
+        if self.instrumentation_enabled:
+            result["seed_generation"] = {
+                "schema_version": 1,
+                "batch": self.seed_generation_batch.payload(
+                    graph_family=self.spec.graph_family,
+                    graph_order=int(self.parameters["order"]),
+                    generator_mode=self._effective_seed_generator_mode(),
+                ),
+                "cumulative": self.seed_generation_cumulative.payload(
+                    graph_family=self.spec.graph_family,
+                    graph_order=int(self.parameters["order"]),
+                    generator_mode=self._effective_seed_generator_mode(),
+                ),
+            }
+        return result
+
+    def _empty_rust_batch_result(
+        self, source_checkpoint_id: str | None
+    ) -> dict[str, Any]:
+        self.batch_source_checkpoint_id = source_checkpoint_id
+        return {
+            "evaluated": 0,
+            "accepted": 0,
+            "legal": 0,
+            "improvements": 0,
+            "duplicates": 0,
+            "early_rejected": 0,
+            "elapsed_seconds": 1e-9,
+            "candidates_per_second": 0.0,
+            "acceptance_rate": 0.0,
+            "duplicate_rate": 0.0,
+            "diversity": 1.0,
+            "operator_yield": 0.0,
+            "best_score": list(self.best_score.ordering_key),
+            "best_scalar": _score_scalar(self.best_score),
+            "initial_score": _score_payload(self.score),
+            "final_score": _score_payload(self.score),
+            "score_trajectory_summary": {
+                "initial": list(self.score.ordering_key),
+                "final": list(self.score.ordering_key),
+                "best": list(self.best_score.ordering_key),
+                "improvement_count": 0,
+                "improvement_samples": [],
+                "samples_truncated": False,
+            },
+            "operator_statistics": {
+                "accepted": 0,
+                "legal": 0,
+                "improvements": 0,
+                "duplicates": 0,
+                "acceptance_rate": 0.0,
+                "duplicate_rate": 0.0,
+                "operator_yield": 0.0,
+                "mutation_operators": {},
+            },
+            "best_evaluation": 0,
+            "plateau_evaluations": 0,
+            "plateau_signal": {
+                "plateau": False,
+                "evaluations_since_last_global_record": 0,
+                "accepted_moves_since_last_global_record": 0,
+                "diversity": 1.0,
+                "remaining_evaluation_budget": 0,
+                "evaluation_threshold": 1,
+                "telemetry_only": True,
+            },
+            "global_record_count": 0,
+            "actual_restart_occurred": False,
+            "actual_restart_count": self.actual_restarts,
+            "score_counts_truncated_by_witness_cap": not self.best_score.complete,
+            "mutation_ancestry": _ancestry_payload(
+                global_records=[],
+                final_best_ancestry=self.best_ancestry,
+                current_accepted_ancestry=list(self.accepted_ancestry),
+                maximum_evaluations=0,
+            ),
+            "candidate_provenance": (
+                dict(self.best_provenance)
+                if self.best_provenance is not None
+                else None
+            ),
+            "termination_reason": "stopped",
+            "end_high_water": self.high_water,
+            "score_backend": {
+                "implementation": "rust",
+                "early_exit_enabled": self.score_early_exit_enabled,
+                "duplicate_key_scheme": self.tabu_key_scheme,
+                "score_worker_protocol_version": PROTOCOL_VERSION,
+                "mutation_witness_cache_enabled": (
+                    self.mutation_witness_cache_enabled
+                ),
+                "score_worker_sha256": self.score_worker.binary_sha256,
+                "cpp_requests": 0,
+                "rust_batches": 0,
+                "worker_restarts": 0,
+            },
+        }
 
     def _accept(self, candidate_score: ScoreResult, key: str) -> bool:
         if self.algorithm == "simulated_annealing":
@@ -2014,6 +2431,7 @@ def _lane_worker(
     fork_seed: int | None,
     memory_limit_bytes: int | None,
     score_profiling_enabled: bool,
+    engine_backend: str | None = None,
 ) -> None:
     preview_stop: Event | None = None
     preview_thread: Thread | None = None
@@ -2039,6 +2457,7 @@ def _lane_worker(
             fork_seed,
             score_profiling_enabled=score_profiling_enabled,
             score_worker_memory_bytes=DEFAULT_WORKER_MEMORY_BYTES,
+            engine_backend=engine_backend,
         )
         lane_version = spec.lane_version
         resource_share = spec.resource_share
@@ -2298,7 +2717,7 @@ class LaneManager:
         self,
         campaign_dir: Path,
         *,
-        max_active_lanes: int = 8,
+        max_active_lanes: int = 16,
         event_capacity: int = 512,
         command_capacity: int = 32,
         telemetry_windows: int = 120,
@@ -2306,6 +2725,7 @@ class LaneManager:
         pinned_checkpoints: int = 128,
         memory_limit_bytes: int | None = 512 * 1024 * 1024,
         score_profiling_enabled: bool = True,
+        engine_backend: str | None = None,
     ):
         if checkpoints_per_lane < 2:
             raise ValueError("checkpoints_per_lane must be at least 2")
@@ -2321,6 +2741,7 @@ class LaneManager:
         self.pinned_checkpoints = pinned_checkpoints
         self.memory_limit_bytes = memory_limit_bytes
         self.score_profiling_enabled = score_profiling_enabled
+        self.engine_backend = normalize_engine_backend(engine_backend)
         self.context = get_context("spawn")
         self.events = self.context.Queue(maxsize=event_capacity)
         self.lanes: dict[str, LaneRuntime] = {}
@@ -2360,6 +2781,7 @@ class LaneManager:
                 fork_seed,
                 self.memory_limit_bytes,
                 self.score_profiling_enabled,
+                self.engine_backend,
             ),
             name=f"sglab-lane-{spec.lane_id}",
         )
@@ -3074,6 +3496,7 @@ def run_bounded_lane_batch(
     optimized_legacy_key: bool = True,
     independent_sample_provenance: bool = True,
     proposal_ranking_profile_enabled: bool = False,
+    engine_backend: str | None = None,
 ) -> dict[str, Any]:
     """Run exactly one bounded batch in the coordinator process."""
 
@@ -3091,6 +3514,7 @@ def run_bounded_lane_batch(
         optimized_legacy_key=optimized_legacy_key,
         independent_sample_provenance=independent_sample_provenance,
         proposal_ranking_profile_enabled=proposal_ranking_profile_enabled,
+        engine_backend=engine_backend,
     )
     try:
         metrics = kernel.run_batch(

@@ -129,7 +129,7 @@ PRODUCTION_CONTEXT_MODE = DirectorContextMode.STATELESS_TURNS
 PRODUCTION_MAXIMUM_DIRECTOR_CYCLES = 12
 PRODUCTION_MAXIMUM_DIRECTOR_TURNS = 24
 PRODUCTION_TURN_TIMEOUT_SECONDS = 300
-PRODUCTION_MAX_ACTIVE_LANES = 8
+PRODUCTION_MAX_ACTIVE_LANES = 16
 PRODUCTION_LANE_MEMORY_BYTES = 512 * 1024 * 1024
 PRODUCTION_VERIFICATION_QUEUE = 32
 PRODUCTION_VERIFICATION_TIMEOUT_SECONDS = 60
@@ -274,6 +274,7 @@ def prepare_campaign_plan(
     director_mode: str = "llm",
     passive_seed: int = 0,
     proposal_ranking: str | None = None,
+    engine_backend: str | None = None,
 ) -> dict[str, Any]:
     if director_mode not in DIRECTOR_MODES:
         raise CampaignPlanError("unsupported director mode")
@@ -285,6 +286,12 @@ def prepare_campaign_plan(
         proposal_ranking = normalize_proposal_ranking_catalog_id(
             proposal_ranking
         )
+    except ValueError as error:
+        raise CampaignPlanError(str(error)) from error
+    from .lanes import normalize_engine_backend
+
+    try:
+        resolved_engine_backend = normalize_engine_backend(engine_backend)
     except ValueError as error:
         raise CampaignPlanError(str(error)) from error
     if proposal_ranking is not None and director_mode != "llm":
@@ -390,6 +397,11 @@ def prepare_campaign_plan(
                 "checkpoints_per_lane": 8,
                 "pinned_checkpoints": 128,
                 "score_profiling_enabled": True,
+                **(
+                    {"engine_backend": resolved_engine_backend}
+                    if resolved_engine_backend != "cpp"
+                    else {}
+                ),
             },
             "scientific_memory": {
                 "scientific_state_soft_limit_bytes": (
@@ -1475,6 +1487,7 @@ class ResearchCampaignRunner:
                 resources.lane_memory_bytes
             ),
             score_profiling_enabled=score_profiling_enabled,
+            engine_backend=search_plan.get("engine_backend"),
         )
         dispatcher = LaneActionDispatcher(
             store=store, manager=manager, campaign_id=campaign_id

@@ -7,8 +7,9 @@ CXX ?= c++
 CXXFLAGS ?= -O3 -std=c++17 -Wall -Wextra -Wpedantic
 CYCLECHECK := _build/sglab-cyclecheck
 SCORE_WORKER := _build/sglab-score-worker
+RUST_ENGINE := _build/sglab-rust-engine
 
-.PHONY: doctor test check init serve dashboard-smoke benchmark-smoke cyclecheck score-worker clean
+.PHONY: doctor test check init serve dashboard-smoke benchmark-smoke cyclecheck score-worker rust-engine clean
 
 doctor:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m sglab doctor
@@ -30,6 +31,13 @@ score-worker: $(SCORE_WORKER)
 $(SCORE_WORKER): cpp/sglab_score_worker.cpp
 	mkdir -p _build
 	$(CXX) $(CXXFLAGS) $< -o $@
+
+rust-engine: $(RUST_ENGINE)
+
+$(RUST_ENGINE): rust/sglab-engine/Cargo.toml rust/sglab-engine/src/*.rs
+	mkdir -p _build
+	RUSTFLAGS="-C target-cpu=native" cargo build --release --manifest-path rust/sglab-engine/Cargo.toml
+	cp rust/sglab-engine/target/release/sglab-rust-engine $@
 
 init:
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m sglab init --workspace $(WORKSPACE)

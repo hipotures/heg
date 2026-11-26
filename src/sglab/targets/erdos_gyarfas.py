@@ -355,14 +355,15 @@ class ErdosGyarfasPlugin:
                 retry_budget = 2_000
                 if trace is not None:
                     trace.retry_budget = retry_budget
-                high_count = 2 if n % 2 == 0 else 1
-                high_count = min(
-                    high_count, max(1, math.floor(3 * n / 7))
-                )
-                degrees = [4] * high_count + [3] * (n - high_count)
-                if sum(degrees) % 2:
-                    high_count += 1
+                if n == 6:
+                    high_count = 1
+                    degrees = [5] + [3] * 5
+                else:
+                    high_count = 2 if n % 2 == 0 else 1
                     degrees = [4] * high_count + [3] * (n - high_count)
+                    if sum(degrees) % 2:
+                        high_count += 1
+                        degrees = [4] * high_count + [3] * (n - high_count)
                 high = set(range(high_count))
                 for attempt in range(1, retry_budget + 1):
                     if trace is not None:
@@ -391,12 +392,8 @@ class ErdosGyarfasPlugin:
                         edges.add(tuple(sorted((u, v))))
                     if valid:
                         graph = BitGraph.from_edges(n, edges)
-                        if graph.is_connected() and all(
-                            any(
-                                graph.degree(v) == 3
-                                for v in graph.neighbors(u)
-                            )
-                            for u in range(n)
+                        if graph.is_connected() and self._minimal_structure_valid(
+                            graph
                         ):
                             return graph
                 if trace is not None:
@@ -717,7 +714,9 @@ class ErdosGyarfasPlugin:
         weighted = 0
         complete = True
         for result in results:
-            count = min(result.count, cap)
+            # Budget exhaustion is unknown, not cycle absence; charge the cap
+            # conservatively so search cannot reward-hack truncated DFS counts.
+            count = cap if not result.complete else min(result.count, cap)
             counts.append((result.length, count))
             weighted += count * max(1, 64 // result.length)
             complete = (
@@ -788,17 +787,61 @@ class ErdosGyarfasPlugin:
         }
 
     @staticmethod
-    def _minimal_structure_valid(graph: BitGraph) -> bool:
+    def _has_at_most_two_blocks(graph: BitGraph) -> bool:
+        """Return True iff graph is connected and has at most two biconnected
+        blocks (biconnected or 1-clique-sum of two biconnected graphs, per
+        Ducoffe & Dumitru, arXiv:2609.28594)."""
+
+        n = graph.n
+        if n < 3:
+            return True
+        disc = [0] * n
+        low = [0] * n
+        timer = 0
+        blocks = 0
+
+        def dfs(u: int, parent: int) -> None:
+            nonlocal timer, blocks
+            timer += 1
+            disc[u] = low[u] = timer
+            bits = graph.rows[u]
+            while bits:
+                lsb = bits & -bits
+                v = lsb.bit_length() - 1
+                bits ^= lsb
+                if v == parent:
+                    continue
+                if disc[v] == 0:
+                    dfs(v, u)
+                    if low[v] < low[u]:
+                        low[u] = low[v]
+                    if low[v] >= disc[u]:
+                        blocks += 1
+                        if blocks > 2:
+                            return
+                elif disc[v] < low[u]:
+                    low[u] = disc[v]
+                if blocks > 2:
+                    return
+
+        dfs(0, -1)
+        return timer == n and blocks <= 2
+
+    @classmethod
+    def _minimal_structure_valid(cls, graph: BitGraph) -> bool:
         degree_three = sum(graph.degree(u) == 3 for u in range(graph.n))
-        if degree_three < math.ceil(4 * graph.n / 7):
+        # Ducoffe & Dumitru (arXiv:2609.28594): strictly > 2/3 of vertices have degree 3.
+        if 3 * degree_three <= 2 * graph.n:
             return False
         high = {u for u in range(graph.n) if graph.degree(u) >= 4}
         if any(u in high and v in high for u, v in graph.edges()):
             return False
-        return all(
+        if not all(
             any(graph.degree(v) == 3 for v in graph.neighbors(u))
             for u in range(graph.n)
-        )
+        ):
+            return False
+        return cls._has_at_most_two_blocks(graph)
 
 
 PLUGIN = ErdosGyarfasPlugin()
