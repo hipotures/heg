@@ -8,6 +8,7 @@ mod protocol;
 mod rng;
 mod search;
 mod spectral;
+mod voltage_bipartite;
 
 use std::env;
 use std::process;
@@ -728,11 +729,157 @@ fn cmd_lns_polish(args: &[String]) -> i32 {
     0
 }
 
+fn cmd_bjorklund_c32(args: &[String]) -> i32 {
+    let mut g6 = String::new();
+    let mut length = 32usize;
+    let mut rounds = 2usize;
+    let mut workers = 16usize;
+    let mut seed = 20261126u64;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--graph6" => {
+                i += 1;
+                g6 = args.get(i).cloned().unwrap_or_default();
+            }
+            "--length" => {
+                i += 1;
+                length = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(32);
+            }
+            "--rounds" => {
+                i += 1;
+                rounds = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(2);
+            }
+            "--workers" => {
+                i += 1;
+                workers = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(16);
+            }
+            "--seed" => {
+                i += 1;
+                seed = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(20261126);
+            }
+            "--json" => {}
+            other => {
+                eprintln!("unknown argument: {other}");
+                return 2;
+            }
+        }
+        i += 1;
+    }
+    let graph = match BitGraph::from_graph6(&g6) {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!("graph6 error: {e}");
+            return 2;
+        }
+    };
+    match crate::voltage_bipartite::bipartite_cycle_sieve_gf2_16(
+        &graph, length, rounds, workers, seed, None,
+    ) {
+        Ok(res) => {
+            println!(
+                "{{\"order\":{},\"length\":{},\"found\":{},\"rounds\":{},\"roots_tested\":{},\"elapsed_ms\":{:.3},\"pclmulqdq_enabled\":{}}}",
+                graph.n,
+                res.length,
+                res.found,
+                res.rounds,
+                res.roots_tested,
+                res.elapsed_ms,
+                res.pclmulqdq_enabled
+            );
+            0
+        }
+        Err(e) => {
+            eprintln!("bjorklund-c32 error: {e}");
+            2
+        }
+    }
+}
+
+fn cmd_voltage_search(args: &[String]) -> i32 {
+    let mut base_name = "theta4".to_string();
+    let mut group_name = "f20".to_string();
+    let mut steps = 50_000u64;
+    let mut workers = 16usize;
+    let mut seed = 20261126u64;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--base" => {
+                i += 1;
+                base_name = args.get(i).cloned().unwrap_or_else(|| "theta4".to_string());
+            }
+            "--group" => {
+                i += 1;
+                group_name = args.get(i).cloned().unwrap_or_else(|| "f20".to_string());
+            }
+            "--steps" => {
+                i += 1;
+                steps = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(50_000);
+            }
+            "--workers" => {
+                i += 1;
+                workers = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(16);
+            }
+            "--seed" => {
+                i += 1;
+                seed = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(20261126);
+            }
+            "--json" => {}
+            other => {
+                eprintln!("unknown argument: {other}");
+                return 2;
+            }
+        }
+        i += 1;
+    }
+    let base = match crate::voltage_bipartite::BipartiteCubicBase::parse(&base_name) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("{e}");
+            return 2;
+        }
+    };
+    let group = match crate::voltage_bipartite::FiniteGroup::parse(&group_name) {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!("{e}");
+            return 2;
+        }
+    };
+    let summary =
+        crate::voltage_bipartite::run_voltage_lift_search(&base, &group, steps, workers, seed);
+    let best_g6_json = match summary.best_graph6 {
+        Some(ref g6) => format!("\"{}\"", escape_json_str(g6)),
+        None => "null".to_string(),
+    };
+    let v_json: Vec<String> = summary.best_voltages.iter().map(|x| x.to_string()).collect();
+    println!(
+        "{{\"base\":\"{}\",\"group\":\"{}\",\"order\":{},\"evaluated_lifts\":{},\"valid_lifts\":{},\"c4_c8_zero_hits\":{},\"c4_c8_c16_zero_hits\":{},\"c32_sieve_absent_hits\":{},\"best_c4\":{},\"best_c8\":{},\"best_c16\":{},\"best_c32_flag\":{},\"best_voltages\":[{}],\"wall_seconds\":{:.3},\"best_graph6\":{}}}",
+        summary.base_name,
+        summary.group_name,
+        summary.order,
+        summary.evaluated_lifts,
+        summary.valid_lifts,
+        summary.c4_c8_zero_hits,
+        summary.c4_c8_c16_zero_hits,
+        summary.c32_sieve_absent_hits,
+        summary.best_key.0,
+        summary.best_key.1,
+        summary.best_key.2,
+        summary.best_key.3,
+        v_json.join(","),
+        summary.wall_seconds,
+        best_g6_json
+    );
+    0
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
         eprintln!(
-            "usage: sglab-rust-engine --version | --serve | score | bench-score | search | verify-exact | lns-polish"
+            "usage: sglab-rust-engine --version | --serve | score | bench-score | search | verify-exact | lns-polish | voltage-search | bjorklund-c32"
         );
         process::exit(2);
     }
@@ -747,6 +894,8 @@ fn main() {
         "search" => cmd_search(&args[2..]),
         "verify-exact" => cmd_verify_exact(&args[2..]),
         "lns-polish" => cmd_lns_polish(&args[2..]),
+        "voltage-search" => cmd_voltage_search(&args[2..]),
+        "bjorklund-c32" => cmd_bjorklund_c32(&args[2..]),
         other => {
             eprintln!("unknown subcommand: {other}");
             2

@@ -2,6 +2,12 @@
 
 Last implementation audit: **2026-11-26**.
 
+## Wave D2: Bipartite `n ∈ [70, 128]` Voltage-Lift Search & x86-64 `PCLMULQDQ` Björklund $\mathrm{GF}(2^{16})$ Narrow Sieve
+
+- **Hardware `PCLMULQDQ` Bipartite Björklund Narrow Sieve (`rust/sglab-engine/src/voltage_bipartite.rs`, `main.rs`)**: Implemented `_mm_clmulepi64_si128`-accelerated $\mathrm{GF}(2^{16})$ arithmetic, Gray-code Ryser inclusion-exclusion over $2^{h-1}$ subsets on the smaller bipartition with exact characteristic-2 non-backtracking 2-step transitions (`C32` detection in `32.3–57.1 ms` on 16 cores at $n = 72..120$, zero false positives, 2-round error $< 5.2 \times 10^{-7}$), exposed via `sglab-rust-engine bjorklund-c32`.
+- **Bipartite Cubic Voltage-Lift Search (`voltage-search`)**: Supports 9 non-abelian, non-nilpotent even-order finite groups ($D_6, A_4, D_7, D_9, D_{10}, F_{20}, S_4, D_{14}, D_{15}$) over 4 bipartite cubic bases (`theta4`, `k33`, `theta6`, `cube8`) with orbit-reduced exact `C4`/`C8`/`C16` MitM + Björklund `C32` verification.
+- **Verification & Experiment 10 (`docs/reports/M6_WAVE_D2_VOLTAGE_BJORKLUND_2026_11_26.md`)**: `16/16` Rust release tests (`0` warnings, `0.37 s`), `7/7` Python parity tests; scanned `746,472` lifts (`671,660` valid cubic bipartite graphs, `14` exhaustive families across $n = 72..120$) in `0.11 s`, ruling out `{C4, C8, C16}`-free lifts in all 14 exhaustive families.
+
 ## Wave D1: Native Rust Exact-Matching Micro-LNS Destroy-and-Repair (`C4 = C8 = 0`)
 
 - **Exact-Matching Micro-LNS (`rust/sglab-engine/src/lns.rs`, `search.rs`, `main.rs`)**: Computes exact `C16` edge-participation heat `w_16(e)` via Bitset MitM, destroys `k in [4, 8]` pairwise-disjoint hot/cluster edges (`2k <= 16` ports), precomputes external path-length bitmasks `L_ext(p, q) <= 7` in frozen `G_rest`, and exhaustively solves legal `C4 = C8 = 0` strictly 2-connected perfect matchings via MRV branch-and-bound with incremental `C4`/`C8` pruning and exact early-aborting MitM `C16`. Exposed via `sglab-rust-engine lns-polish` (16-core shared-champion parallel polish) and opt-in `search --lns-interval`.
