@@ -1705,6 +1705,39 @@ pub fn count_cycles_pruned_u64(
     }
 
     fn dfs(st: &mut PrunedState<'_>, vertex: usize, seen: u64, rem: usize) {
+        if rem == 3 {
+            // Unrolled 3-level leaf collapse: vertex -> u -> w -> last (in closing_set) -> start.
+            let mut u_bits = st.rows[vertex] & !seen & st.dist_mask[3];
+            while u_bits != 0 {
+                let u = u_bits.trailing_zeros() as usize;
+                u_bits &= u_bits - 1;
+                st.nodes += 1;
+                if st.budget != 0 && st.nodes > st.budget {
+                    st.budget_exhausted = true;
+                    return;
+                }
+                let seen_u = seen | (1u64 << u);
+                let closing_avail = st.closing_set & !seen_u;
+                if closing_avail == 0 {
+                    continue;
+                }
+                let mut w_bits = st.rows[u] & !seen_u & st.adj_to_closing;
+                while w_bits != 0 {
+                    let w = w_bits.trailing_zeros() as usize;
+                    w_bits &= w_bits - 1;
+                    let c = (st.rows[w] & closing_avail).count_ones();
+                    if c != 0 {
+                        st.count += c;
+                        if st.count >= st.stop_lim {
+                            st.cutoff_reached =
+                                st.stop_at_count != 0 && st.count >= st.stop_at_count;
+                            return;
+                        }
+                    }
+                }
+            }
+            return;
+        }
         if rem == 2 {
             // Two edges left: vertex -> w -> last (in closing_set) -> start.
             let closing_avail = st.closing_set & !seen;
