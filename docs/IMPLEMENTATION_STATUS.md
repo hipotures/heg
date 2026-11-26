@@ -2,6 +2,12 @@
 
 Last implementation audit: **2026-11-26**.
 
+## 2-Hour Multi-Basin Elite-Archive ILS-LNS Campaign (`n = 76, 74, 70`, `42.63B` Exact `u128` LNS Leaves)
+
+- **119.84-minute 16-core `u128` ILS-LNS campaign (`docs/reports/M6_CAMPAIGN_2H_ILS_LNS_CUBIC_F4_2026_11_26.md`)**: Evaluated **`42,627,141,833`** exact `C4 = C8 = 0` `u128` LNS leaves (`5.93M` leaves/s across `308` rounds, `0` errors) using 3-regime `C4 = C8 = 0` perturbations (`defect_ball`, `medium_hop`, `deep_ruin`) and automatic 45s `k = 5..8` deep polish:
+  - **New strictly cubic record at `n = 74`**: cut exact `C16` in half from `6` down to **`3`** (`m = 111`, 3-regular, strictly 2-connected, `bridges = 0`, `M4(4,8) = ABSENT`, Rust `verify-exact = 0.89 ms`, Python exact `C16 = 3`; `15` distinct `C16 = 3` basins across `8.44B` leaves).
+  - **Deep floor confirmation**: `n = 76` cubic (`30.77B` leaves, `43` distinct `C16 = 3` basins), `n = 70` cubic (`2.17B` leaves, `6` distinct `C16 = 4, C64 = 0` basins), and `n = 76` mixed `{3:74, 4:2}` (`1.24B` leaves, `4` distinct `C16 = 4` basins). No strictly cubic `f_cubic(4) < 78` witness was found; cumulative exact LNS evaluations across Wave D1/E + 1h + 2h campaigns now reach `83.26B` leaves.
+
 ## Wave E: `u128` Exact-Matching Micro-LNS (`n <= 128`) & `f(4) < 78` Hunt (`f_{\delta \ge 3}(4) \le 77` Certified)
 
 - **`u128` Exact Bitset MitM `C16` & `u128` Exact-Matching Micro-LNS (`rust/sglab-engine/src/cycles.rs`, `lns.rs`, `main.rs`)**: Added `count_c16_mitm_u128` (wired into `count_cycles_fast_u128`, `verify-exact`, and `lns-polish` for `64 < n <= 128`) and full `u128` Exact-Matching Micro-LNS (`lns_destroy_and_repair_u128`, `run_parallel_lns_polish_u128` with instant `AtomicBool` stop on `best_c16 == 0`). Verified with `16/16` Rust release tests (`0` warnings, including `u128` MitM parity vs exact DFS on `n = 70` and `u128` LNS on `n = 70`) and `11/11` Python parity/resource tests (`--serve` v2 intact).
