@@ -2,6 +2,16 @@
 
 Last implementation audit: **2026-11-26**.
 
+## Rust engine optimization waves 1–13 (L1 `BitGraph64`, delta `C4`/`C8`/`C16`, `CycleBank64`, Pósa+Thomason)
+
+Completed 13 verified optimization waves inside `rust/sglab-engine/` without modifying the legacy Python or C++ stack or relaxing exactness/soundness invariants (`--serve` protocol v2 remains bit-for-bit parity-tested against `sglab-score-worker` in `tests/test_rust_engine.py`, M4 remains the sole counterexample certification authority, and all 5 Rust release unit tests prove exactness/soundness of every accelerated path):
+
+- **Compact representation & zero-allocation hot loop**: 512-byte L1-resident `BitGraph64` (`[u64; 64]`), `Copy` `ScoreResult` with per-length `complete_mask`, stack-only `StackWitnesses`, `O(1)` edge-index patching (`removed_idx`), bidirectional `are_connected`, and 64-bit backward-shift `TabuRing64`.
+- **Exact analytic, MitM, and incremental delta counters**: bitwise analytic `C4` (~0.15 µs) + exact `O(1)` delta `C4` (~10 ns) and exact delta `C8` (~50 ns) on 2-edge switches, zero-minus exact delta `C16` for `n <= 40`, register-resident recursive `count_cycles_pruned_u64` with `closing_set`-seeded `dist_mask`, `adj_to_closing`, and 3-level `rem == 3` leaf collapse, and `[C4, C8, C16, C32]` evaluation order when delta `C4`/`C8` are exact.
+- **Hamiltonian acceleration (`n=32`, `n=64`)**: 2-bit register-only `(hi, lo)` cubic Hamiltonian DFS (`count_hamiltonian_cubic_u64`) plus sound Pósa extension + cubic branchless Thomason lollipop harvester with zero-copy reverse reopen, 4-seed Phase-1 skip, fused swap+`pos_of` updates, `edge_mix64`, and open-addressed dedup (`n=64` direct scorer `p50=56.3 µs`, `p95=69.0 µs`).
+- **Orientation-aware transposed bitset `CycleBank64` (`rust/sglab-engine/src/bank.rs`)**: proves surviving and orientation-matched reconnected cycles across 2-edge switches in ~10 ns using interleaved `edge_bits`, `u8` 4 KB `edge_id`, branchless zero-division `insert_cycle`, 4-root MitM `C16` bank harvesting (~15 µs), 2-closing-vertex full-graph `C32` harvesting with lazy leaf hashing, 384-slot `C64` bank with `dir_valid` incremental retention, and zero-count-skip `WitnessCache` with `O(m)` bank witness extraction.
+- **Verified 16-core throughput (`Ryzen 9 7950X3D`, `cubic_first` ILS-tabu, 2 s runs)**: `n=32`: **3.50M ev/s** (`138.5×` 1-core vs legacy Py+C++), `n=50`: **3.28M ev/s** (`58×`), `n=60`: **3.96M ev/s** (`81.5×`), `n=64`: **668k ev/s** (`35.9×`); `minimal_structure_mixed_degree` 16-core ILS-tabu: `n=50` **3.11M**, `n=60` **3.64M**, `n=64` **645k ev/s**; 16-core SA (`cubic_first`): `n=50` **2.79M**, `n=60` **3.08M**, `n=64` **417k ev/s**.
+
 ## Native Rust search engine, campaign wiring, and Ducoffe–Dumitru filter
 
 Added an optional zero-dependency Rust crate (`rust/sglab-engine/`, built via
