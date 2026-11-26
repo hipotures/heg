@@ -36,6 +36,165 @@ impl GraphMode {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SeedStyle {
+    Random,
+    TwoBlock,
+    Mixed,
+}
+
+impl SeedStyle {
+    pub fn parse(s: &str) -> Result<Self, String> {
+        match s {
+            "random" => Ok(Self::Random),
+            "two_block" | "two-block" | "ducoffe_two_block" => Ok(Self::TwoBlock),
+            "mixed" => Ok(Self::Mixed),
+            _ => Err(format!("unsupported seed style: {s}")),
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Random => "random",
+            Self::TwoBlock => "two_block",
+            Self::Mixed => "mixed",
+        }
+    }
+}
+
+/// Build one 2-connected block of size `verts.len() >= 6` where `verts[0]` is
+/// the shared cut-vertex (degree 2 inside this block), internal vertices have
+/// degree 3, and if `verts.len()` is even one internal vertex not adjacent to
+/// `verts[0]` has degree 4 so the block degree sum is even.
+fn fill_biconnected_block(rng: &mut Rng, g: &mut BitGraph, verts: &[usize]) -> bool {
+    let k = verts.len();
+    if k < 6 {
+        return false;
+    }
+    let mut ring = Vec::with_capacity(k);
+    ring.push(verts[0]);
+    let mut internal: Vec<usize> = verts[1..].to_vec();
+    let mut stubs = Vec::with_capacity(k + 2);
+
+    for _attempt in 0..256 {
+        ring.truncate(1);
+        rng.shuffle(&mut internal);
+        ring.extend_from_slice(&internal);
+
+        // Clear any edges from previous failed attempt on this block.
+        for &u in &ring {
+            for &v in &ring {
+                if u < v && g.has_edge(u, v) {
+                    g.remove_edge(u, v);
+                }
+            }
+        }
+
+        // Hamiltonian cycle on the block: guarantees 2-connectivity and gives
+        // cut-vertex `ring[0]` exact degree 2 (adjacent only to degree-3 vertices).
+        for idx in 0..k {
+            g.add_edge(ring[idx], ring[(idx + 1) % k]);
+        }
+
+        stubs.clear();
+        let high_pos = if k % 2 == 0 {
+            Some(2 + rng.gen_range(k - 3))
+        } else {
+            None
+        };
+        for pos in 1..k {
+            stubs.push(ring[pos]);
+            if Some(pos) == high_pos {
+                stubs.push(ring[pos]);
+            }
+        }
+        rng.shuffle(&mut stubs);
+
+        let mut ok = true;
+        while let Some(u) = stubs.pop() {
+            let mut chosen_idx = None;
+            let mut seen_valid = 0usize;
+            for (idx, &v) in stubs.iter().enumerate() {
+                if u != v && !g.has_edge(u, v) {
+                    seen_valid += 1;
+                    if rng.gen_range(seen_valid) == 0 {
+                        chosen_idx = Some(idx);
+                    }
+                }
+            }
+            if let Some(idx) = chosen_idx {
+                let v = stubs.swap_remove(idx);
+                g.add_edge(u, v);
+            } else {
+                ok = false;
+                break;
+            }
+        }
+        if ok {
+            return true;
+        }
+    }
+    false
+}
+
+/// Generate a Ducoffe-Dumitru legal 2-block 1-clique-sum seed of order `n`.
+/// For `11 <= n <= 61`, both blocks have size `<= 31`, which mathematically
+/// guarantees zero 32-cycles (`C32 == 0`) while keeping zero bridges, at most
+/// 3 independent degree-4 vertices, and strictly > 2/3 degree-3 vertices.
+/// Returns `(graph, block1_inner_mask)` where `block1_inner_mask` marks the
+/// internal (non-cut) vertices of block 1 when `n <= 64` (0 otherwise).
+pub fn generate_two_block_ducoffe_seed(rng: &mut Rng, n: usize) -> Result<(BitGraph, u64), String> {
+    if n < 11 {
+        let g = generate_seed(rng, n, GraphMode::MinimalStructureMixedDegree)?;
+        return Ok((g, 0));
+    }
+    if n > 128 {
+        return Err("order must be between 4 and 128".to_string());
+    }
+
+    let half = (n + 1) / 2;
+    let max_block = if n <= 61 { 31 } else { (n + 1) - 6 };
+    let lo = half
+        .saturating_sub(2)
+        .max(6)
+        .max((n + 1).saturating_sub(max_block));
+    let hi = (half + 2).min(max_block).min((n + 1) - 6);
+    let n1 = if lo < hi {
+        lo + rng.gen_range(hi - lo + 1)
+    } else {
+        lo
+    };
+
+    let mut perm: Vec<usize> = (0..n).collect();
+    for _attempt in 0..64 {
+        rng.shuffle(&mut perm);
+        let cut = perm[0];
+        let mut block1 = Vec::with_capacity(n1);
+        block1.push(cut);
+        block1.extend_from_slice(&perm[1..n1]);
+
+        let mut block2 = Vec::with_capacity(n + 1 - n1);
+        block2.push(cut);
+        block2.extend_from_slice(&perm[n1..n]);
+
+        let mut g = BitGraph::empty(n);
+        if fill_biconnected_block(rng, &mut g, &block1)
+            && fill_biconnected_block(rng, &mut g, &block2)
+            && g.is_connected()
+            && g.minimal_structure_valid()
+        {
+            let mut b1_mask = 0u64;
+            if n <= 64 {
+                for &v in &perm[1..n1] {
+                    b1_mask |= 1u64 << v;
+                }
+            }
+            return Ok((g, b1_mask));
+        }
+    }
+    Err("failed to generate 2-block Ducoffe-Dumitru seed within retry budget".to_string())
+}
+
 pub fn generate_seed(rng: &mut Rng, n: usize, mode: GraphMode) -> Result<BitGraph, String> {
     if !(4..=128).contains(&n) {
         return Err("order must be between 4 and 128".to_string());
@@ -272,8 +431,15 @@ fn try_two_edge_switch_u64(
     None
 }
 
+#[inline]
+fn edge_in_block1(e: Edge, block1_inner_mask: u64) -> bool {
+    (((1u64 << e.0) | (1u64 << e.1)) & block1_inner_mask) != 0
+}
+
 /// Mutate a 64-vertex graph using a pre-cached edge list (`edges_buf` is owned
 /// by the lane and only rebuilt when `graph` changes).
+/// When `block1_inner_mask != 0`, 2-edge switches only pair edges from the same
+/// block, preserving the 2-block 1-clique-sum decomposition in O(1).
 #[allow(clippy::too_many_arguments)]
 pub fn mutate_u64(
     graph: &BitGraph64,
@@ -282,6 +448,7 @@ pub fn mutate_u64(
     mode: GraphMode,
     targeted: bool,
     nonzero_len_mask: u8,
+    block1_inner_mask: u64,
     bank: Option<&CycleBank64>,
     witness_cache: &mut WitnessCache,
     scratch: &mut DfsScratch,
@@ -360,6 +527,12 @@ pub fn mutate_u64(
             let first = group[rng.gen_range(g_len)];
             let j = rng.gen_range(m);
             let remote = edges[j];
+            if block1_inner_mask != 0
+                && edge_in_block1(first, block1_inner_mask)
+                    != edge_in_block1(remote, block1_inner_mask)
+            {
+                continue;
+            }
             if let Some((cand, mut delta)) =
                 try_two_edge_switch_u64(graph, first, u16::MAX, remote, j as u16, rng, mode)
             {
@@ -377,6 +550,12 @@ pub fn mutate_u64(
         let mut j = rng.gen_range(m - 1);
         if j >= i {
             j += 1;
+        }
+        if block1_inner_mask != 0
+            && edge_in_block1(edges[i], block1_inner_mask)
+                != edge_in_block1(edges[j], block1_inner_mask)
+        {
+            continue;
         }
         if let Some(res) =
             try_two_edge_switch_u64(graph, edges[i], i as u16, edges[j], j as u16, rng, mode)
@@ -537,4 +716,87 @@ pub fn mutate(
         }
     }
     (*graph, MutationDelta::NONE)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cycles::score_graph_fast;
+
+    #[test]
+    fn two_block_ducoffe_seed_valid_and_c32_free_up_to_61() {
+        let mut rng = Rng::new(2026112601);
+        let mut scratch = DfsScratch::new();
+        for &n in &[11usize, 12, 20, 32, 36, 40, 44, 48, 50, 55, 60, 61, 64] {
+            let (g, b1_mask) = generate_two_block_ducoffe_seed(&mut rng, n)
+                .unwrap_or_else(|e| panic!("seed failed for n={n}: {e}"));
+            assert!(g.is_connected(), "n={n} not connected");
+            assert!(g.minimum_degree() >= 3, "n={n} min_deg < 3");
+            assert!(
+                g.minimal_structure_valid(),
+                "n={n} failed minimal_structure_valid"
+            );
+            assert_ne!(b1_mask, 0, "n={n} expected non-zero block1 mask");
+
+            let score = score_graph_fast(&g, 64, 50_000, None, &mut scratch)
+                .expect("unbounded score");
+            if n <= 61 {
+                for &(len, cnt) in score.counts_slice() {
+                    if len == 32 {
+                        assert_eq!(cnt, 0, "n={n} 2-block seed unexpectedly had C32={cnt}");
+                    }
+                }
+            }
+            if n == 64 {
+                for &(len, cnt) in score.counts_slice() {
+                    if len == 64 {
+                        assert_eq!(cnt, 0, "n=64 2-block seed unexpectedly had C64={cnt}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn within_block_mutations_preserve_two_block_and_c32_zero() {
+        let mut rng = Rng::new(2026112602);
+        let mut scratch = DfsScratch::new();
+        let mut wc = WitnessCache::new();
+        let (init, b1_mask) = generate_two_block_ducoffe_seed(&mut rng, 50).unwrap();
+        let mut g = BitGraph64::from_graph(&init);
+        let mut edges = Vec::new();
+        g.collect_edges(&mut edges);
+
+        let mut accepted = 0usize;
+        for step in 0..300 {
+            let targeted = (step & 1) == 0;
+            let (cand, delta) = mutate_u64(
+                &g,
+                &edges,
+                &mut rng,
+                GraphMode::MinimalStructureMixedDegree,
+                targeted,
+                0x3f,
+                b1_mask,
+                None,
+                &mut wc,
+                &mut scratch,
+            );
+            if delta.changed {
+                assert!(cand.is_connected());
+                assert!(cand.minimal_structure_valid());
+                g = cand;
+                g.collect_edges(&mut edges);
+                wc.invalidate();
+                accepted += 1;
+            }
+        }
+        assert!(accepted >= 50, "expected >= 50 valid within-block mutations, got {accepted}");
+        let score = score_graph_fast(&g.to_graph(), 64, 50_000, None, &mut scratch).unwrap();
+        for &(len, cnt) in score.counts_slice() {
+            if len == 32 {
+                assert_eq!(cnt, 0, "within-block mutations must preserve C32==0, got {cnt}");
+            }
+        }
+    }
 }

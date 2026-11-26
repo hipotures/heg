@@ -12,7 +12,7 @@ use std::time::Instant;
 
 use crate::cycles::{DfsScratch, evaluate_lengths, forbidden_lengths, score_graph_fast};
 use crate::graph::BitGraph;
-use crate::mutation::{GraphMode, WitnessCache, generate_seed, mutate};
+use crate::mutation::{GraphMode, SeedStyle, WitnessCache, generate_seed, mutate};
 use crate::rng::Rng;
 use crate::search::{Algorithm, SearchParams, run_parallel};
 
@@ -198,10 +198,12 @@ fn cmd_bench_score(args: &[String]) -> i32 {
 fn cmd_search(args: &[String]) -> i32 {
     let mut order = 50usize;
     let mut mode = GraphMode::CubicFirst;
+    let mut seed_style = SeedStyle::Random;
     let mut algorithm = Algorithm::IteratedLocalSearchTabu;
     let mut evals = 4_000usize;
     let mut workers = 1usize;
     let mut cap = 64u32;
+    let mut adaptive_cap_max = 0u32;
     let mut node_budget: Option<u32> = None;
     let mut seed = 20261126u64;
     let mut targeted_prob = 0.5f64;
@@ -227,6 +229,24 @@ fn cmd_search(args: &[String]) -> i32 {
                     .get(i)
                     .and_then(|s| GraphMode::parse(s).ok())
                     .unwrap_or(GraphMode::CubicFirst);
+            }
+            "--seed-style" => {
+                i += 1;
+                seed_style = match args.get(i).map(|s| SeedStyle::parse(s)) {
+                    Some(Ok(st)) => st,
+                    Some(Err(e)) => {
+                        eprintln!("{e}");
+                        return 2;
+                    }
+                    None => {
+                        eprintln!("missing value for --seed-style");
+                        return 2;
+                    }
+                };
+            }
+            "--adaptive-cap-max" => {
+                i += 1;
+                adaptive_cap_max = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(0);
             }
             "--algorithm" => {
                 i += 1;
@@ -315,9 +335,11 @@ fn cmd_search(args: &[String]) -> i32 {
     let params = SearchParams {
         order,
         mode,
+        seed_style,
         algorithm,
         evaluations_per_worker: evals,
         witness_cap: cap,
+        adaptive_cap_max,
         node_budget: node_budget.unwrap_or_else(|| SearchParams::default_node_budget(cap)),
         targeted_prob,
         temperature,
@@ -352,11 +374,13 @@ fn cmd_search(args: &[String]) -> i32 {
 
     if json_output {
         println!(
-            "{{\"engine\":\"rust\",\"order\":{},\"mode\":\"{}\",\"algorithm\":\"{}\",\"workers\":{},\"total_evaluations\":{},\"wall_seconds\":{:.6},\"evals_per_second\":{:.2},\"accepted\":{},\"improvements\":{},\"cutoffs\":{},\"best_total\":{},\"best_weighted_penalty\":{},\"best_complete\":{},\"best_witness_counts\":{},\"best_graph6\":\"{}\",\"final_total\":{},\"final_weighted_penalty\":{},\"final_complete\":{},\"final_witness_counts\":{},\"final_graph6\":\"{}\"}}",
+            "{{\"engine\":\"rust\",\"order\":{},\"mode\":\"{}\",\"seed_style\":\"{}\",\"algorithm\":\"{}\",\"workers\":{},\"effective_cap\":{},\"total_evaluations\":{},\"wall_seconds\":{:.6},\"evals_per_second\":{:.2},\"accepted\":{},\"improvements\":{},\"cutoffs\":{},\"best_total\":{},\"best_weighted_penalty\":{},\"best_complete\":{},\"best_witness_counts\":{},\"best_graph6\":\"{}\",\"final_total\":{},\"final_weighted_penalty\":{},\"final_complete\":{},\"final_witness_counts\":{},\"final_graph6\":\"{}\"}}",
             order,
             mode.as_str(),
+            seed_style.as_str(),
             algorithm.as_str(),
             workers,
+            best.effective_cap,
             total_evals,
             wall_s,
             agg_sps,
@@ -376,9 +400,11 @@ fn cmd_search(args: &[String]) -> i32 {
         );
     } else {
         println!(
-            "rust | n={} alg={} workers={} | {} ev in {:.3}s | {:.1} ev/s | cutoffs={} | best={} (weighted={}, cmp={})",
+            "rust | n={} alg={} seed={} cap={} workers={} | {} ev in {:.3}s | {:.1} ev/s | cutoffs={} | best={} (weighted={}, cmp={})",
             order,
             algorithm.as_str(),
+            seed_style.as_str(),
+            best.effective_cap,
             workers,
             total_evals,
             wall_s,

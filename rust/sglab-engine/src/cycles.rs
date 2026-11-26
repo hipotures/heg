@@ -87,6 +87,27 @@ impl ScoreResult {
     }
 
     #[inline]
+    pub fn c4_c8_zero(&self) -> bool {
+        for i in 0..(self.counts_len as usize) {
+            let (len, cnt) = self.counts[i];
+            if (len == 4 || len == 8) && cnt > 0 {
+                return false;
+            }
+        }
+        true
+    }
+
+    #[inline]
+    pub fn has_saturated_length(&self, cap: u32) -> bool {
+        for i in 0..(self.counts_len as usize) {
+            if self.counts[i].1 >= cap {
+                return true;
+            }
+        }
+        false
+    }
+
+    #[inline]
     pub fn ordering_key(&self) -> (u8, u32, u32, u32) {
         (
             if self.valid { 0 } else { 1 },
@@ -2338,15 +2359,91 @@ pub fn count_cycles_fast_u64(
     match length {
         4 => count_c4_u64(&g.rows, g.n, limit, stop_at_count),
         8 => count_c8_mitm_u64(&g.rows, g.n, limit, node_budget, stop_at_count, scratch),
-        _ => count_cycles_pruned_u64(
-            &g.rows,
-            g.n,
-            length,
-            limit,
-            node_budget,
-            stop_at_count,
-            scratch,
-        ),
+        _ => {
+            let (block_count, blocks, max_block) = g.biconnected_blocks();
+            if max_block < length as usize {
+                return CountResult {
+                    length,
+                    count: 0,
+                    complete: true,
+                    nodes: 0,
+                    elapsed_ns: 0,
+                    cutoff_reached: false,
+                };
+            }
+            if block_count <= 1 {
+                return count_cycles_pruned_u64(
+                    &g.rows,
+                    g.n,
+                    length,
+                    limit,
+                    node_budget,
+                    stop_at_count,
+                    scratch,
+                );
+            }
+            let mut total_count = 0u32;
+            let mut total_nodes = 0u64;
+            let mut all_complete = true;
+            for &bmask in &blocks[..block_count] {
+                if (bmask.count_ones() as usize) < (length as usize) {
+                    continue;
+                }
+                let mut sub_rows = [0u64; 64];
+                let mut bits = bmask;
+                while bits != 0 {
+                    let u = bits.trailing_zeros() as usize;
+                    bits &= bits - 1;
+                    sub_rows[u] = g.rows[u] & bmask;
+                }
+                let rem_limit = limit.saturating_sub(total_count).max(1);
+                let rem_stop = if stop_at_count != 0 {
+                    stop_at_count.saturating_sub(total_count).max(1)
+                } else {
+                    0
+                };
+                let r = count_cycles_pruned_u64(
+                    &sub_rows,
+                    g.n,
+                    length,
+                    rem_limit,
+                    node_budget,
+                    rem_stop,
+                    scratch,
+                );
+                total_count = total_count.saturating_add(r.count);
+                total_nodes = total_nodes.saturating_add(r.nodes);
+                all_complete = all_complete && r.complete;
+                if r.cutoff_reached || (stop_at_count != 0 && total_count >= stop_at_count) {
+                    return CountResult {
+                        length,
+                        count: total_count.min(limit),
+                        complete: false,
+                        nodes: total_nodes,
+                        elapsed_ns: 0,
+                        cutoff_reached: true,
+                    };
+                }
+                if total_count >= limit {
+                    return CountResult {
+                        length,
+                        count: limit,
+                        complete: false,
+                        nodes: total_nodes,
+                        elapsed_ns: 0,
+                        cutoff_reached: false,
+                    };
+                }
+            }
+            CountResult {
+                length,
+                count: total_count,
+                complete: all_complete,
+                nodes: total_nodes,
+                elapsed_ns: 0,
+                cutoff_reached: false,
+            }
+        }
     }
 }
 
@@ -3437,7 +3534,7 @@ mod tests {
                 for _ in 0..40 {
                     let exact_c4_p = count_c4_u64(&g.rows, n, 10_000, 0).count;
                     let exact_c8_p = count_c8_mitm_u64(&g.rows, n, 10_000, 0, 0, &mut scratch).count;
-                    let (mut cand, delta) = mutate_u64(&g, &edges_buf, &mut rng, mode, false, !0u8, None, &mut wc, &mut scratch);
+                    let (mut cand, delta) = mutate_u64(&g, &edges_buf, &mut rng, mode, false, !0u8, 0u64, None, &mut wc, &mut scratch);
                     if !delta.changed || delta.removed_count != 2 || delta.added_count != 2 {
                         continue;
                     }

@@ -2,6 +2,12 @@
 
 Last implementation audit: **2026-11-26**.
 
+## Rust 2-block Ducoffe–Dumitru seeding, exact Tarjan block scoring, adaptive cap, and `/proc` RSS fix
+
+- **Fixed `/proc` RSS race condition (`src/sglab/resources.py`, `tests/test_resources.py`)**: `current_rss_bytes()` and `process_tree_rss_bytes()` now handle `ProcessLookupError` when short-lived worker subprocesses exit mid-read. Verified with unit tests (`4/4`) and a 20-second 16-lane Rust `sglab research-campaign` (11.73M evaluations, clean `paused_by_operator`, `last_error: null`, zero orphan processes).
+- **Exact Tarjan biconnected-block cycle scoring (`rust/sglab-engine/src/graph.rs`, `cycles.rs`)**: `count_cycles_fast_u64` now decomposes `length >= 16` queries by biconnected blocks (`BitGraph64::biconnected_blocks`), returning exact `count = 0, complete = true` in ~100 ns whenever `max_block_size < length` (eliminating false `node_budget` exhaustion penalties on 2-block graphs) and restricting multi-block DFS to individual blocks of size `>= length`. `--serve` protocol v2 parity remains untouched and 100% tested.
+- **2-block Ducoffe–Dumitru seeding & adaptive cap (`mutation.rs`, `search.rs`, `main.rs`)**: Added opt-in `--seed-style {random,two_block,mixed}` (default `random`) with `O(1)` within-block 2-edge switch preservation and `--adaptive-cap-max <u32>` (default `0`, disabled). Verified across 7/7 Rust release tests, 11/11 Python tests, and M4-certified Experiment 5 (`docs/reports/M6_RUST_TWOBLOCK_AND_RESOURCE_FIX_2026_11_26.md`), breaking the `n = 38..60` `total = 128` plateau down to `total = 4..12` inside the legal Ducoffe–Dumitru class.
+
 ## Rust engine optimization waves 1–13 (L1 `BitGraph64`, delta `C4`/`C8`/`C16`, `CycleBank64`, Pósa+Thomason)
 
 Completed 13 verified optimization waves inside `rust/sglab-engine/` without modifying the legacy Python or C++ stack or relaxing exactness/soundness invariants (`--serve` protocol v2 remains bit-for-bit parity-tested against `sglab-score-worker` in `tests/test_rust_engine.py`, M4 remains the sole counterexample certification authority, and all 5 Rust release unit tests prove exactness/soundness of every accelerated path):

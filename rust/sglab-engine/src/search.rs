@@ -10,7 +10,10 @@ use crate::cycles::{
     Cutoff, DfsScratch, ScoreResult, score_graph_delta_u64, score_graph_fast, score_graph_fast_u64,
 };
 use crate::graph::{BitGraph, BitGraph64, Edge, zobrist_edge, zobrist_edge64};
-use crate::mutation::{GraphMode, MutationDelta, WitnessCache, generate_seed, mutate, mutate_u64};
+use crate::mutation::{
+    GraphMode, MutationDelta, SeedStyle, WitnessCache, generate_seed,
+    generate_two_block_ducoffe_seed, mutate, mutate_u64,
+};
 use crate::rng::Rng;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -45,9 +48,11 @@ impl Algorithm {
 pub struct SearchParams {
     pub order: usize,
     pub mode: GraphMode,
+    pub seed_style: SeedStyle,
     pub algorithm: Algorithm,
     pub evaluations_per_worker: usize,
     pub witness_cap: u32,
+    pub adaptive_cap_max: u32,
     pub node_budget: u32,
     pub targeted_prob: f64,
     pub temperature: f64,
@@ -73,6 +78,7 @@ pub struct LaneSummary {
     pub accepted: usize,
     pub improvements: usize,
     pub cutoffs: usize,
+    pub effective_cap: u32,
     pub wall_seconds: f64,
     pub final_graph: BitGraph,
     pub final_score: ScoreResult,
@@ -380,26 +386,54 @@ fn update_key64(mut key: u64, delta: &MutationDelta) -> u64 {
     key
 }
 
-fn run_lane_u64(params: &SearchParams, seed: u64) -> Result<LaneSummary, String> {
+fn make_lane_seed(
+    rng: &mut Rng,
+    params: &SearchParams,
+    use_two_block: bool,
+) -> Result<(BitGraph, u64), String> {
+    if use_two_block {
+        generate_two_block_ducoffe_seed(rng, params.order)
+    } else {
+        Ok((generate_seed(rng, params.order, params.mode)?, 0u64))
+    }
+}
+
+fn lane_uses_two_block(params: &SearchParams, worker_idx: usize) -> bool {
+    params.initial_graph.is_none()
+        && params.mode == GraphMode::MinimalStructureMixedDegree
+        && match params.seed_style {
+            SeedStyle::TwoBlock => true,
+            SeedStyle::Mixed => (worker_idx & 1) == 0,
+            SeedStyle::Random => false,
+        }
+}
+
+fn run_lane_u64(params: &SearchParams, seed: u64, worker_idx: usize) -> Result<LaneSummary, String> {
     let started = Instant::now();
     let mut rng = Rng::new(seed);
     let mut scratch = DfsScratch::new();
     let mut witness_cache = WitnessCache::new();
     let mut edges_buf: Vec<Edge> = Vec::with_capacity(params.order * 3);
     let mut cycle_bank = CycleBank64::new(seed);
+    let use_two_block = lane_uses_two_block(params, worker_idx);
 
-    let init_g = match params.initial_graph {
-        Some(g) => BitGraph64::from_graph(&g),
-        None => BitGraph64::from_graph(&generate_seed(&mut rng, params.order, params.mode)?),
+    let (init_g, mut block1_inner_mask) = match params.initial_graph {
+        Some(g) => (BitGraph64::from_graph(&g), 0u64),
+        None => {
+            let (g, mask) = make_lane_seed(&mut rng, params, use_two_block)?;
+            (BitGraph64::from_graph(&g), mask)
+        }
     };
+    let mut active_cap = params.witness_cap;
+    let mut active_budget = params.node_budget;
     let mut graph = init_g;
     graph.collect_edges(&mut edges_buf);
     cycle_bank.reset_for_graph(&edges_buf);
     let mut key = graph.zobrist_key64();
     let mut score = score_graph_fast_u64(
         &graph,
-        params.witness_cap,
-        params.node_budget,
+        active_cap,
+        active_budget,
         None,
         &mut scratch,
     )
@@ -415,6 +449,7 @@ fn run_lane_u64(params: &SearchParams, seed: u64) -> Result<LaneSummary, String>
     let mut accepted = 0usize;
     let mut improvements = 0usize;
     let mut cutoffs = 0usize;
+    let mut stagnant_evals = 0usize;
     let mut sa_temp = params.temperature;
     let threshold = params.restart_threshold.max(1);
 
@@ -427,11 +462,13 @@ fn run_lane_u64(params: &SearchParams, seed: u64) -> Result<LaneSummary, String>
         evaluated += 1;
 
         if params.algorithm == Algorithm::RandomRestart {
-            let cand = BitGraph64::from_graph(&generate_seed(&mut rng, params.order, params.mode)?);
+            let (seed_g, mask) = make_lane_seed(&mut rng, params, use_two_block)?;
+            let cand = BitGraph64::from_graph(&seed_g);
+            block1_inner_mask = mask;
             let cand_score = score_graph_fast_u64(
                 &cand,
-                params.witness_cap,
-                params.node_budget,
+                active_cap,
+                active_budget,
                 None,
                 &mut scratch,
             )
@@ -451,20 +488,55 @@ fn run_lane_u64(params: &SearchParams, seed: u64) -> Result<LaneSummary, String>
             && params.restart_threshold > 0
             && evaluated % params.restart_threshold == 0
         {
-            graph = BitGraph64::from_graph(&generate_seed(&mut rng, params.order, params.mode)?);
+            let (seed_g, mask) = make_lane_seed(&mut rng, params, use_two_block)?;
+            graph = BitGraph64::from_graph(&seed_g);
+            block1_inner_mask = mask;
             graph.collect_edges(&mut edges_buf);
             cycle_bank.reset_for_graph(&edges_buf);
             key = graph.zobrist_key64();
             score = score_graph_fast_u64(
                 &graph,
-                params.witness_cap,
-                params.node_budget,
+                active_cap,
+                active_budget,
                 None,
                 &mut scratch,
             )
             .expect("reseed has no cutoff");
             witness_cache.invalidate();
             sa_temp = params.temperature;
+        }
+
+        if params.adaptive_cap_max > active_cap
+            && (evaluated & 255) == 0
+            && score.has_saturated_length(active_cap)
+            && (score.c4_c8_zero() || stagnant_evals >= 4_000)
+        {
+            active_cap = active_cap.saturating_mul(2).min(params.adaptive_cap_max);
+            active_budget = active_budget.max(
+                SearchParams::default_node_budget(active_cap)
+                    .max(active_cap.saturating_mul(512)),
+            );
+            score = score_graph_fast_u64(
+                &graph,
+                active_cap,
+                active_budget,
+                None,
+                &mut scratch,
+            )
+            .expect("adaptive re-score has no cutoff");
+            best_score = score_graph_fast_u64(
+                &best_graph,
+                active_cap,
+                active_budget,
+                None,
+                &mut scratch,
+            )
+            .expect("adaptive best re-score has no cutoff");
+            if score.ordering_key() < best_score.ordering_key() {
+                best_graph = graph;
+                best_score = score;
+            }
+            stagnant_evals = 0;
         }
 
         let targeted = params.targeted_prob > 0.0 && rng.next_f64() < params.targeted_prob;
@@ -475,6 +547,7 @@ fn run_lane_u64(params: &SearchParams, seed: u64) -> Result<LaneSummary, String>
             params.mode,
             targeted,
             score.nonzero_len_mask(),
+            block1_inner_mask,
             Some(&cycle_bank),
             &mut witness_cache,
             &mut scratch,
@@ -521,13 +594,14 @@ fn run_lane_u64(params: &SearchParams, seed: u64) -> Result<LaneSummary, String>
             delta.removed_idx,
             delta.added,
             cand_simplicity,
-            params.witness_cap,
-            params.node_budget,
+            active_cap,
+            active_budget,
             cutoff,
             &mut scratch,
             &mut cycle_bank,
         ) else {
             cutoffs += 1;
+            stagnant_evals += 1;
             continue;
         };
 
@@ -559,6 +633,9 @@ fn run_lane_u64(params: &SearchParams, seed: u64) -> Result<LaneSummary, String>
             best_graph = cand;
             best_score = cand_score;
             improvements += 1;
+            stagnant_evals = 0;
+        } else {
+            stagnant_evals += 1;
         }
         if accept {
             graph = cand;
@@ -581,6 +658,7 @@ fn run_lane_u64(params: &SearchParams, seed: u64) -> Result<LaneSummary, String>
         accepted,
         improvements,
         cutoffs,
+        effective_cap: active_cap,
         wall_seconds: started.elapsed().as_secs_f64(),
         final_graph: graph.to_graph(),
         final_score: score,
@@ -589,9 +667,9 @@ fn run_lane_u64(params: &SearchParams, seed: u64) -> Result<LaneSummary, String>
     })
 }
 
-pub fn run_lane(params: &SearchParams, seed: u64) -> Result<LaneSummary, String> {
+pub fn run_lane(params: &SearchParams, seed: u64, worker_idx: usize) -> Result<LaneSummary, String> {
     if params.order <= 64 {
-        return run_lane_u64(params, seed);
+        return run_lane_u64(params, seed, worker_idx);
     }
 
     let started = Instant::now();
@@ -599,10 +677,11 @@ pub fn run_lane(params: &SearchParams, seed: u64) -> Result<LaneSummary, String>
     let mut scratch = DfsScratch::new();
     let mut witness_cache = WitnessCache::new();
     let mut edges_buf: Vec<Edge> = Vec::with_capacity(params.order * 3);
+    let use_two_block = lane_uses_two_block(params, worker_idx);
 
     let mut graph = match params.initial_graph {
         Some(g) => g,
-        None => generate_seed(&mut rng, params.order, params.mode)?,
+        None => make_lane_seed(&mut rng, params, use_two_block)?.0,
     };
     graph.collect_edges(&mut edges_buf);
     let mut key = graph.zobrist_key();
@@ -771,6 +850,7 @@ pub fn run_lane(params: &SearchParams, seed: u64) -> Result<LaneSummary, String>
         accepted,
         improvements,
         cutoffs,
+        effective_cap: params.witness_cap,
         wall_seconds: started.elapsed().as_secs_f64(),
         final_graph: graph,
         final_score: score,
@@ -787,7 +867,7 @@ pub fn run_parallel(
     let n_workers = workers.max(1);
     let started = Instant::now();
     if n_workers == 1 {
-        let one = run_lane(params, base_seed)?;
+        let one = run_lane(params, base_seed, 0)?;
         return Ok((vec![one], started.elapsed().as_secs_f64()));
     }
 
@@ -795,7 +875,7 @@ pub fn run_parallel(
         let handles: Vec<_> = (0..n_workers)
             .map(|i| {
                 let seed = base_seed.wrapping_add(i as u64);
-                scope.spawn(move || run_lane(params, seed))
+                scope.spawn(move || run_lane(params, seed, i))
             })
             .collect();
         handles
@@ -807,6 +887,30 @@ pub fn run_parallel(
     let mut out = Vec::with_capacity(n_workers);
     for r in results {
         out.push(r?);
+    }
+    let max_cap = out
+        .iter()
+        .map(|l| l.effective_cap)
+        .max()
+        .unwrap_or(params.witness_cap);
+    if out.iter().any(|l| l.effective_cap < max_cap) {
+        let max_budget = params
+            .node_budget
+            .max(SearchParams::default_node_budget(max_cap).max(max_cap.saturating_mul(512)));
+        let mut scratch = DfsScratch::new();
+        for lane in &mut out {
+            if lane.effective_cap < max_cap {
+                lane.best_score = score_graph_fast(
+                    &lane.best_graph,
+                    max_cap,
+                    max_budget,
+                    None,
+                    &mut scratch,
+                )
+                .expect("reconcile cap score");
+                lane.effective_cap = max_cap;
+            }
+        }
     }
     Ok((out, started.elapsed().as_secs_f64()))
 }

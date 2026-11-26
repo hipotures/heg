@@ -214,6 +214,116 @@ impl BitGraph64 {
         (timer as usize) == n && blocks <= 2
     }
 
+    /// Compute all biconnected components (blocks) as vertex bitmasks via
+    /// Hopcroft-Tarjan DFS. Returns `(block_count, block_masks, max_block_size)`.
+    /// Every simple cycle of length L >= 3 lies entirely within a unique block
+    /// of size >= L.
+    pub fn biconnected_blocks(&self) -> (usize, [u64; 64], usize) {
+        let n = self.n;
+        let mut blocks = [0u64; 64];
+        if n < 3 {
+            return (0, blocks, n);
+        }
+        let mut disc = [0u8; 64];
+        let mut low = [0u8; 64];
+        let mut timer = 0u8;
+        let mut block_count = 0usize;
+        let mut max_block = 0usize;
+        let mut edge_stack: [(u8, u8); 2048] = [(0, 0); 2048];
+        let mut sp = 0usize;
+
+        #[allow(clippy::too_many_arguments)]
+        fn dfs(
+            rows: &[u64; 64],
+            u: usize,
+            parent: usize,
+            disc: &mut [u8; 64],
+            low: &mut [u8; 64],
+            timer: &mut u8,
+            edge_stack: &mut [(u8, u8); 2048],
+            sp: &mut usize,
+            blocks: &mut [u64; 64],
+            block_count: &mut usize,
+            max_block: &mut usize,
+        ) {
+            *timer += 1;
+            disc[u] = *timer;
+            low[u] = *timer;
+            let mut bits = rows[u];
+            while bits != 0 {
+                let v = bits.trailing_zeros() as usize;
+                bits &= bits - 1;
+                if v == parent {
+                    continue;
+                }
+                if disc[v] == 0 {
+                    edge_stack[*sp] = (u as u8, v as u8);
+                    *sp += 1;
+                    dfs(
+                        rows,
+                        v,
+                        u,
+                        disc,
+                        low,
+                        timer,
+                        edge_stack,
+                        sp,
+                        blocks,
+                        block_count,
+                        max_block,
+                    );
+                    if low[v] < low[u] {
+                        low[u] = low[v];
+                    }
+                    if low[v] >= disc[u] {
+                        let mut mask = 0u64;
+                        while *sp > 0 {
+                            *sp -= 1;
+                            let (a, b) = edge_stack[*sp];
+                            mask |= (1u64 << a) | (1u64 << b);
+                            if a == u as u8 && b == v as u8 {
+                                break;
+                            }
+                        }
+                        let sz = mask.count_ones() as usize;
+                        if sz > *max_block {
+                            *max_block = sz;
+                        }
+                        if *block_count < 64 {
+                            blocks[*block_count] = mask;
+                            *block_count += 1;
+                        }
+                    }
+                } else if disc[v] < disc[u] {
+                    edge_stack[*sp] = (u as u8, v as u8);
+                    *sp += 1;
+                    if disc[v] < low[u] {
+                        low[u] = disc[v];
+                    }
+                }
+            }
+        }
+
+        for root in 0..n {
+            if disc[root] == 0 {
+                dfs(
+                    &self.rows,
+                    root,
+                    usize::MAX,
+                    &mut disc,
+                    &mut low,
+                    &mut timer,
+                    &mut edge_stack,
+                    &mut sp,
+                    &mut blocks,
+                    &mut block_count,
+                    &mut max_block,
+                );
+            }
+        }
+        (block_count, blocks, max_block)
+    }
+
     #[inline]
     pub fn minimal_structure_valid(&self) -> bool {
         let mut degree_three = 0usize;
