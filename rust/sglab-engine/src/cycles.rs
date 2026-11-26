@@ -227,6 +227,7 @@ pub struct DfsScratch {
     pub mitm_left_mid: [u8; 64],
     pub mitm_left_mask: [u64; 64],
     pub mitm16_masks: Vec<u64>,
+    pub mitm16_masks128: Vec<u128>,
     pub mitm16_next: Vec<u32>,
 }
 
@@ -243,6 +244,7 @@ impl DfsScratch {
             mitm_left_mid: [0u8; 64],
             mitm_left_mask: [0u64; 64],
             mitm16_masks: Vec::with_capacity(1024),
+            mitm16_masks128: Vec::with_capacity(1024),
             mitm16_next: Vec::with_capacity(1024),
         }
     }
@@ -2651,6 +2653,151 @@ pub fn count_c16_mitm_u64(
     })
 }
 
+/// Exact Bitset Meet-in-the-Middle counter for C16 on u128 graphs (`n <= 128`).
+pub fn count_c16_mitm_u128(
+    rows: &[u128; MAX_ORDER],
+    order: usize,
+    limit: u32,
+    stop_at_count: u32,
+    scratch: &mut DfsScratch,
+) -> Option<CountResult> {
+    if order < 16 || order > MAX_ORDER {
+        return Some(CountResult {
+            length: 16,
+            count: 0,
+            complete: true,
+            ..Default::default()
+        });
+    }
+    const MAX_HALF_PATHS: usize = 8_192;
+    let stop_lim = if stop_at_count != 0 {
+        stop_at_count.min(limit)
+    } else {
+        limit
+    };
+    let mut count = 0u32;
+    let mut nodes = 0u64;
+
+    for s in 0..=(order - 16) {
+        let allowed = !((1u128 << (s + 1)) - 1);
+        if (rows[s] & allowed).count_ones() < 2 {
+            continue;
+        }
+        let mut head = [u32::MAX; MAX_ORDER];
+        let mut bucket_cnt = [0u16; MAX_ORDER];
+        let mut touched_t = [0u8; MAX_ORDER];
+        let mut touched_len = 0usize;
+        scratch.mitm16_masks128.clear();
+        scratch.mitm16_next.clear();
+        let mut overflow = false;
+
+        let mut b1 = rows[s] & allowed;
+        while b1 != 0 && !overflow {
+            let v1 = b1.trailing_zeros() as usize;
+            b1 &= b1 - 1;
+            let m1 = 1u128 << v1;
+            let mut b2 = rows[v1] & allowed & !m1;
+            while b2 != 0 && !overflow {
+                let v2 = b2.trailing_zeros() as usize;
+                b2 &= b2 - 1;
+                let m2 = m1 | (1u128 << v2);
+                let mut b3 = rows[v2] & allowed & !m2;
+                while b3 != 0 && !overflow {
+                    let v3 = b3.trailing_zeros() as usize;
+                    b3 &= b3 - 1;
+                    let m3 = m2 | (1u128 << v3);
+                    let mut b4 = rows[v3] & allowed & !m3;
+                    while b4 != 0 && !overflow {
+                        let v4 = b4.trailing_zeros() as usize;
+                        b4 &= b4 - 1;
+                        let m4 = m3 | (1u128 << v4);
+                        let mut b5 = rows[v4] & allowed & !m4;
+                        while b5 != 0 && !overflow {
+                            let v5 = b5.trailing_zeros() as usize;
+                            b5 &= b5 - 1;
+                            let m5 = m4 | (1u128 << v5);
+                            let mut b6 = rows[v5] & allowed & !m5;
+                            while b6 != 0 && !overflow {
+                                let v6 = b6.trailing_zeros() as usize;
+                                b6 &= b6 - 1;
+                                let m6 = m5 | (1u128 << v6);
+                                let mut b7 = rows[v6] & allowed & !m6;
+                                while b7 != 0 && !overflow {
+                                    let v7 = b7.trailing_zeros() as usize;
+                                    b7 &= b7 - 1;
+                                    let m7 = m6 | (1u128 << v7);
+                                    let mut bt = rows[v7] & allowed & !m7;
+                                    while bt != 0 {
+                                        let t = bt.trailing_zeros() as usize;
+                                        bt &= bt - 1;
+                                        let idx = scratch.mitm16_masks128.len();
+                                        if idx >= MAX_HALF_PATHS {
+                                            overflow = true;
+                                            break;
+                                        }
+                                        scratch.mitm16_masks128.push(m7);
+                                        scratch.mitm16_next.push(head[t]);
+                                        if head[t] == u32::MAX {
+                                            touched_t[touched_len] = t as u8;
+                                            touched_len += 1;
+                                        }
+                                        head[t] = idx as u32;
+                                        bucket_cnt[t] += 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if overflow {
+            return None;
+        }
+
+        nodes += scratch.mitm16_masks128.len() as u64;
+        let masks = &scratch.mitm16_masks128;
+        let next = &scratch.mitm16_next;
+        for ti in 0..touched_len {
+            let t = touched_t[ti] as usize;
+            if bucket_cnt[t] < 2 {
+                continue;
+            }
+            let mut i = head[t];
+            while i != u32::MAX {
+                let mi = masks[i as usize];
+                let mut j = next[i as usize];
+                while j != u32::MAX {
+                    if (mi & masks[j as usize]) == 0 {
+                        count += 1;
+                        if count >= stop_lim {
+                            return Some(CountResult {
+                                length: 16,
+                                count: count.min(limit),
+                                complete: false,
+                                nodes,
+                                elapsed_ns: 0,
+                                cutoff_reached: stop_at_count != 0 && count >= stop_at_count,
+                            });
+                        }
+                    }
+                    j = next[j as usize];
+                }
+                i = next[i as usize];
+            }
+        }
+    }
+
+    Some(CountResult {
+        length: 16,
+        count: count.min(limit),
+        complete: count < limit,
+        nodes,
+        elapsed_ns: 0,
+        cutoff_reached: false,
+    })
+}
+
 #[inline]
 pub fn count_cycles_fast_u64(
     g: &BitGraph64,
@@ -2768,6 +2915,21 @@ pub fn count_cycles_fast_u128(
 ) -> CountResult {
     match length {
         4 => count_c4_u128(&g.rows, g.n, limit, stop_at_count),
+        16 => {
+            if let Some(res) = count_c16_mitm_u128(&g.rows, g.n, limit, stop_at_count, scratch) {
+                res
+            } else {
+                count_cycles_pruned_u128(
+                    &g.rows,
+                    g.n,
+                    length,
+                    limit,
+                    node_budget,
+                    stop_at_count,
+                    scratch,
+                )
+            }
+        }
         _ => count_cycles_pruned_u128(
             &g.rows,
             g.n,
@@ -3870,6 +4032,25 @@ mod tests {
         let mitm_m24 = count_c16_mitm_u64(&m24_64.rows, 24, 10_000, 0, &mut scratch).unwrap();
         assert_eq!(mitm_m24.count, 228);
         assert!(mitm_m24.complete);
+        let mitm_m24_128 = count_c16_mitm_u128(&m24.rows, 24, 10_000, 0, &mut scratch).unwrap();
+        assert_eq!(mitm_m24_128.count, 228);
+        assert!(mitm_m24_128.complete);
+
+        // Verify u128 MitM matches u64 MitM on n=64 and matches exact DFS on n=70 (Petersen + 10*H7)
+        let g64 = crate::mutation::generate_h7_expansion_seed(&mut rng, 64, GraphMode::CubicFirst)
+            .expect("h7 n=64");
+        let g64_fast = BitGraph64::from_graph(&g64);
+        let r64 = count_c16_mitm_u64(&g64_fast.rows, 64, 100_000, 0, &mut scratch).unwrap();
+        let r128 = count_c16_mitm_u128(&g64.rows, 64, 100_000, 0, &mut scratch).unwrap();
+        assert_eq!(r128.count, r64.count, "u128 vs u64 MitM C16 mismatch on n=64");
+        assert!(r128.complete && r64.complete);
+
+        let g70 = crate::mutation::generate_h7_expansion_seed(&mut rng, 70, GraphMode::CubicFirst)
+            .expect("h7 n=70");
+        let ref70 = count_cycles(&g70, 16, 10_000, 0, 0, &mut scratch, false);
+        let mitm70 = count_c16_mitm_u128(&g70.rows, 70, 10_000, 0, &mut scratch).unwrap();
+        assert_eq!(mitm70.count, ref70.count, "u128 MitM C16 vs DFS mismatch on n=70");
+        assert!(mitm70.complete && ref70.complete);
     }
 
     #[test]

@@ -554,6 +554,19 @@ fn cmd_verify_exact(args: &[String]) -> i32 {
         }
     } else {
         for &len in lengths {
+            if len == 16 {
+                if let Some(r) = crate::cycles::count_c16_mitm_u128(
+                    &graph.rows,
+                    graph.n,
+                    u32::MAX,
+                    0,
+                    &mut scratch,
+                ) {
+                    c16_exact_count = Some(r.count);
+                    status_map.push((16, if r.count > 0 { "FOUND" } else { "ABSENT" }));
+                    continue;
+                }
+            }
             status_map.push((len, "PENDING"));
         }
     }
@@ -693,9 +706,40 @@ fn cmd_lns_polish(args: &[String]) -> i32 {
             return 2;
         }
     };
-    if graph.n > 64 {
-        eprintln!("lns-polish supports n <= 64 (got {})", graph.n);
+    if graph.n > 128 {
+        eprintln!("lns-polish supports n <= 128 (got {})", graph.n);
         return 2;
+    }
+    if graph.n > 64 {
+        let summary = crate::lns::run_parallel_lns_polish_u128(
+            graph,
+            mode,
+            k_min,
+            k_max,
+            wall_seconds,
+            workers,
+            seed,
+            allow_sideways,
+            node_cap,
+        );
+        let best_g6 = escape_json_str(&summary.best_graph.to_graph6());
+        println!(
+            "{{\"order\":{},\"mode\":\"{}\",\"k_min\":{},\"k_max\":{},\"workers\":{},\"wall_seconds\":{:.3},\"initial_c16\":{},\"best_c16\":{},\"total_steps\":{},\"total_leaves\":{},\"improvements\":{},\"sideways_moves\":{},\"best_graph6\":\"{}\"}}",
+            graph.n,
+            mode.as_str(),
+            k_min,
+            k_max,
+            workers,
+            summary.wall_seconds,
+            summary.initial_c16,
+            summary.best_c16,
+            summary.total_steps,
+            summary.total_leaves,
+            summary.improvements,
+            summary.sideways_moves,
+            best_g6
+        );
+        return 0;
     }
     let g64 = crate::graph::BitGraph64::from_graph(&graph);
     let summary = crate::lns::run_parallel_lns_polish(

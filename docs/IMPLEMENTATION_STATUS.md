@@ -2,6 +2,13 @@
 
 Last implementation audit: **2026-11-26**.
 
+## Wave E: `u128` Exact-Matching Micro-LNS (`n <= 128`) & `f(4) < 78` Hunt (`f_{\delta \ge 3}(4) \le 77` Certified)
+
+- **`u128` Exact Bitset MitM `C16` & `u128` Exact-Matching Micro-LNS (`rust/sglab-engine/src/cycles.rs`, `lns.rs`, `main.rs`)**: Added `count_c16_mitm_u128` (wired into `count_cycles_fast_u128`, `verify-exact`, and `lns-polish` for `64 < n <= 128`) and full `u128` Exact-Matching Micro-LNS (`lns_destroy_and_repair_u128`, `run_parallel_lns_polish_u128` with instant `AtomicBool` stop on `best_c16 == 0`). Verified with `16/16` Rust release tests (`0` warnings, including `u128` MitM parity vs exact DFS on `n = 70` and `u128` LNS on `n = 70`) and `11/11` Python parity/resource tests (`--serve` v2 intact).
+- **4-Stage `f(4) < 78` Campaign (`docs/reports/M6_WAVE_E_U128_LNS_F4_HUNT_2026_11_26.md`, `5,852,915,825` exact `u128` LNS leaves)**:
+  - **Triple-certified explicit upper bound $f_{\delta \ge 3}(4) \le 77$**: Contracting an edge incident to the unexpanded $K_3$ vertex in Exoo $G_{78}$ yields strictly 2-connected (`bridges = 0`), simple 77-vertex graphs (`m = 116`, `76 × deg-3 + 1 × deg-4`, $\delta(G) = 3$) avoiding $\{C_4, C_8, C_{16}\}$ — independently certified by **M4 C++17 (`_build/sglab-cyclecheck`: `ABSENT, complete=true` on `[4, 8, 16]` in `8.37 ms`)**, **Rust `verify-exact` (`0.89 ms`)**, and **pure Python exact DFS** (`24` distinct witnesses generated on the `C4 = C8 = C16 = 0` manifold).
+  - **Strictly cubic `n = 66..76` frontier (`C4 = C8 = 0`, `bridges = 0`)**: Drove strictly 3-regular **`n = 76` down to `C16 = 3`** via double-contraction cubicization + ILS-LNS (`435 -> 3` in 15s), alongside `n = 74 -> C16 = 6`, `n = 72 -> C16 = 9`, `n = 70 -> C16 = 4` (`C64 = 0`, matching exact Petersen+$10\cdot H_7$ pigeonhole bound $40/12 > 3$), `n = 68 -> C16 = 9`, `n = 66 -> C16 = 12`, and exhaustive proof that no 9-vertex `{C4, C8}`-free 3-port gadget has all pairwise port distances $\ge 3$.
+
 ## 1-Hour Multi-Basin LNS Campaign (`n = 60, 62, 64`, 34.78B exact leaves)
 
 - **60.69-minute 16-core campaign (`docs/reports/M6_CAMPAIGN_1H_LNS_F4_60_62_64_2026_11_26.md`)**: Evaluated **`34,775,945,720`** exact `C4 = C8 = 0` LNS repair leaves (`+ 54.06M` SA evals) across 4 independent basins per order, establishing new strictly 2-connected (`bridges = 0`, `C4 = C8 = 0`) cubic records: **`n = 62 -> C16 = 12`** (`108×` below random), **`n = 64 -> C16 = 18`** (`78×` below random), and a 4-basin floor **`n = 60 -> C16 = 23`**, all certified by M4 + `verify-exact` (`0.5–0.9 ms`). No counterexample or `f(4) <= 64` witness was found.
