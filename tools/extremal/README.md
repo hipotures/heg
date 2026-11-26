@@ -9,6 +9,11 @@ Self-contained C++17 and Python tools imported into the repository for full repr
 - `f5_h8star_solver.cpp`: 16-core C++17 joint gadget-placement and port-orientation WalkSAT/SA solver over the Tutte–Coxeter base graph.
 - `test_h8star_petersen_f4.py`: Exact backtracking solver over Petersen + `{H_8*, H_7}` producing the certified `n = 73` (`delta >= 3`) witness.
 - `track2_certify_all_f5.py`: Graph expansion and dual-verifier certification driver (`verify-large` + `sglab-cyclecheck-large`).
+- `exhaustive_gadget_enum.cpp`: 100% exhaustive symmetry-broken enumeration of 3-port (`n <= 11`) and 4-port (`n <= 10`) `{C4, C8}`-free gadgets (both unrestricted and no-port-edge).
+- `exhaustive_gadget_enum_deep.cpp`: 16-core parallel 100% exhaustive enumeration of 3-port (`n = 11..17`) and 4-port (`n = 11..14`) `{C4, C8, C16}`-free gadgets with incremental `C4` and MitM `C8` pruning.
+- `tc_exact_optimality.cpp`: Analytic double-counting (`8 a_15 - 4 b_8 - 8 c_7 >= 45`) + exact symmetry-broken branch-and-bound optimality solver for Tutte–Coxeter + `{H_15, H_8*, H_7}` (`PROVEN_UNSAT` for `n = 338` and cubic `n = 354`).
+- `f5_girth8_bipartite_assault.cpp`: 16-core solver over bipartite girth-8 cubic bases `B_{34}..B_{48}`.
+- `petersen_4port_f4_solver.cpp`: Exact bitmask-convolution solver over 1-edge/2-edge Petersen contractions with 4-port gadgets (`Q_9..Q_{14}`) and 1-unexpanded Petersen (`Pet_1U_9H8`, 2nd certified `n = 73` witness).
 
 ## Building & Verifying Certificates
 

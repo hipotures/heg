@@ -1,6 +1,12 @@
 # Implementation Status
 
-Last implementation audit: **2026-11-26**.
+Last implementation audit: **2026-11-27**.
+
+## Overnight `/goal` Phase R2: Exhaustive 3-Port/4-Port Gadget Classification, Tutte–Coxeter Exact Optimality Proofs & Second `n = 73` Witness
+
+- **100% Exhaustive Gadget Classification (`tools/extremal/exhaustive_gadget_enum.cpp`, `exhaustive_gadget_enum_deep.cpp`)**: Proved exhaustively (verified against brute-force non-symmetry-broken search at `n = 7, 8, 9` and exact unique recovery of `H_15` at `n = 15` in `2.92 ms`) that among all cubic, `1×deg4`, and `2×deg4` 3-port `{C4, C8, C16}`-free gadgets without port-port edges up to `n = 17`, **only three orders exist**: `n = 7` cubic (`H_7'`, `H_7`), `n = 8` `1×deg4` (`H_8'`, **`H_8*`**), and `n = 15` cubic (**`H_15`**); zero exist at `n = 5, 6, 9, 10, 11, 12, 13, 14, 16 (1×deg4), 17 (cubic)`. Also exhaustively classified 4-port `{C4, C8, C16}`-free gadgets `n = 6..14` (`Q_9`, `Q_{11a/b/c}`, `Q_{12a/b}`, `Q_{13}^*`, `Q_{14}`).
+- **Tutte–Coxeter Analytic Double-Counting + Exact Branch-and-Bound Optimality (`tools/extremal/tc_exact_optimality.cpp`)**: Proved analytically that $8 a_{15} - 4 b_8 - 8 c_7 \ge 45$ over TC's 90 `C8` cycles (`a_15 >= 14` general, `a_15 >= 18` cubic), and proved via exact symmetry-broken branch-and-bound with global slack pruning that **`TC(14·H_15 + 16·H_8*)` (`n = 338`) is `PROVEN_UNSAT`** (`32.78 s`, `124.26M` nodes — forcing `a_15 >= 15` and bracketing the exact TC minimum to `[342, 345]`) and **`TC(18·H_15 + 12·H_7)` (`n = 354` cubic) is `PROVEN_UNSAT`** (`4.80 s`, `11.12M` nodes — bracketing cubic TC to `{362, 370}`).
+- **Second Quadruple-Certified `n = 73` Witness (`docs/reports/certificates/f4_delta3_n73_Petersen_1U_9H8star.g6`)**: `Petersen + 1 unexpanded vertex + 9·H_8*` (`m = 114`, `{3: 64, 4: 9}`, 2-connected), independently verified by M4 (`cpp/sglab_cyclecheck`), Rust `verify-exact`, Python DFS, and reviewer's `cyc.c` (`pow2 check: C4=0 C8=0 C16=0`). Report: `docs/reports/M6_GOAL_PHASE_R2_EXACT_GADGETS_TC_OPTIMALITY_2026_11_27.md`.
 
 ## Peer-Review Remediation (`REVIEW_M6_WAVES_D_F_TRACK2_2026_11_26.md` & Erratum)
 
