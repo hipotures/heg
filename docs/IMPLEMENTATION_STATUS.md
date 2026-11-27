@@ -2,6 +2,11 @@
 
 Last implementation audit: **2026-11-27**.
 
+## Overnight `/goal` Phase R4: Bipartite Cubic `n = 78..126` Frontier (`23` Voltage Families + `3.30B` Bipartite `u128` LNS-RRT Leaves)
+
+- **Expanded Voltage-Lift Scan (`docs/reports/M6_GOAL_PHASE_R4_BIPARTITE_FRONTIER_2026_11_27.md`, raw data `docs/reports/data/track3_bipartite_results.json`)**: Scanned `1,813,576` lifts (`1,661,449` valid cubic bipartite graphs, `100,055` `C4 = C8 = 0` hits, `0.35 s`) across `23` non-abelian, non-nilpotent families (`16` exhaustive, including simple non-solvable `theta2 × A_5` at `n = 120` and `theta4 × SL(2,3)` at `n = 96`), finding `0` `{C4, C8, C16}`-free lifts.
+- **Bipartite-Preserving `u128` LNS-RRT (`--bipartite --rrt-slack`, `104.2` min, `3,299,149,485` exact leaves)**: Slashed `C16` by `43%–65%` across `n = 84, 96, 108, 112 (Ljubljana), 120` (`Ljubljana-112`: `3,948 -> 1,378`; `n = 120`: `3,300 -> 1,218`), all strictly bipartite with `M4(4, 8) = ABSENT (True)` and `PCLMULQDQ` Björklund `C32 = True` (zero-FP witness present), exposing a massive `C16 >= 1,218` bipartite wall compared to non-bipartite `H_7`-based constructions.
+
 ## Follow-Up Review Remediation (`REVIEW_FOLLOWUP_2026_11_27.md`) & Overnight `/goal` Phase R3 (`f_{\delta \ge 3}(4) < 73`)
 
 - **Complete Follow-Up Remediation (`docs/reports/ERRATUM_2026_11_27_PHASE_R2.md`)**:
