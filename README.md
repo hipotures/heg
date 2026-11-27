@@ -26,10 +26,42 @@ that the conjecture has been resolved.
 - resumes the same scientific campaign through new execution attempts, with
   optional resource changes.
 
+## Verified research results & Lean 4 formalization
+
+While the Erdős–Gyárfás conjecture remains open, this repository includes
+reproducible computational witnesses, SAT/DRAT UNSAT proofs, and a
+**zero-dependency Lean 4 (`v4.36.0`) kernel-checked formalization** (`lean/`,
+`3,849` lines, zero Mathlib, zero `sorry`, zero custom axioms, zero
+`native_decide`) of our extremal bounds on finite simple graphs avoiding
+$\{C_4, C_8, \dots, C_{2^k}\}$:
+
+| Result | Construction / Scope | Verification |
+|---|---|---|
+| $f_{\delta \ge 3}(4) \le 73$ | Two distinct 2-connected witnesses: `Petersen + 3·H_8* + 7·H_7` and `Petersen + 1·U_1 + 9·H_8*` | M4 C++17, Rust `verify-exact`, Python DFS, Lean 4 (`f_delta3_4_le_73`, `f_delta3_4_le_73_alt`) |
+| $f_{\mathrm{cubic}}(5) \le 370$ | 3-regular, 2-connected `Tutte–Coxeter + 20·H_15 + 10·H_7` | Rust `verify-large`, C++17 exact DFS, Lean 4 (`f_cubic_5_le_370`) |
+| $f_{\delta \ge 3}(5) \le 345$ | 2-connected `Tutte–Coxeter + 15·H_15 + 15·H_8*` | Rust `verify-large`, C++17 exact DFS, Lean 4 (`f_delta3_5_le_345`) |
+| $f_{\mathrm{cubic}}(6)$ via 4-packing | Any cubic base of order $N$ and girth $\ge 17$ lifts to order $\le 15 N - 8 \lceil N / 46 \rceil$ ($\le 30{,}360$ at $N = 2048$) | Lean 4 (`f_cubic_6_4packing`, `f_cubic_6_4packing_N2048`) |
+| Tutte–Coxeter lower bounds (`{H_15, H_8*, H_7}`) | Exact double-counting $8 a_{15} - 4 b_8 - 8 c_7 \ge 45$ over all 90 8-cycles (`a_15 ≥ 18` cubic, `a_15 ≥ 14` general) and DRAT slack-bound soundness (`≤ 6` slack cycles at `n = 354, 338`) | Lean 4 (`tc_double_counting_bound`, `tc_slack_card_sound`), independent SAT/DRAT & CaDiCaL UNSAT proofs |
+
+Build and audit the Lean 4 proofs locally:
+
+```bash
+cd lean
+lake build
+```
+
+See [lean/README.md](lean/README.md) for the module map and `#print axioms`
+audit command, and the
+[Master Synthesis Report](docs/reports/M6_OVERNIGHT_10H_GOAL_SYNTHESIS_2026_11_27.md)
+(with graph6 certificates under `docs/reports/certificates/` and reproducible
+solvers under `tools/extremal/`) for the full experimental record.
+
 ## Documentation entry points
 
 | You are… | Start here |
 |---|---|
+| Checking formal Lean 4 proofs | [Lean 4 formalization](lean/README.md) |
+| Reading extremal bounds & research status | [Research status](docs/00_RESEARCH_STATUS.md) and [Master synthesis report](docs/reports/M6_OVERNIGHT_10H_GOAL_SYNTHESIS_2026_11_27.md) |
 | Running experiments | [User guide](docs/user/README.md) |
 | Operating a server | [Operator guide](docs/operator/README.md) |
 | Understanding the design | [Architecture](docs/architecture/README.md) |
