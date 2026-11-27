@@ -2,6 +2,15 @@
 
 Last implementation audit: **2026-11-27**.
 
+## Pure Lean 4 Kernel-Checked Formalization (`lean/Sglab/`)
+
+- **Zero-dependency Lean 4 (`v4.36.0`) formalization (`lean/README.md`, `lean/Sglab/`)**: Built cleanly via `lake build` (`14/14` jobs, `0` errors, `0` warnings, `0` `sorry`, `0` custom axioms, `0` `native_decide`; only standard Lean foundational axioms `propext`, `Classical.choice`, `Quot.sound` verified by `#print axioms` across all 25 headline theorems):
+  - `lean/Sglab/Graph.lean`: Finite simple graphs (`FinGraph n`), `SimplePath`, `SimpleCycle`, BFS distance potential lower bound (`dist_lower_of_potential`), provably sound canonical bitmask cycle DFS (`not_hasCycle_of_dfs`), and provably sound weighted short-cycle DFS (`weighted_cycle_lower_of_check`).
+  - `lean/Sglab/GadgetLift.lean`: General 3-port vertex-replacement lift (`liftGraph`), degree preservation (`liftGraph_minDeg3`, `liftGraph_isCubic`), and the Master 3-Port Cycle Projection & Length Lower Bound Theorem (`liftGraph_cycle_dichotomy`, `liftGraph_no_cycle`).
+  - `lean/Sglab/Gadgets.lean`: Kernel-verified gadgets `H7` (`n=7`, cubic-internal, `(2,2,3)`), `H8star` (`n=8`, `δ≥3`, `(3,3,2)`), and `H15` (`n=15`, cubic-internal, `(3,3,5)`), with `{C4, C8}`-freeness and explicit BFS distance potentials checked inside the kernel.
+  - `lean/Sglab/Records.lean`: Kernel-checked proofs of `f_delta3_4_le_73` (`3·H_8* + 7·H_7`), `f_delta3_4_le_73_alt` (`1·U_1 + 9·H_8*`), `f_cubic_5_le_370` (`20·H_15 + 10·H_7`), `f_delta3_5_le_345` (`15·H_15 + 15·H_8*`), and the general 4-packing theorem `f_cubic_6_4packing` / `f_cubic_6_4packing_N2048` (`≤ 30,360` on any `N=2048` cubic girth-`≥ 17` base).
+  - `lean/Sglab/TutteCoxeterLowerBound.lean`: Kernel-checked verification of all 90 Tutte–Coxeter 8-cycles and exact 8-fold incidence of every `(v, off_port)` (`tc_incidence_eq_8`), exact double-counting identity (`tc_double_counting_eq`), `8 a_15 - 4 b_8 - 8 c_7 ≥ 45` (`tc_double_counting_bound`, `tc_cubic_a15_ge_18`, `tc_delta3_a15_ge_14`, `tc_delta3_a15_15_c7_le_3`), and formal soundness of the SAT/DRAT `--add-slack-bound` cardinality constraint (`tc_slack_card_sound`, `tc_slack_card_n354_cubic`, `tc_slack_card_n338_delta3`).
+
 ## Overnight `/goal` Master Synthesis & Final Verification Gates
 
 - **Master Synthesis (`docs/reports/M6_OVERNIGHT_10H_GOAL_SYNTHESIS_2026_11_27.md`)**: Consolidates all certified upper bounds ($f_{\mathrm{cubic}}(5) \le 370$, $f_{\delta \ge 3}(5) \le 345$, $f_{\delta \ge 3}(4) \le 73$ via two distinct witnesses, $f_{\delta \ge 3}(4) \le 77$), exhaustive 3-port/4-port gadget classifications (`n <= 17` / `n <= 14`), Tutte–Coxeter exact optimality proofs (analytic + branch-and-bound + independent RUP/DRAT + reviewer CaDiCaL 1.5.3), `61.78B` exact LNS-RRT leaves across Phases R3–R5, and all three peer-review remediation cycles (including exact CNF reproduction commands and DRAT lemma-scope disclosure in `ERRATUM_2026_11_27_PHASE_R2.md`).

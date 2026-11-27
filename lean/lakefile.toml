@@ -1,0 +1,6 @@
+name = "sglab_formal"
+version = "0.1.0"
+defaultTargets = ["Sglab"]
+
+[[lean_lib]]
+name = "Sglab"
