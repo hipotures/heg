@@ -13,7 +13,8 @@ and **zero `native_decide`** (every finite verification runs inside the Lean 4 k
 | `Sglab/GadgetLift.lean` | General 3-port vertex-replacement lift (`liftGraph`), degree preservation (`liftGraph_minDeg3`, `liftGraph_isCubic`), and the **Master 3-Port Cycle Projection & Length Lower Bound Theorem** (`liftGraph_cycle_dichotomy`, `liftGraph_no_cycle`). |
 | `Sglab/Gadgets.lean` | Kernel-verified gadgets `H7` (`n=7`, cubic-internal, port distances `(2,2,3)`), `H8star` (`n=8`, `δ≥3`, port distances `(3,3,2)`), and `H15` (`n=15`, cubic-internal, port distances `(3,3,5)`): `{C4, C8}`-freeness via `not_hasCycle_of_dfs`, port distances via explicit BFS potentials. |
 | `Sglab/Records.lean` | Kernel-checked extremal upper bounds: `f_delta3_4_le_73` (`3·H_8* + 7·H_7`), `f_delta3_4_le_73_alt` (`1·U_1 + 9·H_8*`), `f_cubic_5_le_370` (`20·H_15 + 10·H_7`), `f_delta3_5_le_345` (`15·H_15 + 15·H_8*`), and the general 4-packing theorem `f_cubic_6_4packing` (`≤ 30,360` for any `N = 2048` cubic girth-`≥ 17` base, `f_cubic_6_4packing_N2048`). |
-| `Sglab/TutteCoxeterLowerBound.lean` | Kernel-checked verification of all 90 8-cycles of the Tutte–Coxeter graph, exact 8-fold incidence of every `(v, off_port)` pair (`tc_incidence_eq_8`), the exact double-counting identity (`tc_double_counting_eq`), `8 a_15 - 4 b_8 - 8 c_7 ≥ 45` (`tc_double_counting_bound`), `a_15 ≥ 18` cubic / `a_15 ≥ 14` general / `c_7 ≤ 3` at `a_15 = 15`, and formal soundness of the SAT/DRAT `--add-slack-bound` cardinality constraint (`tc_slack_card_sound`, `tc_slack_card_n354_cubic`, `tc_slack_card_n338_delta3`). |
+| `Sglab/TutteCoxeterLowerBound.lean` | Kernel-checked verification of all 90 8-cycles of the Tutte–Coxeter graph, exact 8-fold incidence of every `(v, off_port)` pair (`tc_incidence_eq_8`), the exact double-counting identity (`tc_double_counting_eq`), `8 a_15 - 4 b_8 - 8 c_7 ≥ 45` (`tc_double_counting_bound`), `a_15 ≥ 18` cubic / `a_15 ≥ 14` general / `c_7 ≤ 3` at `a_15 = 15`, exact closure reductions (`tc_delta3_a15_ge_16_order_ge_346`, `tc_delta3_lt_345_cases`), and formal soundness of the SAT/DRAT `--add-slack-bound` cardinality constraint (`tc_slack_card_sound`, `tc_slack_card_n354_cubic`, `tc_slack_card_n338_delta3`, `tc_slack_card_n362_cubic`, `tc_slack_card_mixed3_delta3`). |
+| `Sglab/Stage1Extensions.lean` | General Source 8-Packing Lift Theorem (`f_cubic_6_source_8packing`) and numerical corollary (`f_cubic_6_source_8packing_N702_S4`, order `≤ 10,498`), plus kernel-checked certification of all three `(3,10)`-cages (`cage310_1_certified`, `cage310_2_certified`, `cage310_3_certified`: simple, 3-regular, bipartite, `C4`-free, with explicit simple `C16` witnesses). |
 
 ## Building and Auditing Axioms
 
@@ -41,8 +42,17 @@ import Sglab
 #print axioms Sglab.tc_cubic_a15_ge_18
 #print axioms Sglab.tc_delta3_a15_ge_14
 #print axioms Sglab.tc_delta3_a15_15_c7_le_3
+#print axioms Sglab.tc_delta3_a15_ge_16_order_ge_346
+#print axioms Sglab.tc_delta3_lt_345_cases
 #print axioms Sglab.tc_slack_card_sound
 #print axioms Sglab.tc_slack_card_n354_cubic
 #print axioms Sglab.tc_slack_card_n338_delta3
+#print axioms Sglab.tc_slack_card_n362_cubic
+#print axioms Sglab.tc_slack_card_mixed3_delta3
+#print axioms Sglab.f_cubic_6_source_8packing
+#print axioms Sglab.f_cubic_6_source_8packing_N702_S4
+#print axioms Sglab.cage310_1_certified
+#print axioms Sglab.cage310_2_certified
+#print axioms Sglab.cage310_3_certified
 EOF
 ```

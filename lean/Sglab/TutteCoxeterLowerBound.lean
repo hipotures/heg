@@ -502,4 +502,61 @@ theorem tc_slack_card_n338_delta3 (kind : Fin 30 → TCGadgetKind) (choice : Fin
   have hs := tc_counts_sum kind
   omega
 
+/-- **Corollary 2d (`tc_delta3_a15_ge_16_order_ge_346`)**:
+    For ANY valid `{H_15, H_8*, H_7}` assignment with `a15 ≥ 16`, the double-counting bound
+    forces `c7 ≤ 3 * a15 - 42`, hence total order `tcTotalOrder kind ≥ 282 + 4 * a15 ≥ 346 > 345`. -/
+theorem tc_delta3_a15_ge_16_order_ge_346 (kind : Fin 30 → TCGadgetKind) (choice : Fin 30 → Fin 3)
+    (h25 : ∀ C ∈ tcC8Cycles, 25 ≤ tcCycleWeight kind choice C)
+    (ha16 : 16 ≤ countKind kind .H15) :
+    346 ≤ tcTotalOrder kind := by
+  have hb := tc_double_counting_bound kind choice h25
+  have hs := tc_counts_sum kind
+  have ho := tcTotalOrder_eq kind
+  omega
+
+/-- **Corollary 2e (`tc_delta3_lt_345_cases`) — Exhaustive Reduction for Exact Minimum `345`**:
+    Any valid `{H_15, H_8*, H_7}` assignment on Tutte–Coxeter with total order `< 345` MUST satisfy
+    either `a15 ≤ 14` (ruled out by `n ≤ 338` DRAT proof) or `a15 = 15 ∧ c7 ∈ {1, 2, 3}`
+    (ruled out by `n ∈ {342, 343, 344}` `drat-trim` proofs). -/
+theorem tc_delta3_lt_345_cases (kind : Fin 30 → TCGadgetKind) (choice : Fin 30 → Fin 3)
+    (h25 : ∀ C ∈ tcC8Cycles, 25 ≤ tcCycleWeight kind choice C)
+    (hlt : tcTotalOrder kind < 345) :
+    countKind kind .H15 ≤ 14 ∨
+      (countKind kind .H15 = 15 ∧
+        (countKind kind .H7 = 1 ∨ countKind kind .H7 = 2 ∨ countKind kind .H7 = 3)) := by
+  by_cases ha14 : countKind kind .H15 ≤ 14
+  · exact Or.inl ha14
+  · by_cases ha15 : countKind kind .H15 = 15
+    · right
+      refine ⟨ha15, ?_⟩
+      have hle3 := (tc_delta3_a15_15_c7_le_3 kind choice h25 ha15).1
+      have hs := tc_counts_sum kind
+      have ho := tcTotalOrder_eq kind
+      omega
+    · exfalso
+      have hge16 : 16 ≤ countKind kind .H15 := by omega
+      have hge346 := tc_delta3_a15_ge_16_order_ge_346 kind choice h25 hge16
+      omega
+
+/-- Concrete DRAT instantiation 3: for cubic `n ≤ 362` (`a15 ≤ 19, b8 = 0`), at most `38` 8-cycles
+    can have weight `≥ 26` (certifying soundness of `--add-slack-bound` in our 56-leaf `drat-trim` closure). -/
+theorem tc_slack_card_n362_cubic (kind : Fin 30 → TCGadgetKind) (choice : Fin 30 → Fin 3)
+    (h25 : ∀ C ∈ tcC8Cycles, 25 ≤ tcCycleWeight kind choice C)
+    (ha15 : countKind kind .H15 ≤ 19) (hb8 : countKind kind .H8s = 0) :
+    (tcC8Cycles.filter (fun C => decide (26 ≤ tcCycleWeight kind choice C))).length ≤ 38 := by
+  have hcard := tc_slack_card_sound kind choice h25
+  have hs := tc_counts_sum kind
+  omega
+
+/-- Concrete DRAT instantiation 4: for mixed `δ ≥ 3` (`a15 ≤ 15, c7 ≥ k`), at most `30 - 8 * k`
+    8-cycles can have weight `≥ 26` (`≤ 22` at `n = 344`, `≤ 14` at `n = 343`, `≤ 6` at `n = 342`),
+    certifying soundness of `--mode mixed3 --add-slack-bound` in our `drat-trim` closure of `= 345`. -/
+theorem tc_slack_card_mixed3_delta3 (kind : Fin 30 → TCGadgetKind) (choice : Fin 30 → Fin 3)
+    (h25 : ∀ C ∈ tcC8Cycles, 25 ≤ tcCycleWeight kind choice C)
+    (ha15 : countKind kind .H15 ≤ 15) (k : Nat) (hc7 : k ≤ countKind kind .H7) :
+    (tcC8Cycles.filter (fun C => decide (26 ≤ tcCycleWeight kind choice C))).length + 8 * k ≤ 30 := by
+  have hcard := tc_slack_card_sound kind choice h25
+  have hs := tc_counts_sum kind
+  omega
+
 end Sglab
