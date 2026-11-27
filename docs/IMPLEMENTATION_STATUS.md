@@ -2,6 +2,11 @@
 
 Last implementation audit: **2026-11-27**.
 
+## Overnight `/goal` Master Synthesis & Final Verification Gates
+
+- **Master Synthesis (`docs/reports/M6_OVERNIGHT_10H_GOAL_SYNTHESIS_2026_11_27.md`)**: Consolidates all certified upper bounds ($f_{\mathrm{cubic}}(5) \le 370$, $f_{\delta \ge 3}(5) \le 345$, $f_{\delta \ge 3}(4) \le 73$ via two distinct witnesses, $f_{\delta \ge 3}(4) \le 77$), exhaustive 3-port/4-port gadget classifications (`n <= 17` / `n <= 14`), Tutte–Coxeter exact optimality proofs (analytic + branch-and-bound + independent RUP/DRAT + reviewer CaDiCaL 1.5.3), `61.78B` exact LNS-RRT leaves across Phases R3–R5, and all three peer-review remediation cycles (including exact CNF reproduction commands and DRAT lemma-scope disclosure in `ERRATUM_2026_11_27_PHASE_R2.md`).
+- **Final Gates (`2026-11-27T05:06Z`)**: `cargo test --release` `17/17` (`0.81 s`), `test_rust_engine.py` `7/7` (`3.04 s`), `make doctor`, `make check`, `make benchmark-smoke`, `make dashboard-smoke`, `SHA256SUMS.txt` `12/12`, and live verification of all 5 certificates (`verify-large` + `sglab-cyclecheck-large` + M4 `sglab-cyclecheck`) all green; `0` files modified in `src/` or `tests/`.
+
 ## Overnight `/goal` Phase R5: Ducoffe–Dumitru Conjecture 4.1 (`single_block_41`, `27.96B` Exact `u64` LNS-RRT Leaves)
 
 - **110.1-minute 16-core `u64` LNS-RRT Campaign (`docs/reports/M6_GOAL_PHASE_R5_CONJECTURE_41_LNS_RRT_2026_11_27.md`, raw data `docs/reports/data/track4_conj41_n64_results.json`)**: Evaluated **`27,958,747,565`** (`27.96B`) exact `C4 = C8 = 0` LNS-RRT leaves across `k = 23..37` (glued odd orders `n = 45..73`). Inside the automatic-`C32=C64=0` Theorem 4.2 window (`k = 23..31`, `17.43B` leaves), blocks held a rigid `C16 = 111..138` floor; above `k = 31`, `k = 33` improved `142 -> 122` and `k = 37` reached **`C16 = 97`** (first sub-100 `single_block_41` block). Zero counterexamples found.

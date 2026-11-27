@@ -40,6 +40,21 @@
 | `TC(<=18·H_15 + H_7)` (`n <= 354`, cubic) | `8,106 / 37,187` | `UNSATISFIABLE` (`24.39 s`, `179,809` conflicts) | **`VERIFIED UNSAT`**: `179,809` steps checked in `35.83 s` | `d42e49c4...45e44e` |
 | `TC(<=14·H_15 + H_8*)` (`n <= 338`, $\delta \ge 3$) | `7,270 / 34,799` | `UNSATISFIABLE` (`43.67 s`, `232,503` conflicts) | **`VERIFIED UNSAT`**: `232,503` steps checked in `57.62 s` | `a966119e...bcccb64f` |
 
+Exact commands reproducing those two CNFs (C8-only relaxation — omitting `--include-c10` is sound for `UNSAT` — plus `--add-slack-bound`):
+
+```bash
+python3 tools/extremal/tc_to_cnf.py --a15 18 --g2 H7  --add-slack-bound --out tc_n354_slack.cnf
+python3 tools/extremal/tc_to_cnf.py --a15 14 --g2 H8s --add-slack-bound --out tc_n338_slack.cnf
+g++ -O3 -std=c++17 tools/extremal/mini_cdcl_drat.cpp -o _build/mini-cdcl-drat
+g++ -O3 -std=c++17 tools/extremal/check_drat.cpp     -o _build/check-drat
+_build/mini-cdcl-drat tc_n354_slack.cnf tc_n354_slack.drat
+_build/check-drat     tc_n354_slack.cnf tc_n354_slack.drat
+_build/mini-cdcl-drat tc_n338_slack.cnf tc_n338_slack.drat
+_build/check-drat     tc_n338_slack.cnf tc_n338_slack.drat
+```
+
+**Scope of the DRAT certificate**: DRAT certifies unsatisfiability of the generated CNF *including* the `--add-slack-bound` lemma `AtMost({sum_C >= 10}, S)`; it does not formally derive that counting lemma itself. The counting lemma (`sum_{C in C8} (sum_C - 9) <= 16 a_15 - (8 or 16)(30 - a_15) - 90` under `AtMost(#H_15 <= a_15)`) is verified directly by hand from the exact incidence count (every `(vertex, off-edge)` of Tutte–Coxeter lies on exactly `8` of its `90` `C8` cycles) and was independently confirmed by `REVIEW_FOLLOWUP2_2026_11_27.md` using a separate Levi-graph / PySAT / CaDiCaL 1.5.3 encoding.
+
 - **Scope & wording precision**:
   - The bounds `[342, 345]` ($\delta \ge 3$) and `{362, 370}` (cubic) apply **strictly within the Tutte–Coxeter base + `{H_15, H_8*, H_7}` replacement family** (excluding unexpanded vertices, 4-port gadgets, or other base graphs).
   - For bipartite girth-8 bases `B_{34}..B_{48}` (§4 of R2), our solver is heuristic; the accurate statement is that **no** `n < 370` (cubic) or `n < 345` ($\delta \ge 3$) solution was found (not a proof of impossibility).
