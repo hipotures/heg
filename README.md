@@ -33,15 +33,15 @@ reproducible computational witnesses, SAT/DRAT UNSAT proofs, and a
 **zero-dependency Lean 4 (`v4.36.0`) kernel-checked formalization** (`lean/`,
 `3,849` lines, zero Mathlib, zero `sorry`, zero custom axioms, zero
 `native_decide`) of our extremal bounds on finite simple graphs avoiding
-$\{C_4, C_8, \dots, C_{2^k}\}$:
+$\lbrace C_4, C_8, \dots, C_{2^k}\rbrace$:
 
 | Result | Construction / Scope | Verification |
 |---|---|---|
-| $f_{\delta \ge 3}(4) \le 73$ | Two distinct 2-connected witnesses: `Petersen + 3·H_8* + 7·H_7` and `Petersen + 1·U_1 + 9·H_8*` | M4 C++17, Rust `verify-exact`, Python DFS, Lean 4 (`f_delta3_4_le_73`, `f_delta3_4_le_73_alt`) |
-| $f_{\mathrm{cubic}}(5) \le 370$ | 3-regular, 2-connected `Tutte–Coxeter + 20·H_15 + 10·H_7` | Rust `verify-large`, C++17 exact DFS, Lean 4 (`f_cubic_5_le_370`) |
-| $f_{\delta \ge 3}(5) \le 345$ | 2-connected `Tutte–Coxeter + 15·H_15 + 15·H_8*` | Rust `verify-large`, C++17 exact DFS, Lean 4 (`f_delta3_5_le_345`) |
-| $f_{\mathrm{cubic}}(6)$ via 4-packing | Any cubic base of order $N$ and girth $\ge 17$ lifts to order $\le 15 N - 8 \lceil N / 46 \rceil$ ($\le 30{,}360$ at $N = 2048$) | Lean 4 (`f_cubic_6_4packing`, `f_cubic_6_4packing_N2048`) |
-| Tutte–Coxeter lower bounds (`{H_15, H_8*, H_7}`) | Exact double-counting $8 a_{15} - 4 b_8 - 8 c_7 \ge 45$ over all 90 8-cycles (`a_15 ≥ 18` cubic, `a_15 ≥ 14` general) and DRAT slack-bound soundness (`≤ 6` slack cycles at `n = 354, 338`) | Lean 4 (`tc_double_counting_bound`, `tc_slack_card_sound`), independent SAT/DRAT & CaDiCaL UNSAT proofs |
+| ${f_{\delta \ge 3}(4) \le 73}$ | Two distinct 2-connected witnesses: `Petersen + 3·H_8* + 7·H_7` and `Petersen + 1·U_1 + 9·H_8*` | M4 C++17, Rust `verify-exact`, Python DFS, Lean 4 (`f_delta3_4_le_73`, `f_delta3_4_le_73_alt`) |
+| ${f_{\mathrm{cubic}}(5) \le 370}$ | 3-regular, 2-connected `Tutte–Coxeter + 20·H_15 + 10·H_7` | Rust `verify-large`, C++17 exact DFS, Lean 4 (`f_cubic_5_le_370`) |
+| ${f_{\delta \ge 3}(5) \le 345}$ | 2-connected `Tutte–Coxeter + 15·H_15 + 15·H_8*` | Rust `verify-large`, C++17 exact DFS, Lean 4 (`f_delta3_5_le_345`) |
+| ${f_{\mathrm{cubic}}(6)}$ via 4-packing | Any cubic base of order $N$ and girth $\ge 17$ lifts to order $\le 15 N - 8 \lceil N / 46 \rceil$ ($\le 30{,}360$ at $N = 2048$) | Lean 4 (`f_cubic_6_4packing`, `f_cubic_6_4packing_N2048`) |
+| Tutte–Coxeter lower bounds ($\lbrace H_{15}, H_8^*, H_7\rbrace$) | Exact double-counting $8 a_{15} - 4 b_8 - 8 c_7 \ge 45$ over all 90 8-cycles ($a_{15} \ge 18$ cubic, $a_{15} \ge 14$ general) and DRAT slack-bound soundness ($\le 6$ slack cycles at $n \in \lbrace 354, 338\rbrace$) | Lean 4 (`tc_double_counting_bound`, `tc_slack_card_sound`), independent SAT/DRAT & CaDiCaL UNSAT proofs |
 
 Build and audit the Lean 4 proofs locally:
 
