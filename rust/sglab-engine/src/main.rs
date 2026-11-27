@@ -1,4 +1,5 @@
 mod bank;
+mod batch_scan;
 mod cycles;
 mod exact_verify;
 mod graph;
@@ -1032,11 +1033,139 @@ fn cmd_verify_large(args: &[String]) -> i32 {
     0
 }
 
+fn cmd_scan_batch(args: &[String]) -> i32 {
+    let mut input = String::new();
+    let mut format = crate::batch_scan::InputFormat::Graph6;
+    let mut mode = crate::batch_scan::ScanMode::General;
+    let mut lengths = vec![4usize, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192];
+    let mut workers = 16usize;
+    let mut expect_cubic = false;
+    let mut max_order: Option<usize> = None;
+    let mut witness_out: Option<String> = None;
+    let mut exceptions_out: Option<String> = None;
+    let mut exception_min_len = 32usize;
+    let mut summary_json: Option<String> = None;
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--input" => {
+                i += 1;
+                input = args.get(i).cloned().unwrap_or_default();
+            }
+            "--format" => {
+                i += 1;
+                let Some(s) = args.get(i) else {
+                    eprintln!("missing value for --format");
+                    return 2;
+                };
+                format = match crate::batch_scan::InputFormat::parse(s) {
+                    Ok(f) => f,
+                    Err(e) => {
+                        eprintln!("{e}");
+                        return 2;
+                    }
+                };
+            }
+            "--mode" => {
+                i += 1;
+                let Some(s) = args.get(i) else {
+                    eprintln!("missing value for --mode");
+                    return 2;
+                };
+                mode = match crate::batch_scan::ScanMode::parse(s) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        eprintln!("{e}");
+                        return 2;
+                    }
+                };
+            }
+            "--lengths" => {
+                i += 1;
+                let Some(s) = args.get(i) else {
+                    eprintln!("missing value for --lengths");
+                    return 2;
+                };
+                lengths.clear();
+                for part in s.split(',') {
+                    let trimmed = part.trim();
+                    match trimmed.parse::<usize>() {
+                        Ok(v) if v >= 4 && v % 2 == 0 => lengths.push(v),
+                        _ => {
+                            eprintln!("invalid --lengths token: '{trimmed}' (must be even >= 4)");
+                            return 2;
+                        }
+                    }
+                }
+                if lengths.is_empty() {
+                    eprintln!("--lengths cannot be empty");
+                    return 2;
+                }
+            }
+            "--workers" => {
+                i += 1;
+                workers = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(16);
+            }
+            "--expect-cubic" => {
+                expect_cubic = true;
+            }
+            "--max-order" => {
+                i += 1;
+                max_order = args.get(i).and_then(|s| s.parse().ok());
+            }
+            "--witness-out" => {
+                i += 1;
+                witness_out = args.get(i).cloned();
+            }
+            "--exceptions-out" => {
+                i += 1;
+                exceptions_out = args.get(i).cloned();
+            }
+            "--exception-min-len" => {
+                i += 1;
+                exception_min_len = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(32);
+            }
+            "--summary-json" => {
+                i += 1;
+                summary_json = args.get(i).cloned();
+            }
+            other => {
+                eprintln!("unknown argument: {other}");
+                return 2;
+            }
+        }
+        i += 1;
+    }
+    if input.is_empty() {
+        eprintln!("--input is required (file path or '-' for stdin)");
+        return 2;
+    }
+    let cfg = crate::batch_scan::BatchScanConfig {
+        input,
+        format,
+        mode,
+        lengths,
+        workers,
+        expect_cubic,
+        max_order,
+        witness_out,
+        exceptions_out,
+        exception_min_len,
+        summary_json,
+    };
+    if let Err(e) = crate::batch_scan::run_batch_scan(&cfg) {
+        eprintln!("scan-batch error: {e}");
+        return 1;
+    }
+    0
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
         eprintln!(
-            "usage: sglab-rust-engine --version | --serve | score | bench-score | search | verify-exact | verify-large | lns-polish | voltage-search | bjorklund-c32"
+            "usage: sglab-rust-engine --version | --serve | score | bench-score | search | verify-exact | verify-large | scan-batch | lns-polish | voltage-search | bjorklund-c32"
         );
         process::exit(2);
     }
@@ -1051,6 +1180,7 @@ fn main() {
         "search" => cmd_search(&args[2..]),
         "verify-exact" => cmd_verify_exact(&args[2..]),
         "verify-large" => cmd_verify_large(&args[2..]),
+        "scan-batch" => cmd_scan_batch(&args[2..]),
         "lns-polish" => cmd_lns_polish(&args[2..]),
         "voltage-search" => cmd_voltage_search(&args[2..]),
         "bjorklund-c32" => cmd_bjorklund_c32(&args[2..]),

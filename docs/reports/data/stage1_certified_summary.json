@@ -1,0 +1,476 @@
+{
+  "date": "2026-11-27",
+  "hardware": "16-core AMD Ryzen 9 7950X3D, 121 GiB RAM",
+  "track_1a_girth9_n58_64": {
+    "cub58g9": {
+      "total_graphs": 18,
+      "cubic_violations": 0,
+      "mode": "general",
+      "workers": 16,
+      "elapsed_seconds": 0.001,
+      "graphs_per_second": 20229.4,
+      "counts_by_shortest_len": {
+        "16": 18
+      },
+      "counts_by_girth": {},
+      "counts_by_bipartite": {},
+      "counts_by_cayley": {},
+      "none_examples": []
+    },
+    "cub60g9": {
+      "total_graphs": 474,
+      "cubic_violations": 0,
+      "mode": "general",
+      "workers": 16,
+      "elapsed_seconds": 0.004,
+      "graphs_per_second": 131130.6,
+      "counts_by_shortest_len": {
+        "16": 474
+      },
+      "counts_by_girth": {},
+      "counts_by_bipartite": {},
+      "counts_by_cayley": {},
+      "none_examples": []
+    },
+    "cub62g9": {
+      "total_graphs": 27169,
+      "cubic_violations": 0,
+      "mode": "general",
+      "workers": 16,
+      "elapsed_seconds": 0.127,
+      "graphs_per_second": 214350.5,
+      "counts_by_shortest_len": {
+        "16": 27169
+      },
+      "counts_by_girth": {},
+      "counts_by_bipartite": {},
+      "counts_by_cayley": {},
+      "none_examples": []
+    },
+    "cub64g9": {
+      "total_graphs": 1408813,
+      "cubic_violations": 0,
+      "mode": "general",
+      "workers": 16,
+      "elapsed_seconds": 6.682,
+      "graphs_per_second": 210843.2,
+      "counts_by_shortest_len": {
+        "16": 1408813
+      },
+      "counts_by_girth": {},
+      "counts_by_bipartite": {},
+      "counts_by_cayley": {},
+      "none_examples": []
+    }
+  },
+  "track_1b_censuses": {
+    "psv_all_main_graph": {
+      "total_graphs": 111705,
+      "cubic_violations": 0,
+      "mode": "vertex-transitive",
+      "workers": 12,
+      "elapsed_seconds": 6.751,
+      "graphs_per_second": 16545.5,
+      "counts_by_shortest_len": {
+        "16": 89161,
+        "32": 117,
+        "4": 5783,
+        "8": 16644
+      },
+      "counts_by_girth": {
+        "3": {
+          "16": 102,
+          "32": 53,
+          "4": 12,
+          "8": 4
+        },
+        "4": {
+          "4": 5771
+        },
+        "5": {
+          "16": 83,
+          "32": 3,
+          "8": 16
+        },
+        "6": {
+          "16": 55811,
+          "32": 25,
+          "8": 2958
+        },
+        "7": {
+          "16": 70,
+          "32": 2,
+          "8": 121
+        },
+        "8": {
+          "8": 13545
+        },
+        "9": {
+          "16": 220,
+          "32": 1
+        },
+        "10": {
+          "16": 25836,
+          "32": 1
+        },
+        "11": {
+          "16": 83,
+          "32": 1
+        },
+        "12": {
+          "16": 5468,
+          "32": 30
+        },
+        "13": {
+          "16": 37
+        },
+        "14": {
+          "16": 1409,
+          "32": 1
+        },
+        "15": {
+          "16": 15
+        },
+        "16": {
+          "16": 27
+        }
+      },
+      "counts_by_bipartite": {
+        "bipartite": {
+          "16": 87514,
+          "32": 44,
+          "4": 4361,
+          "8": 14691
+        },
+        "non_bipartite": {
+          "16": 1647,
+          "32": 73,
+          "4": 1422,
+          "8": 1953
+        }
+      },
+      "counts_by_cayley": {
+        "cayley": {
+          "16": 88383,
+          "32": 89,
+          "4": 5596,
+          "8": 16126
+        },
+        "non_cayley": {
+          "16": 778,
+          "32": 28,
+          "4": 187,
+          "8": 518
+        }
+      },
+      "none_examples": []
+    },
+    "conder_n_le_2048": {
+      "total_graphs": 796,
+      "cubic_violations": 0,
+      "mode": "vertex-transitive",
+      "workers": 12,
+      "elapsed_seconds": 0.92,
+      "graphs_per_second": 865.7,
+      "counts_by_shortest_len": {
+        "16": 715,
+        "32": 23,
+        "4": 3,
+        "8": 55
+      },
+      "counts_by_girth": {
+        "3": {
+          "4": 1
+        },
+        "4": {
+          "4": 2
+        },
+        "5": {
+          "8": 2
+        },
+        "6": {
+          "16": 325,
+          "8": 7
+        },
+        "7": {
+          "16": 7,
+          "32": 1,
+          "8": 2
+        },
+        "8": {
+          "8": 44
+        },
+        "9": {
+          "16": 20
+        },
+        "10": {
+          "16": 94,
+          "32": 1
+        },
+        "11": {
+          "16": 7,
+          "32": 1
+        },
+        "12": {
+          "16": 165,
+          "32": 19
+        },
+        "14": {
+          "16": 69,
+          "32": 1
+        },
+        "15": {
+          "16": 5
+        },
+        "16": {
+          "16": 23
+        }
+      },
+      "counts_by_bipartite": {
+        "bipartite": {
+          "16": 648,
+          "32": 19,
+          "4": 2,
+          "8": 45
+        },
+        "non_bipartite": {
+          "16": 57,
+          "32": 2,
+          "4": 1,
+          "8": 10
+        }
+      },
+      "counts_by_cayley": {},
+      "none_examples": []
+    },
+    "conder_n_le_10000": {
+      "total_graphs": 3815,
+      "cubic_violations": 0,
+      "mode": "vertex-transitive",
+      "workers": 12,
+      "elapsed_seconds": 4.107,
+      "graphs_per_second": 928.9,
+      "counts_by_shortest_len": {
+        "16": 3012,
+        "32": 689,
+        "4": 3,
+        "8": 111
+      },
+      "counts_by_girth": {
+        "3": {
+          "4": 1
+        },
+        "4": {
+          "4": 2
+        },
+        "5": {
+          "8": 2
+        },
+        "6": {
+          "16": 1559,
+          "8": 7
+        },
+        "7": {
+          "16": 8,
+          "32": 9,
+          "8": 2
+        },
+        "8": {
+          "8": 100
+        },
+        "9": {
+          "16": 40
+        },
+        "10": {
+          "16": 290,
+          "32": 21
+        },
+        "11": {
+          "16": 7,
+          "32": 4
+        },
+        "12": {
+          "16": 571,
+          "32": 310
+        },
+        "13": {
+          "16": 2,
+          "32": 1
+        },
+        "14": {
+          "16": 248,
+          "32": 125
+        },
+        "15": {
+          "16": 22,
+          "32": 14
+        },
+        "16": {
+          "16": 265
+        },
+        "17": {
+          "32": 3
+        },
+        "18": {
+          "32": 187
+        },
+        "19": {
+          "32": 6
+        },
+        "20": {
+          "32": 9
+        }
+      },
+      "counts_by_bipartite": {
+        "bipartite": {
+          "16": 2873,
+          "32": 608,
+          "4": 2,
+          "8": 92
+        },
+        "non_bipartite": {
+          "16": 79,
+          "32": 18,
+          "4": 1,
+          "8": 16
+        }
+      },
+      "counts_by_cayley": {},
+      "none_examples": []
+    }
+  },
+  "track_1c_cages_3_10": {
+    "scan": {
+      "total_graphs": 3,
+      "cubic_violations": 0,
+      "mode": "general",
+      "workers": 4,
+      "elapsed_seconds": 0.0,
+      "graphs_per_second": 8429.4,
+      "counts_by_shortest_len": {
+        "16": 3
+      },
+      "counts_by_girth": {},
+      "counts_by_bipartite": {},
+      "counts_by_cayley": {},
+      "none_examples": []
+    },
+    "m4_all_c16_found": true,
+    "zhuge_single_core_scaling_seconds": {
+      "29": 0.47,
+      "30": 0.858,
+      "31": 1.674,
+      "32": 3.269,
+      "33": 5.726
+    }
+  },
+  "track_1d_henry_and_f6": {
+    "henry_graph370_sha256": "d403fdaa756d67fe4bf6e9758552fddbf557c44305b5cc0b6cc40a1fc4524d94",
+    "henry_graph370_verified_c4_c8_c16_c32_absent": true,
+    "k3_g17_n2048": {
+      "file": "_build/datasets/hog/k3_g17_n2048.g6",
+      "sha256": "9220300a11c22def24ad79d26a39a583f6abc8ed7d508b12c6272c1719a6efbd",
+      "order": 2048,
+      "size": 3072,
+      "degrees": [
+        3
+      ],
+      "is_cubic": true,
+      "connected": true,
+      "bipartite": false,
+      "exact_girth": 17,
+      "greedy_4packing_size": 124,
+      "f_cubic_6_unconditional_upper_bound": 29728,
+      "packing_first_20": [
+        0,
+        4,
+        5,
+        6,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        20,
+        21,
+        22,
+        23,
+        24
+      ]
+    },
+    "k3_g16_n702": {
+      "file": "_build/datasets/hog/k3_g16_n702.g6",
+      "sha256": "b94c67a673daa8be9384f8a8b793c7791202f5c88fa05e1660acc7d08e8b8b90",
+      "order": 702,
+      "size": 1053,
+      "degrees": [
+        3
+      ],
+      "is_cubic": true,
+      "connected": true,
+      "bipartite": true,
+      "exact_girth": 16
+    },
+    "k3_g16_n702_source_8packing": [
+      270,
+      417,
+      484,
+      622
+    ],
+    "f_cubic_6_unconditional_bound_g16_702": 10498,
+    "f_cubic_6_unconditional_bound_g17_2048": 29728
+  },
+  "track_1e_tutte_coxeter_exact_closure": {
+    "delta3_exact_minimum": 345,
+    "delta3_drat_verified": {
+      "n342_a15_15_c7_3": {
+        "solve_s": 3,
+        "drat_trim_s": 2.581,
+        "resolution_steps": 2863822,
+        "check_drat_verified": true
+      },
+      "n343_a15_15_c7_2": {
+        "solve_s": 96,
+        "drat_trim_s": 93.721,
+        "resolution_steps": 59697566
+      },
+      "n344_a15_15_c7_1": {
+        "solve_s": 367,
+        "drat_trim_s": 617.547,
+        "resolution_steps": 127498690
+      }
+    },
+    "cubic_exact_minimum": 370,
+    "cubic_n362_56leaf_closure": {
+      "depth2_verified_unsat": 32,
+      "depth3_verified_unsat": 24,
+      "total_leaves_verified_unsat": 56,
+      "total_leaves": 56,
+      "depth3_wall_seconds": 737.47
+    }
+  },
+  "external_dataset_and_witness_sha256": {
+    "cub58g9.g6": "6c5339042f2f48e9f596e154da3f0bc145d27cb835902f538618013c2439b5b2",
+    "cub60g9.g6": "cfc7542f1ac8728b0d3a4dc69ba7a1795a49e6389dcf908d7624dd3e4dc6522f",
+    "cub62g9.g6.gz": "f1932360e7520e0af26e1fa7bf82af88cb66c9fab78157c8e992b15e0c7218c7",
+    "cub64g9.g6.gz": "26800e3f3d0abaf8ec58a336bba388881c2690283b6b55b9fc9fa9477ea28ae8",
+    "cagesk3g10.g6": "cf5605c11b54cdbba47f921fc6fe2261ede376ee94f6d6b74b8603aba7290c8c",
+    "k3_g17_n2048.g6": "9220300a11c22def24ad79d26a39a583f6abc8ed7d508b12c6272c1719a6efbd",
+    "k3_g16_n702.g6": "b94c67a673daa8be9384f8a8b793c7791202f5c88fa05e1660acc7d08e8b8b90",
+    "psv_main_Graph.txt": "95d8a0ecdf9ed49031a41dc272d90b104d742dd55fe7f0bf1ded97a4f7c4562c",
+    "AllSymmCubic-OrderUpTo10000-ByEdgeSets.txt.gz": "0170b695405da4c7b6eeaec8af13a8fb06e059fac439c2030acb5acd82dcf4e7",
+    "cub58g9.witnesses.gz": "a28bc2c639277c67c8357340cfdf7aaa11629ab4637ab2c8aab67f20c1444297",
+    "cub60g9.witnesses.gz": "20f2813a617bcab9be3db54e79c13e156d71da649c333b6b625075b1b8d38827",
+    "cub62g9.witnesses.gz": "f356cc70129c2a7e1ea371830b9bbb0e95eca2c4d85e8c8cf82f5365b76b89b2",
+    "cub64g9.witnesses.gz": "a33a9559e451a730e189dcc4e2ee6e5e1dfde306972abe2e080bd405487345f7",
+    "psv1280.witnesses.gz": "7f6ca699cc2b2a090284437cfa02bcd8ee250ca362a00a533ec2acaf0f6d3610",
+    "conder2048.witnesses.gz": "59f36c62c94e34d95b3c92b91599674310517bcf109764fa6446939a100fe3c8",
+    "conder10000.witnesses.gz": "1ce4d0e21e423f5fae75495564d5544f8f32bea65d2f538ad61fdd3ad34d0f43"
+  }
+}

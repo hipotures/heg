@@ -17,6 +17,7 @@ cp rust/sglab-engine/target/release/sglab-rust-engine _build/sglab-rust-engine
 |---|---:|---|---|
 | `verify-exact` | `n <= 128` | Exact (`C4, C8, C16` MitM + `C32, C64` Frontier DP / BnR) | Fast exact cycle verification (not M4; use M4 `sglab-cyclecheck` for formal certification) |
 | `verify-large` | `n <= 512` | Exact (16-core canonical-start `[u64; 8]` MitM + release witness check) | Exact even-cycle verification for `128 < n <= 512` (see [ADR 0019](../adr/0019-large-order-exact-cycle-verification.md)) |
+| `scan-batch` | `n <= 16,384` | Exact MitM (`C4..C32`) + guided MitM (`C64+`) + release witness check | High-throughput parallel census scanner (`g6`, `s6`, `psv-tsv`, `conder-edges`) with general & vertex-transitive modes and witness stream output |
 | `lns-polish` | `n <= 128` | Exact `C4=C8=0` repair + exact MitM `C16` scoring | 16-core Exact-Matching Micro-LNS with optional RRT (`--rrt-slack`) and bipartition preservation (`--bipartite`) |
 | `voltage-search` | `n <= 128` | Exhaustive (small groups) or parallel Tabu + exact `C4,C8,C16` | Non-abelian, non-nilpotent bipartite cubic voltage-lift search |
 | `bjorklund-c32` | `n <= 128` (bipartite) | **One-sided Monte Carlo** ($\mathrm{GF}(2^{16})$ `PCLMULQDQ` narrow sieve) | Fast `C32` witness detection; `found=true` implies `C32` exists, `found=false` is **NOT** a deterministic proof of absence |
@@ -107,3 +108,27 @@ _build/sglab-rust-engine verify-exact --graph6 <G6>
 ```
 
 Returns JSON with exact `c16_exact_count`, `lengths` (`"ABSENT"` or `"FOUND"` for `4, 8, 16, 32, 64`), and Frontier DP statistics. For formal counterexample certification (`n <= 128`), M4 (`cpp/sglab_cyclecheck.cpp`) remains the sole certification authority ([ADR 0004](../adr/0004-m4-certification-authority.md)).
+
+---
+
+## `scan-batch`
+
+High-throughput multi-threaded batch scanner for large graph censuses (`graph6`, `sparse6`, `psv-tsv`, and `conder-edges`) up to `n <= 16,384`, emitting runtime-verified cycle witness streams and JSON summaries.
+
+```bash
+_build/sglab-rust-engine scan-batch \
+  --input (<PATH> | -) \
+  --format <g6|s6|psv-tsv|conder-edges> \
+  --mode <general|vertex-transitive> \
+  [--lengths 4,8,16,32,64,...] \
+  [--workers 16] \
+  [--expect-cubic] \
+  [--max-order <N>] \
+  [--witness-out <PATH>] \
+  [--exceptions-out <PATH>] \
+  [--exception-min-len 32] \
+  [--summary-json <PATH>]
+```
+
+- **`--mode general`**: checks all canonical minimum vertices (`u64` fast path for `n <= 64, L <= 16`; bloom-accelerated exact MitM for `L <= 32`; guided MitM for `L >= 64`).
+- **`--mode vertex-transitive`**: searches only cycles containing vertex `0` (exact for minimum cycle length on vertex-transitive graphs, yielding up to `n×` speedup). Every emitted positive cycle witness is independently verified in release builds (`verify_cycle_witness`) and can be cross-checked 1-to-1 against the raw input by `tools/extremal/verify_witness_stream.py`.

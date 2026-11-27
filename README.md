@@ -38,10 +38,11 @@ $\lbrace C_4, C_8, \dots, C_{2^k}\rbrace$:
 | Result | Construction / Scope | Verification |
 |---|---|---|
 | ${f_{\delta \ge 3}(4) \le 73}$ | Two distinct 2-connected witnesses: `Petersen + 3·H_8* + 7·H_7` and `Petersen + 1·U_1 + 9·H_8*` | M4 C++17, Rust `verify-exact`, Python DFS, Lean 4 (`f_delta3_4_le_73`, `f_delta3_4_le_73_alt`) |
-| ${f_{\mathrm{cubic}}(5) \le 370}$ | 3-regular, 2-connected `Tutte–Coxeter + 20·H_15 + 10·H_7` | Rust `verify-large`, C++17 exact DFS, Lean 4 (`f_cubic_5_le_370`) |
+| ${f_{\mathrm{cubic}}(5) \le 370}$ | 3-regular, 2-connected `Tutte–Coxeter + 20·H_15 + 10·H_7` (independently rediscovered; prior preprint K. Henry, Zenodo `23886386`, 3 Nov 2026) | Rust `verify-large`, C++17 exact DFS, Lean 4 (`f_cubic_5_le_370`) |
 | ${f_{\delta \ge 3}(5) \le 345}$ | 2-connected `Tutte–Coxeter + 15·H_15 + 15·H_8*` | Rust `verify-large`, C++17 exact DFS, Lean 4 (`f_delta3_5_le_345`) |
-| ${f_{\mathrm{cubic}}(6)}$ via 4-packing | Any cubic base of order $N$ and girth $\ge 17$ lifts to order $\le 15 N - 8 \lceil N / 46 \rceil$ ($\le 30{,}360$ at $N = 2048$) | Lean 4 (`f_cubic_6_4packing`, `f_cubic_6_4packing_N2048`) |
-| Tutte–Coxeter lower bounds<br>$({\lbrace H_{15}, H_8^*, H_7\rbrace})$ | Exact double-counting $8 a_{15} - 4 b_8 - 8 c_7 \ge 45$ over all 90 8-cycles; $a_{15} \ge 18$ cubic, $a_{15} \ge 14$ general; DRAT slack-bound soundness: $\le 6$ slack cycles at $n \in \lbrace 354, 338\rbrace$ | Lean 4 (`tc_double_counting_bound`, `tc_slack_card_sound`), independent SAT/DRAT & CaDiCaL UNSAT proofs |
+| ${f_{\mathrm{cubic}}(6) \le 10{,}498}$ (unconditional) | Verified `k3_g16_n702.g6` (girth `16`) + BFS source 8-packing ($\lvert S_8\rvert = 4$); also $\le 29{,}728$ on verified `k3_g17_n2048.g6` ($\lvert P\rvert = 124$) and general 4-packing $\le 15 N - 8\lceil N/46\rceil$ | Exact BFS girth + packing checks (`verify_high_girth_f6.py`), Lean 4 (`f_cubic_6_4packing`, `f_cubic_6_4packing_N2048`) |
+| Tutte–Coxeter exact minima<br>$({\lbrace H_{15}, H_8^*, H_7\rbrace})$ | **Exact equality**: **`370`** (cubic, `n = 362` all `56/56` cubes `UNSAT`) and **`345`** ($\delta \ge 3$, `n = 342..344` `UNSAT`); exact double-counting $8 a_{15} - 4 b_8 - 8 c_7 \ge 45$ over all 90 8-cycles | Lean 4 (`tc_double_counting_bound`, `tc_slack_card_sound`), CaDiCaL 2.1.3 + official `drat-trim` (`s VERIFIED`) |
+| Certified cubic graph censuses | All `1,436,474` cubic girth $\ge 9$ ($n = 58..64$: 100% $C_{16}$); all `111,705` PSV VT ($n \le 1280$: 100% $\le C_{32}$); all `3,815` Conder symmetric ($n \le 10{,}000$: 100% $\le C_{32}$); all 3 $(3,10)$-cages ($n = 70$: M4 $C_{16}$) | Rust `scan-batch` + 100% independent Python witness-stream verifier (`verify_witness_stream.py`) + M4 (`sglab-cyclecheck`) |
 
 Build and audit the Lean 4 proofs locally:
 
@@ -51,8 +52,10 @@ lake build
 ```
 
 See [lean/README.md](lean/README.md) for the module map and `#print axioms`
-audit command, and the
-[Master Synthesis Report](docs/reports/M6_OVERNIGHT_10H_GOAL_SYNTHESIS_2026_11_27.md)
+audit command, the
+[Master Synthesis Report](docs/reports/M6_OVERNIGHT_10H_GOAL_SYNTHESIS_2026_11_27.md),
+and the
+[Stage 1 Certified Censuses & Tutte–Coxeter Closure Report](docs/reports/M6_STAGE1_CERTIFIED_CENSUSES_AND_TC_CLOSURE_2026_11_27.md)
 (with graph6 certificates under `docs/reports/certificates/` and reproducible
 solvers under `tools/extremal/`) for the full experimental record.
 

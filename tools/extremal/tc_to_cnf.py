@@ -259,25 +259,177 @@ def encode_tc_cnf(
     return cnf, x
 
 
+def encode_tc_mixed3_cnf(
+    a15: int,
+    c7: int,
+    include_c10: bool = True,
+    break_sym: bool = True,
+    add_slack_bound: bool = False,
+) -> tuple[CNFBuilder, dict[tuple[int, int], int]]:
+    """Exact 3-gadget CNF for TC(<= a15 * H_15 + b8 * H_8* + >= c7 * H_7).
+
+    States per vertex v in 0..29 (9 mutually exclusive Boolean variables):
+      s = 0,1,2 -> H_15 with p0 = s       (dl=5 if s==off else 3)
+      s = 3,4,5 -> H_8* with p0 = s - 3   (dl=2 if s-3==off else 3)
+      s = 6,7,8 -> H_7  with p0 = s - 6   (dl=3 if s-6==off else 2)
+    """
+    assert 0 <= a15 <= 30 and 0 <= c7 <= 30 and a15 + c7 <= 30
+    adj = build_tutte_coxeter()
+    lens = (8, 10) if include_c10 else (8,)
+    cycles = find_cycles(adj, lens)
+
+    cnf = CNFBuilder()
+    x: dict[tuple[int, int], int] = {}
+    h15: list[int] = []
+    not_h7: list[int] = []
+    for v in range(30):
+        for s in range(9):
+            x[(v, s)] = cnf.new_var()
+        # Exactly one of x[v, 0..8]
+        cnf.add(*[x[(v, s)] for s in range(9)])
+        for s1 in range(9):
+            for s2 in range(s1 + 1, 9):
+                cnf.add(-x[(v, s1)], -x[(v, s2)])
+        # h15[v] <-> x[v,0] v x[v,1] v x[v,2]
+        hv = cnf.new_var()
+        h15.append(hv)
+        for s in range(3):
+            cnf.add(-x[(v, s)], hv)
+        cnf.add(-hv, x[(v, 0)], x[(v, 1)], x[(v, 2)])
+        # h7[v] <-> x[v,6] v x[v,7] v x[v,8]
+        h7v = cnf.new_var()
+        for s in range(6, 9):
+            cnf.add(-x[(v, s)], h7v)
+        cnf.add(-h7v, x[(v, 6)], x[(v, 7)], x[(v, 8)])
+        not_h7.append(-h7v)
+
+    # AtMost(h15, a15) and AtLeast(h7, c7) (i.e. AtMost(not_h7, 30 - c7))
+    cnf.add_at_most(h15, a15)
+    if c7 > 0:
+        cnf.add_at_most(not_h7, 30 - c7)
+
+    # Lossless symmetry breaking (5-arc-transitivity of TC):
+    # if c7 >= 1, WLOG vertex 0 is H_7 with p0 = 0 (state 6).
+    if break_sym and c7 >= 1:
+        cnf.add(x[(0, 6)])
+
+    c8_excess_lits: list[int] = []
+    for clen, items in cycles:
+        req = 33 - 3 * clen
+        if req <= 0:
+            continue
+        track_max = (req + 1) if (add_slack_bound and clen == 8) else req
+        w_ge3 = []
+        w_eq0 = []
+        for v, off in items:
+            w_ge3.append(x[(v, off)])
+            q_others = [q for q in range(3) if q != off]
+            # dl == 2 iff (H_8* with p0 == off) OR (H_7 with p0 != off)
+            e0 = cnf.new_var()
+            lits_e0 = [x[(v, 3 + off)], x[(v, 6 + q_others[0])], x[(v, 6 + q_others[1])]]
+            for lt in lits_e0:
+                cnf.add(-lt, e0)
+            cnf.add(-e0, *lits_e0)
+            w_eq0.append(e0)
+
+        u: list[dict[int, int]] = []
+        for i in range(clen):
+            max_reach = min(track_max, 3 * (i + 1))
+            layer: dict[int, int] = {}
+            for t in range(1, max_reach + 1):
+                layer[t] = cnf.new_var()
+            u.append(layer)
+
+        for t, var in u[0].items():
+            if t == 1:
+                cnf.add(-var, -w_eq0[0])
+            elif t in (2, 3):
+                cnf.add(-var, w_ge3[0])
+            else:
+                cnf.add(-var)
+        if add_slack_bound and clen == 8:
+            cnf.add(w_eq0[0], u[0][1])
+            cnf.add(-w_ge3[0], u[0][2])
+            cnf.add(-w_ge3[0], u[0][3])
+
+        for i in range(1, clen):
+            prev = u[i - 1]
+            for t, var in u[i].items():
+                if t in prev:
+                    cnf.add(-var, -w_eq0[i], prev[t])
+                elif t > 3 * i:
+                    cnf.add(-var, -w_eq0[i])
+                if t - 1 >= 1:
+                    if (t - 1) in prev:
+                        cnf.add(-var, w_ge3[i], prev[t - 1])
+                    elif t - 1 > 3 * i:
+                        cnf.add(-var, w_ge3[i])
+                if t - 3 >= 1:
+                    if (t - 3) in prev:
+                        cnf.add(-var, prev[t - 3])
+                    elif t - 3 > 3 * i:
+                        cnf.add(-var)
+                if add_slack_bound and clen == 8:
+                    if t in prev:
+                        cnf.add(-prev[t], var)
+                    if t - 1 == 0:
+                        cnf.add(w_eq0[i], var)
+                    elif (t - 1) in prev:
+                        cnf.add(-prev[t - 1], w_eq0[i], var)
+                    if t - 3 <= 0:
+                        cnf.add(-w_ge3[i], var)
+                    elif (t - 3) in prev:
+                        cnf.add(-prev[t - 3], -w_ge3[i], var)
+
+        cnf.add(u[clen - 1][req])
+        if add_slack_bound and clen == 8:
+            c8_excess_lits.append(u[clen - 1][req + 1])
+
+    if add_slack_bound and c8_excess_lits:
+        # Max slack over all (a <= a15, c >= c7, b = 30 - a - c) is achieved at (a=a15, c=c7):
+        # 16*a - 8*(30 - a - c) - 16*c - 90 = 24*a - 8*c - 330
+        slack = 24 * a15 - 8 * c7 - 330
+        if slack < 0:
+            cnf.add()
+        else:
+            cnf.add_at_most(c8_excess_lits, slack)
+
+    return cnf, x
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Encode Tutte-Coxeter {H15, H8*/H7} optimality to DIMACS CNF")
+    ap.add_argument("--mode", choices=["two", "mixed3"], default="two", help="2-gadget or 3-gadget encoding")
     ap.add_argument("--a15", type=int, required=True, help="Max allowed number of H_15 vertices")
-    ap.add_argument("--g2", choices=["H7", "H8s"], required=True, help="Second gadget type (H7 for cubic, H8s for delta>=3)")
+    ap.add_argument("--g2", choices=["H7", "H8s"], default="H7", help="Second gadget type for mode=two")
+    ap.add_argument("--c7", type=int, default=0, help="Min required number of H_7 vertices for mode=mixed3")
     ap.add_argument("--include-c10", action="store_true", help="Include C10 constraints in addition to C8")
     ap.add_argument("--no-sym-break", action="store_true", help="Disable v=0 symmetry breaking")
     ap.add_argument("--add-slack-bound", action="store_true", help="Add exact double-counting global slack bound AtMost({sum_C>=10}, S)")
     ap.add_argument("--out", type=Path, required=True, help="Output DIMACS .cnf path")
     args = ap.parse_args()
 
-    cnf, _ = encode_tc_cnf(
-        args.a15, args.g2,
-        include_c10=args.include_c10,
-        break_sym=not args.no_sym_break,
-        add_slack_bound=args.add_slack_bound,
-    )
-    n_tot = 15 * args.a15 + (8 if args.g2 == "H8s" else 7) * (30 - args.a15)
+    if args.mode == "two":
+        cnf, _ = encode_tc_cnf(
+            args.a15, args.g2,
+            include_c10=args.include_c10,
+            break_sym=not args.no_sym_break,
+            add_slack_bound=args.add_slack_bound,
+        )
+        n_tot = 15 * args.a15 + (8 if args.g2 == "H8s" else 7) * (30 - args.a15)
+        desc = f"<= {args.a15} H_15 + {args.g2} (n <= {n_tot})"
+    else:
+        cnf, _ = encode_tc_mixed3_cnf(
+            args.a15, args.c7,
+            include_c10=args.include_c10,
+            break_sym=not args.no_sym_break,
+            add_slack_bound=args.add_slack_bound,
+        )
+        n_tot = 240 + 7 * args.a15 - args.c7
+        desc = f"<= {args.a15} H_15 + >= {args.c7} H_7 + H_8* (n <= {n_tot})"
+
     comments = [
-        f"Tutte-Coxeter optimality CNF: <= {args.a15} H_15 + {args.g2} (n = {n_tot})",
+        f"Tutte-Coxeter optimality CNF ({args.mode}): {desc}",
         f"include_c10={args.include_c10}, sym_break={not args.no_sym_break}, add_slack_bound={args.add_slack_bound}",
     ]
     cnf.write_dimacs(args.out, comments)
