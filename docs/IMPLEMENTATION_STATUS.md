@@ -2,6 +2,10 @@
 
 Last implementation audit: **2026-11-27**.
 
+## Overnight `/goal` Phase R5: Ducoffe–Dumitru Conjecture 4.1 (`single_block_41`, `27.96B` Exact `u64` LNS-RRT Leaves)
+
+- **110.1-minute 16-core `u64` LNS-RRT Campaign (`docs/reports/M6_GOAL_PHASE_R5_CONJECTURE_41_LNS_RRT_2026_11_27.md`, raw data `docs/reports/data/track4_conj41_n64_results.json`)**: Evaluated **`27,958,747,565`** (`27.96B`) exact `C4 = C8 = 0` LNS-RRT leaves across `k = 23..37` (glued odd orders `n = 45..73`). Inside the automatic-`C32=C64=0` Theorem 4.2 window (`k = 23..31`, `17.43B` leaves), blocks held a rigid `C16 = 111..138` floor; above `k = 31`, `k = 33` improved `142 -> 122` and `k = 37` reached **`C16 = 97`** (first sub-100 `single_block_41` block). Zero counterexamples found.
+
 ## Overnight `/goal` Phase R4: Bipartite Cubic `n = 78..126` Frontier (`23` Voltage Families + `3.30B` Bipartite `u128` LNS-RRT Leaves)
 
 - **Expanded Voltage-Lift Scan (`docs/reports/M6_GOAL_PHASE_R4_BIPARTITE_FRONTIER_2026_11_27.md`, raw data `docs/reports/data/track3_bipartite_results.json`)**: Scanned `1,813,576` lifts (`1,661,449` valid cubic bipartite graphs, `100,055` `C4 = C8 = 0` hits, `0.35 s`) across `23` non-abelian, non-nilpotent families (`16` exhaustive, including simple non-solvable `theta2 × A_5` at `n = 120` and `theta4 × SL(2,3)` at `n = 96`), finding `0` `{C4, C8, C16}`-free lifts.

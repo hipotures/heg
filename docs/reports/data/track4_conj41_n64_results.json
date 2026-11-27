@@ -1,0 +1,405 @@
+{
+  "started_at": "2026-11-27T03:10:11Z",
+  "single_block_41": {
+    "23": {
+      "k": 23,
+      "glued_n": 45,
+      "start_c16": 111,
+      "best_c16": 111,
+      "total_leaves": 2568720109,
+      "ve_block": {
+        "order": 23,
+        "size": 34,
+        "elapsed_ms": 0.02,
+        "c16_exact_count": 111,
+        "bnr_nodes": 0,
+        "frontier_dp_status": "SKIPPED",
+        "frontier_dp_max_width": 0,
+        "frontier_dp_peak_states": 0,
+        "frontier_dp_ms": 0.0,
+        "lengths": {
+          "4": "ABSENT",
+          "8": "ABSENT",
+          "16": "FOUND"
+        }
+      },
+      "m4_glued": {
+        "status": "FOUND",
+        "complete": true,
+        "length": 16,
+        "witness": [
+          0,
+          1,
+          18,
+          2,
+          6,
+          12,
+          13,
+          4,
+          15,
+          21,
+          17,
+          8,
+          19,
+          9,
+          20,
+          11
+        ],
+        "elapsed_seconds": 0.002860210996004753,
+        "implementation": "cpp17-bitset-dfs"
+      },
+      "best_block_g6": "V_?P@_C??OW??_A_a??OO?A_?_bA??H_??S???L??_P?"
+    },
+    "25": {
+      "k": 25,
+      "glued_n": 49,
+      "start_c16": 126,
+      "best_c16": 126,
+      "total_leaves": 4069473685,
+      "ve_block": {
+        "order": 25,
+        "size": 37,
+        "elapsed_ms": 0.028,
+        "c16_exact_count": 126,
+        "bnr_nodes": 0,
+        "frontier_dp_status": "SKIPPED",
+        "frontier_dp_max_width": 0,
+        "frontier_dp_peak_states": 0,
+        "frontier_dp_ms": 0.0,
+        "lengths": {
+          "4": "ABSENT",
+          "8": "ABSENT",
+          "16": "FOUND"
+        }
+      },
+      "m4_glued": {
+        "status": "FOUND",
+        "complete": true,
+        "length": 16,
+        "witness": [
+          0,
+          20,
+          14,
+          10,
+          8,
+          7,
+          6,
+          2,
+          19,
+          9,
+          17,
+          12,
+          4,
+          16,
+          24,
+          23
+        ],
+        "elapsed_seconds": 0.003004899001098238,
+        "implementation": "cpp17-bitset-dfs"
+      },
+      "best_block_g6": "X?@@?C@??@AGA?K@?@A@OB???Q??_HC_A??_??GiGC?Q???A?A@"
+    },
+    "27": {
+      "k": 27,
+      "glued_n": 53,
+      "start_c16": 124,
+      "best_c16": 124,
+      "total_leaves": 3460636247,
+      "ve_block": {
+        "order": 27,
+        "size": 40,
+        "elapsed_ms": 0.021,
+        "c16_exact_count": 124,
+        "bnr_nodes": 0,
+        "frontier_dp_status": "SKIPPED",
+        "frontier_dp_max_width": 0,
+        "frontier_dp_peak_states": 0,
+        "frontier_dp_ms": 0.0,
+        "lengths": {
+          "4": "ABSENT",
+          "8": "ABSENT",
+          "16": "FOUND"
+        }
+      },
+      "m4_glued": {
+        "status": "FOUND",
+        "complete": true,
+        "length": 16,
+        "witness": [
+          0,
+          1,
+          16,
+          3,
+          5,
+          19,
+          12,
+          21,
+          9,
+          11,
+          2,
+          26,
+          13,
+          17,
+          6,
+          24
+        ],
+        "elapsed_seconds": 0.005185142996197101,
+        "implementation": "cpp17-bitset-dfs"
+      },
+      "best_block_g6": "Z_?O_?@???CA??A??H@?GT??I@?Q@?GC??GO?C_?@CA?D?Co_???C?CC?G?G"
+    },
+    "29": {
+      "k": 29,
+      "glued_n": 57,
+      "start_c16": 121,
+      "best_c16": 121,
+      "total_leaves": 3322616285,
+      "ve_block": {
+        "order": 29,
+        "size": 43,
+        "elapsed_ms": 0.021,
+        "c16_exact_count": 121,
+        "bnr_nodes": 0,
+        "frontier_dp_status": "SKIPPED",
+        "frontier_dp_max_width": 0,
+        "frontier_dp_peak_states": 0,
+        "frontier_dp_ms": 0.0,
+        "lengths": {
+          "4": "ABSENT",
+          "8": "ABSENT",
+          "16": "FOUND"
+        }
+      },
+      "m4_glued": {
+        "status": "FOUND",
+        "complete": true,
+        "length": 16,
+        "witness": [
+          0,
+          11,
+          8,
+          3,
+          2,
+          5,
+          19,
+          18,
+          6,
+          25,
+          7,
+          20,
+          21,
+          9,
+          1,
+          26
+        ],
+        "elapsed_seconds": 0.002825849995133467,
+        "implementation": "cpp17-bitset-dfs"
+      },
+      "best_block_g6": "\\@?_??OOA?OC??AA???CGCG_c??C@?G@C@???C?G?_G`?O???_@?oC?W@???A?@CA?W??"
+    },
+    "31": {
+      "k": 31,
+      "glued_n": 61,
+      "start_c16": 138,
+      "best_c16": 138,
+      "total_leaves": 4004373265,
+      "ve_block": {
+        "order": 31,
+        "size": 46,
+        "elapsed_ms": 0.023,
+        "c16_exact_count": 138,
+        "bnr_nodes": 0,
+        "frontier_dp_status": "SKIPPED",
+        "frontier_dp_max_width": 0,
+        "frontier_dp_peak_states": 0,
+        "frontier_dp_ms": 0.0,
+        "lengths": {
+          "4": "ABSENT",
+          "8": "ABSENT",
+          "16": "FOUND"
+        }
+      },
+      "m4_glued": {
+        "status": "FOUND",
+        "complete": true,
+        "length": 16,
+        "witness": [
+          0,
+          2,
+          9,
+          15,
+          7,
+          3,
+          6,
+          16,
+          1,
+          29,
+          23,
+          18,
+          8,
+          10,
+          19,
+          14
+        ],
+        "elapsed_seconds": 0.005440851004095748,
+        "implementation": "cpp17-bitset-dfs"
+      },
+      "best_block_g6": "^O??__GG?@BG??@?O??AcO_?_O?P???P??A?@_O??C@???O?A??P?A???G?O???W???Gh???CO?@I??"
+    },
+    "33": {
+      "k": 33,
+      "glued_n": 65,
+      "start_c16": 142,
+      "best_c16": 122,
+      "total_leaves": 3310562269,
+      "ve_block": {
+        "order": 33,
+        "size": 49,
+        "elapsed_ms": 0.146,
+        "c16_exact_count": 122,
+        "bnr_nodes": 0,
+        "frontier_dp_status": "COMPLETE",
+        "frontier_dp_max_width": 6,
+        "frontier_dp_peak_states": 31,
+        "frontier_dp_ms": 0.123,
+        "lengths": {
+          "4": "ABSENT",
+          "8": "ABSENT",
+          "16": "FOUND",
+          "32": "FOUND"
+        }
+      },
+      "m4_glued": {
+        "status": "FOUND",
+        "complete": true,
+        "length": 16,
+        "witness": [
+          0,
+          1,
+          3,
+          27,
+          17,
+          26,
+          31,
+          30,
+          21,
+          4,
+          11,
+          14,
+          5,
+          16,
+          10,
+          8
+        ],
+        "elapsed_seconds": 0.005295862007187679,
+        "implementation": "cpp17-bitset-dfs"
+      },
+      "best_block_g6": "`a???A??O@D?G??C?__@O@Q???@?C?CA?CA_A????AE????A??C?_??_??_?_?G@S?C??@?CC????g????HCAO?@?"
+    },
+    "35": {
+      "k": 35,
+      "glued_n": 69,
+      "start_c16": 115,
+      "best_c16": 115,
+      "total_leaves": 3894301168,
+      "ve_block": {
+        "order": 35,
+        "size": 52,
+        "elapsed_ms": 0.159,
+        "c16_exact_count": 115,
+        "bnr_nodes": 0,
+        "frontier_dp_status": "COMPLETE",
+        "frontier_dp_max_width": 6,
+        "frontier_dp_peak_states": 34,
+        "frontier_dp_ms": 0.128,
+        "lengths": {
+          "4": "ABSENT",
+          "8": "ABSENT",
+          "16": "FOUND",
+          "32": "FOUND"
+        }
+      },
+      "m4_glued": {
+        "status": "FOUND",
+        "complete": true,
+        "length": 16,
+        "witness": [
+          0,
+          16,
+          4,
+          11,
+          17,
+          9,
+          22,
+          1,
+          20,
+          6,
+          12,
+          27,
+          18,
+          31,
+          5,
+          19
+        ],
+        "elapsed_seconds": 0.004912275995593518,
+        "implementation": "cpp17-bitset-dfs"
+      },
+      "best_block_g6": "b@??@C??A@@?C_???AG@?a???S???CG?PA???I?A?_@????A@??@?W????_?_CC????D??@A????_GOG?C?G`??C?????g???_@?_"
+    },
+    "37": {
+      "k": 37,
+      "glued_n": 73,
+      "start_c16": 128,
+      "best_c16": 97,
+      "total_leaves": 3328064537,
+      "ve_block": {
+        "order": 37,
+        "size": 55,
+        "elapsed_ms": 0.174,
+        "c16_exact_count": 97,
+        "bnr_nodes": 0,
+        "frontier_dp_status": "COMPLETE",
+        "frontier_dp_max_width": 6,
+        "frontier_dp_peak_states": 40,
+        "frontier_dp_ms": 0.15,
+        "lengths": {
+          "4": "ABSENT",
+          "8": "ABSENT",
+          "16": "FOUND",
+          "32": "FOUND"
+        }
+      },
+      "m4_glued": {
+        "status": "FOUND",
+        "complete": true,
+        "length": 16,
+        "witness": [
+          1,
+          4,
+          36,
+          35,
+          10,
+          11,
+          25,
+          13,
+          15,
+          12,
+          14,
+          21,
+          19,
+          23,
+          32,
+          6
+        ],
+        "elapsed_seconds": 0.005123515002196655,
+        "implementation": "cpp17-bitset-dfs"
+      },
+      "best_block_g6": "d[WA?GA@O??@??????O?E??g?@O????????A?OGOG?A???H???g?HO????????G???A_??O??O???@O??@?gA_?C?????g_?W?@?A@????E????@"
+    }
+  },
+  "cubic_n64_rrt": {},
+  "counterexamples": [],
+  "total_leaves": 27958747565,
+  "elapsed_s": 6605.0,
+  "finished_at": "2026-11-27T05:00:16Z"
+}
