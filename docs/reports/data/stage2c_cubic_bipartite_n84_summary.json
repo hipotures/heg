@@ -1,0 +1,66 @@
+{
+  "date": "2026-11-27",
+  "theorem": "Every finite simple cubic bipartite graph on n <= 84 vertices contains a simple cycle of length 4, 8, or 16 (86-vertex lower bound for cubic bipartite Erdős–Gyárfás counterexamples).",
+  "girth10_bonus_theorem": "Every finite simple cubic bipartite graph of girth >= 10 on n <= 88 vertices contains a simple 16-cycle (every cubic bipartite counterexample on n <= 88 must contain a 6-cycle).",
+  "separation_corollary": "f_{delta>=3}(4) <= 73 < 78 = f_cubic(4) < 86 <= f_{cubic,bip}(4)",
+  "hardware": "16-core AMD Ryzen 9 7950X3D, 121 GiB RAM",
+  "engine": "tools/extremal/cubic_bipartite_parallel.cpp (dynamic work-stealing + adaptive zero-oracle re-splitting, default workers = hardware_concurrency())",
+  "cross_check_against_upstream_67adc92d": {
+    "SIDE_29_n58": {
+      "orbit1": {"states": 1405, "attempted": 106964, "structural": 7184, "c8": 63526, "c16": 34850, "completions": 0, "verified_splits": 792, "verified_leaves": 50, "adaptive_resplits": 0, "cert_bytes": 569158, "seconds": 0.003},
+      "orbit2": {"states": 20088, "attempted": 1655404, "structural": 113012, "c8": 1208473, "c16": 313832, "completions": 0, "verified_splits": 1112, "verified_leaves": 1747, "adaptive_resplits": 0, "cert_bytes": 7678467, "seconds": 0.021},
+      "exact_upstream_match": true
+    },
+    "SIDE_34_n68": {
+      "orbit1": {"states": 23143, "attempted": 2972750, "structural": 180011, "c8": 1424785, "c16": 1344812, "completions": 0, "verified_splits": 1123, "verified_leaves": 2256, "adaptive_resplits": 0, "cert_bytes": 17825590, "seconds": 0.061},
+      "orbit2": {"states": 202602, "attempted": 25227209, "structural": 1432521, "c8": 15207779, "c16": 8384308, "completions": 0, "verified_splits": 1811, "verified_leaves": 3747, "adaptive_resplits": 0, "cert_bytes": 136492489, "seconds": 0.370},
+      "exact_upstream_match": true
+    },
+    "SIDE_35_n70": {
+      "orbit1": {"states": 51974, "attempted": 7282166, "structural": 441386, "c8": 3199099, "c16": 3589708, "completions": 0, "verified_splits": 1375, "verified_leaves": 3041, "adaptive_resplits": 0, "cert_bytes": 45155741, "seconds": 0.140},
+      "orbit2": {"states": 353357, "attempted": 47941559, "structural": 2696312, "c8": 27114667, "c16": 17777224, "completions": 0, "verified_splits": 3892, "verified_leaves": 8752, "adaptive_resplits": 2, "cert_bytes": 268807040, "seconds": 0.818},
+      "exact_upstream_match": true
+    }
+  },
+  "c6_branch_new_bounds": {
+    "SIDE_40_n80": {
+      "n_max": 80,
+      "workers": 16,
+      "zero_oracle_verified": true,
+      "orbit1": {"states": 1763196, "attempted": 354095363, "structural": 18070520, "c8": 148081803, "c16": 186179845, "completions": 0, "verified_splits": 2477, "verified_leaves": 9048, "adaptive_resplits": 10, "cert_bytes": 2269709012, "seconds": 7.622},
+      "orbit2": {"states": 12393295, "attempted": 2606532806, "structural": 135470813, "c8": 1036826697, "c16": 1421842002, "completions": 0, "verified_splits": 5366, "verified_leaves": 23584, "adaptive_resplits": 129, "cert_bytes": 16956278100, "seconds": 56.567},
+      "total_states": 14156491,
+      "total_attempted": 2960628169,
+      "total_cert_bytes": 19225987112,
+      "total_seconds": 64.192
+    },
+    "SIDE_41_n82": {
+      "n_max": 82,
+      "workers": 16,
+      "zero_oracle_verified": true,
+      "orbit1": {"states": 3111947, "attempted": 618690795, "structural": 31187384, "c8": 281123347, "c16": 303268118, "completions": 0, "verified_splits": 3027, "verified_leaves": 9488, "adaptive_resplits": 26, "cert_bytes": 3857018396, "seconds": 12.931},
+      "orbit2": {"states": 30997584, "attempted": 7353663962, "structural": 373859991, "c8": 2860026335, "c16": 4088780053, "completions": 0, "verified_splits": 5354, "verified_leaves": 60535, "adaptive_resplits": 733, "cert_bytes": 48270123400, "seconds": 195.641},
+      "total_states": 34109531,
+      "total_attempted": 7972354757,
+      "total_cert_bytes": 52127141796,
+      "total_seconds": 208.575
+    },
+    "SIDE_42_n84": {
+      "n_max": 84,
+      "workers": 16,
+      "zero_oracle_verified": true,
+      "orbit1": {"states": 5517089, "attempted": 1141100929, "structural": 56503556, "c8": 567886245, "c16": 511194040, "completions": 0, "verified_splits": 3400, "verified_leaves": 15330, "adaptive_resplits": 45, "cert_bytes": 6877808428, "seconds": 23.305},
+      "orbit2": {"states": 73104843, "attempted": 19186516084, "structural": 936237621, "c8": 7358733813, "c16": 10818439808, "completions": 0, "verified_splits": 8591, "verified_leaves": 110231, "adaptive_resplits": 2095, "cert_bytes": 126873998366, "seconds": 537.323},
+      "total_states": 78621932,
+      "total_attempted": 20327617013,
+      "total_cert_bytes": 133751806794,
+      "total_seconds": 560.633
+    }
+  },
+  "girth10_branch_static_certs": {
+    "V_41_n82": {"states": 122678, "attempted": 21779839, "structural": 960350, "c6": 5771896, "c8": 12326772, "c16": 2598144, "completions": 0, "cert_sha256": "f41833a64ef27c6c6fcc78a5f8dc268076579bc0e0ad3c17aac458dfb1fa7cdf", "gen_s": 1.174, "verify_s": 0.588},
+    "V_42_n84": {"states": 151270, "attempted": 30152223, "structural": 1310846, "c6": 7802760, "c8": 14160948, "c16": 6726400, "completions": 0, "cert_sha256": "e1f271e55f26786e6c5303e8327be194533bb5be320207eeeb535d3741fcff33", "gen_s": 2.084, "verify_s": 0.910},
+    "V_43_n86": {"states": 430471, "attempted": 66385632, "structural": 3039214, "c6": 16168760, "c8": 23969780, "c16": 22777408, "completions": 0, "cert_sha256": "ef24468e7199be6a3c7f3d58811c6279fd71759c275e70e074744cf1bc7a8f8d", "gen_s": 7.718, "verify_s": 2.227},
+    "V_44_n88": {"states": 1192135, "attempted": 259856800, "structural": 11307910, "c6": 84761220, "c8": 72703376, "c16": 89892160, "completions": 0, "cert_sha256": "efef3c3b79e507db86071f24d5619000b8f88d479df58401d9ceb8c5df33a743", "gen_s": 28.747, "verify_s": 8.547}
+  }
+}

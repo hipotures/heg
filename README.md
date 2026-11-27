@@ -43,7 +43,7 @@ $\lbrace C_4, C_8, \dots, C_{2^k}\rbrace$:
 | ${f_{\mathrm{cubic}}(6) \le 10{,}498}$ (unconditional) | Verified `k3_g16_n702.g6` (girth `16`) + BFS source 8-packing ($\lvert S_8\rvert = 4$); also $\le 29{,}728$ on verified `k3_g17_n2048.g6` ($\lvert P\rvert = 124$) and general 4-packing $\le 15 N - 8\lceil N/46\rceil$ | Exact BFS girth + packing checks (`verify_high_girth_f6.py`), Lean 4 (`f_cubic_6_source_8packing`, `f_cubic_6_source_8packing_N702_S4`, `f_cubic_6_4packing`, `f_cubic_6_4packing_N2048`) |
 | Tutte–Coxeter exact minima<br>$({\lbrace H_{15}, H_8^*, H_7\rbrace})$ | **Exact equality**: **`370`** (cubic, `n = 362` all `56/56` cubes `UNSAT`) and **`345`** ($\delta \ge 3$, `n = 342..344` `UNSAT`); exact double-counting $8 a_{15} - 4 b_8 - 8 c_7 \ge 45$ over all 90 8-cycles | Lean 4 (`tc_double_counting_bound`, `tc_delta3_lt_345_cases`, `tc_slack_card_n362_cubic`, `tc_slack_card_mixed3_delta3`), CaDiCaL 2.1.3 + official `drat-trim` (`s VERIFIED`) |
 | Certified cubic graph censuses | All `1,436,474` cubic girth $\ge 9$ ($n = 58..64$: 100% $C_{16}$); all `111,705` PSV VT ($n \le 1280$: 100% $\le C_{32}$); all `3,815` Conder symmetric ($n \le 10{,}000$: 100% $\le C_{32}$); all 3 $(3,10)$-cages ($n = 70$: M4 + Lean 4 $C_{16}$) | Rust `scan-batch` + 100% independent Python witness-stream verifier (`verify_witness_stream.py`) + M4 + Lean 4 (`cage310_{1,2,3}_certified`) |
-| ${f_{\mathrm{cubic,bip}}(4) \ge 80}$ | Every cubic bipartite graph on $n \le 78$ vertices contains $C_4, C_8,$ or $C_{16}$ (`+10` vs Zhuge `70`, `+20` vs Tranquilli `60`), proving $f_{\delta \ge 3}(4) \le 73 < 78 = f_{\mathrm{cubic}}(4) < 80 \le f_{\mathrm{cubic,bip}}(4)$ | Immutable upstream Tranquilli `67adc92d` (`1.214B` proposals at `SIDE=39`) + zero-oracle static certificates on both $C_6$ (`EGCBTRI1`) and girth-$\ge 10$ Moore-tree (`EGCBG101`) branches |
+| ${f_{\mathrm{cubic,bip}}(4) \ge 86}$ | Every cubic bipartite graph on $n \le 84$ vertices contains $C_4, C_8,$ or $C_{16}$ (`+16` vs Zhuge `70`, `+26` vs Tranquilli `60`; girth-$\ge 10$ branch certified through $n \le 88$), proving $f_{\delta \ge 3}(4) \le 73 < 78 = f_{\mathrm{cubic}}(4) < 86 \le f_{\mathrm{cubic,bip}}(4)$ | Dynamic work-stealing zero-oracle $C_6$ verifier (`cubic_bipartite_parallel.cpp`, `20.33B` proposals / `133.75 GB` verified stream at `SIDE=42`, bit-for-bit matched to upstream Tranquilli `67adc92d`) + static girth-$\ge 10$ Moore-tree certificates (`EGCBG101`, `V=35..44`) |
 
 Build and audit the Lean 4 proofs locally:
 
@@ -58,8 +58,9 @@ audit command, the
 the
 [Stage 1 Certified Censuses & Tutte–Coxeter Closure Report](docs/reports/M6_STAGE1_CERTIFIED_CENSUSES_AND_TC_CLOSURE_2026_11_27.md),
 and the
-[Stage 2C Cubic Bipartite 80-Vertex Lower Bound Report](docs/reports/M6_STAGE2C_CUBIC_BIPARTITE_80_LOWER_BOUND_2026_11_27.md)
-(with graph6 certificates under `docs/reports/certificates/` and reproducible
+[Stage 2C Cubic Bipartite 86-Vertex Lower Bound Report](docs/reports/M6_STAGE2C_EXTENSION_86_LOWER_BOUND_2026_11_27.md)
+(extending [`M6_STAGE2C_CUBIC_BIPARTITE_80_LOWER_BOUND_2026_11_27.md`](docs/reports/M6_STAGE2C_CUBIC_BIPARTITE_80_LOWER_BOUND_2026_11_27.md),
+with graph6 certificates under `docs/reports/certificates/` and reproducible
 solvers under `tools/extremal/`) for the full experimental record.
 
 ## Documentation entry points

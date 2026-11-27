@@ -2,6 +2,13 @@
 
 Last implementation audit: **2026-11-27**.
 
+## Stage 2C Extension: Certified 86-Vertex Lower Bound for Cubic Bipartite Counterexamples ($n \le 84$)
+
+- **Dynamic Work-Stealing Zero-Oracle Extension (`tools/extremal/cubic_bipartite_parallel.cpp`, `docs/reports/M6_STAGE2C_EXTENSION_86_LOWER_BOUND_2026_11_27.md`, `docs/reports/data/stage2c_cubic_bipartite_n84_summary.json`)**: Upgraded the $C_6$-branch engine to dynamic multi-core work-stealing with automatic soft-abort straggler re-splitting (`--workers` defaults to `hardware_concurrency()`, zero manual split tuning, `32 MiB` cert-buffer cap, 100% end-to-end zero-oracle `verify_split` + `verify_subtree`), advancing the certified cubic bipartite lower bound to **$n \ge 86$** (`+16` vs Zhuge `70`, `+26` vs Tranquilli `60`, establishing $f_{\delta \ge 3}(4) \le 73 < 78 = f_{\mathrm{cubic}}(4) < 86 \le f_{\mathrm{cubic,bip}}(4)$):
+  - **Bit-for-bit cross-check**: Exact count match against immutable upstream Tranquilli `67adc92d` at `SIDE = 29` (`0.024 s`), `SIDE = 34` (`0.431 s`), and `SIDE = 35` (`0.958 s`).
+  - **$C_6$ branch (`SIDE = 40, 41, 42`, $n \le 80, 82, 84$, 16 cores, `completions = 0`)**: `SIDE = 40` in `64.19 s` (`14.16M` states, `2.96B` proposals, `19.23 GB` verified stream), `SIDE = 41` in `208.58 s` (`34.11M` states, `7.97B` proposals, `52.13 GB` verified stream), and **`SIDE = 42` in `560.63 s` (`9.34 min`: `78.62M` states, `20.33B` proposals, `133.75 GB` zero-oracle verified stream, `2,140` adaptive re-splits, `completions = 0`)**.
+  - **Girth-$\ge 10$ Moore-tree branch (`V = 41..44`, $n \le 82..88$, `G10_VERIFIED_OK`)**: Static zero-oracle certificates generated and verified through **`V = 44` ($n \le 88$, `completions = 0`)** (`V = 42`: `0.910 s`; `V = 43`: `2.227 s`; `V = 44`: `1,192,135` states, `259.86M` proposals, `1.3 GiB`, `8.547 s` verify), proving additionally that any cubic bipartite counterexample on $n \le 88$ must contain a $C_6$.
+
 ## Stage 2C: Certified 80-Vertex Lower Bound for Cubic Bipartite Counterexamples ($n \le 78$)
 
 - **Complete Two-Branch Zero-Oracle Certified Proof (`docs/reports/M6_STAGE2C_CUBIC_BIPARTITE_80_LOWER_BOUND_2026_11_27.md`, `docs/reports/data/stage2c_cubic_bipartite_n78_summary.json`)**: Proved that **every finite simple cubic bipartite graph on $n \le 78$ vertices contains a simple cycle of length $4$, $8$, or $16$**, advancing the cubic bipartite lower bound to **$n \ge 80$** (`+10` vertices over Zhuge `zenodo.21981786`, `+20` over Tranquilli `arXiv:2608.02675`) and establishing the strict three-way separation $f_{\delta \ge 3}(4) \le 73 < 78 = f_{\mathrm{cubic}}(4) < 80 \le f_{\mathrm{cubic,bip}}(4)$:
