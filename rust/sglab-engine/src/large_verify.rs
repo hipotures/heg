@@ -515,16 +515,14 @@ mod tests {
         assert!(LargeGraph::from_graph6(&format!("{}?", m24.to_graph6())).is_err());
         assert!(verify_large_graph(&g, &[5], 1).is_err());
 
-        // 3. Multi-word bitmask tests (n = 100, 300, 512) spanning words 0..7!
-        // Build a 300-vertex cubic graph with a planted 32-cycle across vertices 250..281 (words 3 & 4)
-        // and NO 4-cycles (cycle C_300 + chords of length 150 -> girth >= 4, actually check DFS parity!).
+        // 3. Multi-word bitmask test at n = 300 (words 0..4):
+        // Base cycle C_300 with two planted chords creating exact C16 (word 1: 100..115)
+        // and exact C32 (words 3..4: 250..281), cross-checked against independent canonical DFS.
         let mut g300 = LargeGraph::empty(300);
         for i in 0..300 {
             g300.add_edge(i, (i + 1) % 300);
         }
-        // Add antipodal chords every 10th vertex to create a sparse graph with C32 in high words:
-        // Cycle 250..281 (31 edges) + chord (250, 281) = exact 32-cycle in words 3..4!
-        g300.add_edge(250, 281);
+        g300.add_edge(250, 281); // exact 32-cycle across words 3..4
         g300.add_edge(100, 115); // exact 16-cycle in word 1
         g300.finalize();
         let r300 = verify_large_graph(&g300, &[4, 8, 16, 32], 4).unwrap();
@@ -533,7 +531,8 @@ mod tests {
         assert!(r300.results[2].1 && has_cycle_dfs_ref(&g300, 16));
         assert!(r300.results[3].1 && has_cycle_dfs_ref(&g300, 32));
 
-        // 4. n = 512 boundary test (word 7, vertex 511!) with exact C32 across vertices 480..511
+        // 4. n = 512 upper-boundary test (word 7, bit 63 = vertex 511):
+        // Base cycle C_512 with one planted chord (480, 511) creating an exact C32 touching vertex 511.
         let mut g512 = LargeGraph::empty(512);
         for i in 0..512 {
             g512.add_edge(i, (i + 1) % 512);
@@ -547,5 +546,20 @@ mod tests {
         assert!(r512.results[3].1);
         let cyc512 = r512.results[3].2.as_ref().unwrap();
         assert!(cyc512.contains(&511), "C32 witness must exercise bit 511 in word 7");
+
+        // 5. Dense cubic n = 370 ABSENT test on the certified f_cubic(5) <= 370 graph (words 0..5):
+        let cert370_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../docs/reports/certificates/f5_cubic_n370_TC_20H15_10H7.g6");
+        let cert370_g6 = std::fs::read_to_string(&cert370_path)
+            .expect("certified n=370 graph6 certificate must exist");
+        let g370 = LargeGraph::from_graph6(cert370_g6.trim()).unwrap();
+        assert_eq!(g370.n, 370);
+        assert_eq!(g370.size(), 555);
+        assert_eq!(g370.min_max_degree(), (3, 3));
+        assert!(g370.is_biconnected());
+        let r370 = verify_large_graph(&g370, &[4, 8, 16, 32], 4).unwrap();
+        for (len, found, _, _) in &r370.results {
+            assert!(!found, "certified n=370 cubic graph must have no C{len}");
+        }
     }
 }

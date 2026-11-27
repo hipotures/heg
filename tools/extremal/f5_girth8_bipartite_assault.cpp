@@ -345,9 +345,10 @@ static bool solve_base_config(
     return best_viol_out == 0;
 }
 
-int main() {
+int main(int argc, char** argv) {
+    const std::string out_path = (argc > 1) ? argv[1] : "f5_girth8_new_records.json";
     std::cout << "=== PHASE R2: BIPARTITE GIRTH-8 CUBIC BASES (n_B = 34..48) FOR f(5) < 370 & < 345 ===\n" << std::flush;
-    std::ofstream ofs("/home/user/.gemini/antigravity-cli/brain/560c9e05-87fd-4ced-8168-8df5a850e495/scratch/f5_girth8_new_records.json");
+    std::ofstream ofs(out_path);
     ofs << "[\n";
     bool first_json = true;
 

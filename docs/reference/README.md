@@ -5,6 +5,7 @@ lookup-oriented.
 
 - [Campaign CLI](cli-campaigns.md)
 - [Comparison CLI](cli-comparisons.md)
+- [Native Rust Engine CLI](cli-rust-engine.md)
 - [Legacy engine and diagnostics](cli-legacy-engine.md)
 - [Configuration](configuration.md)
 - [HTTP API](http-api.md)

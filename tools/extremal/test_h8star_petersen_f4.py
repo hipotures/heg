@@ -8,18 +8,19 @@ from __future__ import annotations
 
 import itertools
 import json
+import os
 import subprocess
 import sys
 from collections import Counter, deque
 from pathlib import Path
 
-sys.path.insert(0, "/home/user/DEV/heg/src")
+REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / "src"))
 from sglab.certification import verify_cpp
 from sglab.model import BitGraph
 
-REPO = Path("/home/user/DEV/heg")
 RUST_BIN = REPO / "_build" / "sglab-rust-engine"
-SCRATCH = Path("/home/user/.gemini/antigravity-cli/brain/560c9e05-87fd-4ced-8168-8df5a850e495/scratch")
+OUT_DIR = Path(os.environ.get("SGLAB_OUT_DIR", "."))
 
 H7_EDGES = [(0, 3), (0, 4), (1, 3), (1, 5), (2, 4), (2, 6), (3, 5), (4, 6), (5, 6)]
 # H8* discovered by 16-core C++17 gadget hunter!
@@ -267,4 +268,4 @@ for r in [2, 3, 4, 5]:
         if ok:
             break
 
-(SCRATCH / "h8star_f4_records.json").write_text(json.dumps(records, indent=2))
+(OUT_DIR / "h8star_f4_records.json").write_text(json.dumps(records, indent=2))

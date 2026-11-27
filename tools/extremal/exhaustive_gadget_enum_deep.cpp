@@ -158,8 +158,9 @@ static void bt_worker(State& st, int u, int next_v, WorkerResult& res) {
     if (u == n) {
         res.leaves++;
         if (!is_connected(n, st.rows)) return;
-        uint32_t icyc = (n >= 16) ? all_cycle_lengths(n, st.rows) : 0;
-        if ((icyc >> 16) & 1u) return;
+        // Belt-and-suspenders exact leaf check for C4, C8, and (when n >= 16) C16!
+        uint32_t icyc = all_cycle_lengths(n, st.rows);
+        if ((icyc & ((1u << 4) | (1u << 8) | (1u << 16))) != 0) return;
         res.valid++;
         bool hpe = false;
         uint32_t pmask = (1u << np) - 1u;
@@ -212,7 +213,7 @@ static void bt_worker(State& st, int u, int next_v, WorkerResult& res) {
             }
         }
         if (creates_c4(st.rows, u, v)) continue;
-        if (u >= np && creates_c8(st.rows, u, v)) continue;
+        if (creates_c8(st.rows, u, v)) continue;
 
         st.rows[u] |= (1u << v);
         st.rows[v] |= (1u << u);
@@ -267,7 +268,7 @@ static void collect_tasks(State& st, int u, int next_v, int split_u, std::vector
             }
         }
         if (creates_c4(st.rows, u, v)) continue;
-        if (u >= np && creates_c8(st.rows, u, v)) continue;
+        if (creates_c8(st.rows, u, v)) continue;
 
         st.rows[u] |= (1u << v);
         st.rows[v] |= (1u << u);
@@ -290,6 +291,12 @@ static std::string mask_str(uint32_t m) {
 static void run_parallel_exhaustive(
     const std::string& name, int n_ports, const std::vector<int>& degs, bool allow_pe = true, int split_u = 5
 ) {
+    int deg_sum = 0;
+    for (int d : degs) deg_sum += d;
+    if ((deg_sum & 1) != 0) {
+        std::cerr << "ERROR: odd degree sum (" << deg_sum << ") in signature: " << name << "\n";
+        std::exit(2);
+    }
     auto t0 = std::chrono::steady_clock::now();
     State init;
     init.n = (int)degs.size();
@@ -361,14 +368,16 @@ int main() {
     run_parallel_exhaustive("3p n=11 2xdeg4  (2,2,2 + 6x3 + 4,4)",          3, {2,2,2, 3,3,3,3,3,3, 4,4}, true, 5);
     run_parallel_exhaustive("3p n=12 1xdeg4  (2,2,2 + 8x3 + 4)",            3, {2,2,2, 3,3,3,3,3,3,3,3, 4}, true, 5);
     run_parallel_exhaustive("3p n=13 cubic   (2,2,2 + 10x3)",               3, {2,2,2, 3,3,3,3,3,3,3,3,3,3}, true, 6);
+    run_parallel_exhaustive("3p n=13 2xdeg4  (2,2,2 + 8x3 + 4,4) noPE",     3, {2,2,2, 3,3,3,3,3,3,3,3, 4,4}, false, 6);
     run_parallel_exhaustive("3p n=14 1xdeg4  (2,2,2 + 10x3 + 4) noPE",      3, {2,2,2, 3,3,3,3,3,3,3,3,3,3, 4}, false, 6);
-    run_parallel_exhaustive("3p n=14 2xdeg4  (2,2,2 + 9x3 + 4,4) noPE",     3, {2,2,2, 3,3,3,3,3,3,3,3,3, 4,4}, false, 6);
+    run_parallel_exhaustive("3p n=14 3xdeg4  (2,2,2 + 8x3 + 4,4,4) noPE",   3, {2,2,2, 3,3,3,3,3,3,3,3, 4,4,4}, false, 6);
     run_parallel_exhaustive("3p n=15 cubic   (2,2,2 + 12x3) noPE",          3, {2,2,2, 3,3,3,3,3,3,3,3,3,3,3,3}, false, 7);
     run_parallel_exhaustive("3p n=15 2xdeg4  (2,2,2 + 10x3 + 4,4) noPE",    3, {2,2,2, 3,3,3,3,3,3,3,3,3,3, 4,4}, false, 6);
     run_parallel_exhaustive("3p n=16 1xdeg4  (2,2,2 + 12x3 + 4) noPE",      3, {2,2,2, 3,3,3,3,3,3,3,3,3,3,3,3, 4}, false, 7);
     run_parallel_exhaustive("3p n=17 cubic   (2,2,2 + 14x3) noPE",          3, {2,2,2, 3,3,3,3,3,3,3,3,3,3,3,3,3,3}, false, 7);
+    run_parallel_exhaustive("3p n=17 2xdeg4  (2,2,2 + 12x3 + 4,4) noPE",    3, {2,2,2, 3,3,3,3,3,3,3,3,3,3,3,3, 4,4}, false, 7);
 
-    std::cout << "\n=== DEEP EXHAUSTIVE 4-PORT {C4, C8, C16}-FREE GADGETS (n=11..14) ===\n";
+    std::cout << "\n=== DEEP EXHAUSTIVE 4-PORT {C4, C8, C16}-FREE GADGETS (n=11..14, FULL C8 LEAF CHECK) ===\n";
     run_parallel_exhaustive("4p n=11 1xdeg4  (4x2 + 6x3 + 4)",              4, {2,2,2,2, 3,3,3,3,3,3, 4}, true, 5);
     run_parallel_exhaustive("4p n=12 cubic   (4x2 + 8x3)",                  4, {2,2,2,2, 3,3,3,3,3,3,3,3}, true, 6);
     run_parallel_exhaustive("4p n=13 1xdeg4  (4x2 + 8x3 + 4) noPE",         4, {2,2,2,2, 3,3,3,3,3,3,3,3, 4}, false, 6);

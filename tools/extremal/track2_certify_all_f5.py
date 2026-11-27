@@ -9,6 +9,7 @@ Also runs edge-contraction cascades on:
 from __future__ import annotations
 
 import json
+import os
 import random
 import subprocess
 import sys
@@ -16,14 +17,15 @@ import time
 from collections import Counter, deque
 from pathlib import Path
 
-sys.path.insert(0, "/home/user/DEV/heg/src")
+REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / "src"))
 from sglab.certification import verify_cpp
 from sglab.model import BitGraph
 
-REPO = Path("/home/user/DEV/heg")
 RUST_BIN = REPO / "_build" / "sglab-rust-engine"
-SCRATCH = Path("/home/user/.gemini/antigravity-cli/brain/560c9e05-87fd-4ced-8168-8df5a850e495/scratch")
-CPP_LARGE = SCRATCH / "sglab-cyclecheck-large"
+WORK_DIR = Path(os.environ.get("SGLAB_WORK_DIR", "."))
+SCRATCH = WORK_DIR
+CPP_LARGE = REPO / "_build" / "sglab-cyclecheck-large"
 
 H7_EDGES = [(0, 3), (0, 4), (1, 3), (1, 5), (2, 4), (2, 6), (3, 5), (4, 6), (5, 6)]
 H7_PORTS = (0, 1, 2)  # port 0 is the "bad" port (0-1, 0-2 have dist 2; 1-2 has dist 3)

@@ -22,6 +22,7 @@ ADRs explain durable architectural decisions and their consequences.
 | [0016](0016-reviewed-proposal-ranking-seam.md) | Frozen proposal ranking is an explicitly opt-in, host-owned seam |
 | [0017](0017-proposal-ranking-performance-seam.md) | Exact optimization keeps the opt-in ranking seam bounded and identity-bound |
 | [0018](0018-proposal-ranking-cli-activation.md) | Operator activation is an immutable, plan-bound, default-disabled choice |
+| [0019](0019-large-order-exact-cycle-verification.md) | Large-order (`128 < n <= 512`) exact cycle verification uses dual independent verifiers separate from M4 (`n <= 128`) |
 
 ADRs are not implementation reports. They describe why the current design was
 chosen.

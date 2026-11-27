@@ -149,13 +149,15 @@ static bool assign_v(
     st.rem[gt]--;
     trail.push_back({v, gt});
     int rem15 = st.rem[2];
+    bool ok = true;
+    // Update EVERY incident cycle unconditionally so unassign_to is ALWAYS an exact inverse!
     for (auto [ci, off] : inst.v2c[v]) {
         st.cur_sum[ci] += dl_of(gt, p0, off);
         st.unass[ci]--;
         if (cycle_max_sum(inst.cycles[ci], st.cur_sum[ci], st.unass[ci], rem15) < inst.cycles[ci].req_sum)
-            return false;
+            ok = false;
     }
-    return true;
+    return ok;
 }
 
 static void unassign_to(const Instance& inst, SearchState& st, std::vector<std::pair<int, int>>& trail, size_t mark) {

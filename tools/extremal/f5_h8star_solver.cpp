@@ -318,7 +318,8 @@ static Sol solve_one(
     return {label, n_tot, b8 == 0, a15, b8, c7, best_viol, el, best_gt, best_p0};
 }
 
-int main() {
+int main(int argc, char** argv) {
+    const std::string out_path = (argc > 1) ? argv[1] : "f5_h8star_solutions.json";
     auto tc = build_tutte_coxeter();
     auto tc_c10 = find_cycles_up_to(tc, 10);
     std::vector<Sol> sols;
@@ -363,7 +364,7 @@ int main() {
     }
 
     // Write JSON of all min_viol == 0 solutions!
-    std::ofstream ofs("/home/user/.gemini/antigravity-cli/brain/560c9e05-87fd-4ced-8168-8df5a850e495/scratch/f5_h8star_solutions.json");
+    std::ofstream ofs(out_path);
     ofs << "[\n";
     bool first = true;
     for (const auto& s : sols) {
