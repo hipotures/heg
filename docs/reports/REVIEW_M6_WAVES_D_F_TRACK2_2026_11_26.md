@@ -1,200 +1,202 @@
-# Przegląd krytyczny: Waves D1–F, kampanie LNS 1h/2h i Track 2 (2026-11-26)
+# Critical Review: Waves D1–F, 1h/2h LNS Campaigns and Track 2 (2026-11-26)
 
-- **Zakres**: commity `7eda717` … `7bb5a67` (Wave A+B+C campaign, D1, D2, 1h LNS, E, 2h ILS-LNS, F, Track 2).
-- **Charakter**: niezależny przegląd poprawności, metodologii i wniosków. Nie zmienia żadnego wcześniejszego raportu (zgodnie z zasadą „reports are evidence”).
-- **Ograniczenia przeglądu**: maszyna była w trakcie innego eksperymentu (load ≈ 16/16), więc **nie uruchamiano** `make test`, `cargo test`, kampanii ani budowania. Wykonano wyłącznie lekkie, jednowątkowe obliczenia (`nice`, łącznie < 15 s CPU). Pełnych tekstów cytowanych preprintów nie czytano — tylko abstrakty.
-- **Skrypty weryfikacyjne**: `docs/reports/assets/review-2026-11-26/` (`g6.py`, `cyc.c`, `h8.py`, `pet.c`).
+> Polish original: [`REVIEW_M6_WAVES_D_F_TRACK2_2026_11_26_pl.md`](REVIEW_M6_WAVES_D_F_TRACK2_2026_11_26_pl.md). This English version is a translation with identical content.
+
+- **Scope**: commits `7eda717` … `7bb5a67` (Wave A+B+C campaign, D1, D2, 1h LNS, E, 2h ILS-LNS, F, Track 2).
+- **Nature**: an independent review of correctness, methodology and conclusions. It does not modify any earlier report (per the "reports are evidence" rule).
+- **Review limitations**: the machine was running another experiment (load ≈ 16/16), so `make test`, `cargo test`, campaigns and builds were **not** run. Only light single-threaded computations were performed (`nice`, < 15 s CPU in total). Full texts of the cited preprints were not read, only abstracts.
+- **Verification scripts**: `docs/reports/assets/review-2026-11-26/` (`g6.py`, `cyc.c`, `h8.py`, `pet.c`).
 
 ---
 
-## 1. Werdykt w skrócie
+## 1. Verdict at a glance
 
-| Twierdzenie | Status po przeglądzie |
+| Claim | Status after review |
 |---|---|
-| Certyfikat `f_cubic(5) ≤ 370` (`n=370`) | **Potwierdzone niezależnie** (graf jest 3-regularny, 2-spójny, nie ma C4/C8/C16/C32) |
-| Certyfikat `f_{δ≥3}(5) ≤ 345` (`n=345`) | **Potwierdzone niezależnie** |
-| Certyfikat `f_{δ≥3}(4) ≤ 73` (`n=73`) | **Potwierdzone niezależnie** |
-| Gadżet `H8*`: okna ścieżek i cykle wewnętrzne | **Potwierdzone** |
-| Brak rozwiązań `Petersen + 2·H8* + 8·H7` (`n=72`) | **Potwierdzone** (tylko w tej rodzinie konstrukcji) |
-| „Poprzedni rekord” `f_cubic(5)=450` (García, arXiv:2609.04686) | Zgodne z abstraktem Garcíi |
-| `f_cubic(6) ≤ 30 360` | Rozumowanie poprawne, ale **warunkowe** i z błędną atrybucją punktu odniesienia (§3.5) |
-| H8* „unikalny”, brak gadżetów przy `n=9,11,13`, `H15` „unikalny” | **Nieudowodnione**: wynika z losowego próbkowania, a nie z wyczerpującego przeszukania (§3.3) |
-| „Pigeonhole floor” `C16 ≥ 4` dla `Petersen + 10·H7` (Wave E) | **Dowód błędny**: rzeczywiste minimum to 2 złe 5-cykle (§3.4) |
-| Kampanie kubiczne `n = 60…76` pod hasłem `f(4) < 78` | **Z góry bezcelowe**: Ripatti (2017) wykazał, że minimum kubiczne wynosi 78 (§3.1) |
-| `f_{δ≥3}(4) ≤ 77` (Wave E) | **Brak artefaktu w repo**, wskazany plik `/tmp/n77.g6` nie istnieje (wynik jest już zastąpiony przez 73) |
+| Certificate `f_cubic(5) ≤ 370` (`n=370`) | **Independently confirmed** (3-regular, 2-connected, no C4/C8/C16/C32) |
+| Certificate `f_{δ≥3}(5) ≤ 345` (`n=345`) | **Independently confirmed** |
+| Certificate `f_{δ≥3}(4) ≤ 73` (`n=73`) | **Independently confirmed** |
+| Gadget `H8*`: path windows and internal cycles | **Confirmed** |
+| No solution for `Petersen + 2·H8* + 8·H7` (`n=72`) | **Confirmed** (only within this construction family) |
+| "Previous record" `f_cubic(5)=450` (García, arXiv:2609.04686) | Consistent with García's abstract |
+| `f_cubic(6) ≤ 30 360` | Reasoning correct, but **conditional** and with a wrong attribution of the reference value (§3.5) |
+| H8* "unique", no gadgets at `n=9,11,13`, `H15` "unique" | **Unproven**: from random sampling, not exhaustive search (§3.3) |
+| "Pigeonhole floor" `C16 ≥ 4` for `Petersen + 10·H7` (Wave E) | **Proof is wrong**: the true minimum is 2 bad 5-cycles (§3.4) |
+| Cubic campaigns `n = 60…76` framed as `f(4) < 78` | **Futile from the start**: Ripatti (2017) showed the cubic minimum is 78 (§3.1) |
+| `f_{δ≥3}(4) ≤ 77` (Wave E) | **No artifact in the repo**; the referenced `/tmp/n77.g6` does not exist (result is superseded by 73 anyway) |
 
-Główny wniosek: **certyfikaty grafów są poprawne**. Słabości leżą w trzech miejscach:
+Main conclusion: **the graph certificates are correct**. The weaknesses lie in three places:
 
-- przegląd literatury i strategia (duża część mocy obliczeniowej poszła na cel, którego nie da się osiągnąć);
-- odtwarzalność (narzędzia i dane leżą poza repo);
-- język raportów („world record”, „exhaustive”, „unique”, „exact floor”), który opisuje wyniki heurystyczne jak dowody.
+- literature review and strategy (a large share of compute went to a goal that cannot be reached);
+- reproducibility (tools and data live outside the repo);
+- report language ("world record", "exhaustive", "unique", "exact floor") that describes heuristic results as if they were proofs.
 
 ---
 
-## 2. Co sprawdzono i jak
+## 2. What was checked and how
 
-1. **Własny parser graph6 i analiza strukturalna** (`g6.py`): liczba wierzchołków i krawędzi, rozkład stopni, spójność, punkty artykulacji.
-   - `n=370`: `m=555`, `{3:370}`, 0 punktów artykulacji ✔
-   - `n=345`: `m=525`, `{3:330, 4:15}`, 0 punktów artykulacji ✔
-   - `n=73`: `m=111`, `{3:70, 4:3}`, 0 punktów artykulacji ✔
-2. **Niezależny dokładny licznik widma cykli** (`cyc.c`). Algorytm: kanoniczny start w najmniejszym wierzchołku i DFS z obcięciem odległością BFS w `G[≥s]`. Jest napisany od zera i różni się od MitM używanego w `verify-large`.
-   - Kalibracja: Petersen daje 5:12, 6:10, 8:15, 9:20. Tutte–Coxeter daje 8:90, 10:72, 12:300. Obie zgodne z literaturą ✔
-   - `n=370`: cykle o długościach {3,5,6,7,9…15} oraz **33, 34, …**. Nie ma żadnego cyklu o długości 16–32. Najkrótszy „podniesiony” cykl ma długość **33**, więc margin wynosi 1 (40 takich cykli).
-   - `n=345`: ten sam obraz (924 cykle długości 33).
-   - `n=73`: {3,5,6,7,17,18,…}. Nie ma C4/C8/C16 ✔
-3. **`verify-large` uruchomiony jednowątkowo** (`--workers 1`): wynik ABSENT dla {4,8,16,32} na obu grafach f5 (0,40 s i 0,69 s). Zgodny z `cyc.c`. Raportowane 9,5–14,6 ms przy 16 wątkach są wiarygodne.
-4. **Okna gadżetu H8*** (`h8.py`): S(0,1)={2..7}, S(0,2)=S(1,2)={3..7}, cykle wewnętrzne {3,5,6,7} ✔
-5. **Wyczerpujące sprawdzenie rodziny Petersena** (`pet.c`): wszystkie podzbiory pozycji H8* × 3¹⁰ orientacji, w modelu minimów okien.
+1. **Own graph6 parser and structural analysis** (`g6.py`): vertex and edge counts, degree distribution, connectivity, articulation points.
+   - `n=370`: `m=555`, `{3:370}`, 0 articulation points ✔
+   - `n=345`: `m=525`, `{3:330, 4:15}`, 0 articulation points ✔
+   - `n=73`: `m=111`, `{3:70, 4:3}`, 0 articulation points ✔
+2. **Independent exact cycle-spectrum counter** (`cyc.c`). Algorithm: canonical start at the minimum vertex and DFS pruned by BFS distance in `G[≥s]`. Written from scratch and different from the MitM used in `verify-large`.
+   - Calibration: Petersen gives 5:12, 6:10, 8:15, 9:20. Tutte–Coxeter gives 8:90, 10:72, 12:300. Both match the literature ✔
+   - `n=370`: cycles of lengths {3,5,6,7,9…15} and **33, 34, …**. No cycle of length 16–32 at all. The shortest "lifted" cycle has length **33**, so the margin is 1 (40 such cycles).
+   - `n=345`: same picture (924 cycles of length 33).
+   - `n=73`: {3,5,6,7,17,18,…}. No C4/C8/C16 ✔
+3. **`verify-large` run single-threaded** (`--workers 1`): ABSENT for {4,8,16,32} on both f5 graphs (0.40 s and 0.69 s). Agrees with `cyc.c`. The reported 9.5–14.6 ms with 16 threads is plausible.
+4. **H8* windows** (`h8.py`): S(0,1)={2..7}, S(0,2)=S(1,2)={3..7}, internal cycles {3,5,6,7} ✔
+5. **Exhaustive check of the Petersen family** (`pet.c`): all subsets of H8* positions × 3¹⁰ orientations, in the window-minimum model.
 
-   | r (liczba H8*) | n | rozwiązania bez złych 5-cykli | minimalna liczba złych 5-cykli |
+   | r (number of H8*) | n | solutions with no bad 5-cycle | minimum number of bad 5-cycles |
    |---:|---:|---:|---:|
    | 0 | 70 | 0 | **2** |
    | 1 | 71 | 0 | 2 |
    | 2 | 72 | 0 | 1 |
    | 3 | 73 | 4680 | 0 |
 
-   Raport Track 2 (`n=72`: 0 rozwiązań; `n=73`: istnieje rozwiązanie) jest poprawny.
-6. **Rachunek dla Tutte–Coxetera**: ręcznie odtworzono `E[excess] = 16(2a−30)/90` oraz `4(a−10)/15`. Uśrednianie jest dokładne, bo graf TC jest łukowo-przechodni, więc każda para krawędzi przy wierzchołku leży w 8 ośmiocyklach. Wyprowadzone progi `a ≥ 18` (kubiczne) i `a ≥ 14` (z H8*) są poprawne **wewnątrz tej rodziny**. Arytmetyka rzędów (`240 + 7a`, `15a + 7c`) się zgadza.
+   The Track 2 report (`n=72`: 0 solutions; `n=73`: a solution exists) is correct.
+6. **Tutte–Coxeter calculus**: `E[excess] = 16(2a−30)/90` and `4(a−10)/15` re-derived by hand. The averaging is exact because TC is arc-transitive, so every pair of edges at a vertex lies on 8 eight-cycles. The derived thresholds `a ≥ 18` (cubic) and `a ≥ 14` (with H8*) are correct **within this family**. The order arithmetic (`240 + 7a`, `15a + 7c`) checks out.
 
 ---
 
-## 3. Słabe miejsca i błędy (od najważniejszych)
+## 3. Weak points and errors (most important first)
 
-### 3.1 [KRYTYCZNE, strategia] Kampanie kubiczne `n < 78` szukały obiektu, który według literatury nie istnieje
+### 3.1 [CRITICAL, strategy] Cubic campaigns at `n < 78` searched for an object that, per the literature, does not exist
 
-A. V. Ripatti, *Faster approach for exhaustive search over graphs with certain properties* (BAIKAL 2017, abstrakt): *„computationally show that the smallest cubic graphs without 4,8,16 cycles have 78 vertices”*. Praca podaje też, że takich grafów jest 6 (graf Exoo i 5 innych). Metoda to generacja izomorficznie wolna w stylu McKaya/Brinkmanna (`minibaum`).
+A. V. Ripatti, *Faster approach for exhaustive search over graphs with certain properties* (BAIKAL 2017, abstract): *"computationally show that the smallest cubic graphs without 4,8,16 cycles have 78 vertices"*. The paper also says there are 6 such graphs (Exoo's graph and 5 others). The method is isomorph-free generation in the style of McKay/Brinkmann (`minibaum`).
 
-W repozytorium **nie ma żadnej wzmianki** o tym wyniku (`grep Ripatti|Baikal` → 0). Tymczasem:
+The repository contains **no mention** of this result (`grep Ripatti|Baikal` → 0). Meanwhile:
 
-- Wave D1, kampania 1h (`n=60,62,64`, 34,78 mld liści), Wave E (część kubiczna) i kampania 2h (`n=76,74,70` kubiczne, 42,63 mld liści) szukały kubicznego grafu {4,8,16}-free o `n < 78`. W sumie raporty deklarują ~83 mld liści LNS, czyli kilka godzin pracy całej 16-rdzeniowej maszyny.
-- Część lifów napięciowych z Wave D2 przy `n=72` (kubiczne) dotyczy tego samego, niemożliwego zakresu.
-- Wnioski oparte na tej błędnej ramie:
-  - *„f(4) lies near the upper half of the open window [54, 78]”* (1h): dla grafów kubicznych to okno jest zamknięte. Pochodzenie dolnej granicy 54 nie jest nigdzie uzasadnione.
-  - *„just 3 sixteen-cycles shy of breaking Exoo's f_cubic(4) ≤ 78”* (Wave E): liczba C16 nie jest miarą odległości od rozwiązania, a samo rozwiązanie nie istnieje.
-  - „rock-solid empirical floor `C16 = 23`”, „deep confirmation of the `C16 = 3` floor”: to lokalne minima heurystyki, bez znaczenia dowodowego.
+- Wave D1, the 1h campaign (`n=60,62,64`, 34.78 B leaves), Wave E (cubic part) and the 2h campaign (`n=76,74,70` cubic, 42.63 B leaves) searched for a cubic {4,8,16}-free graph with `n < 78`. In total the reports claim ~83 B LNS leaves, i.e. several hours of the whole 16-core machine.
+- Part of the Wave D2 voltage lifts at `n=72` (cubic) target the same impossible range.
+- Conclusions built on this wrong framing:
+  - *"f(4) lies near the upper half of the open window [54, 78]"* (1h): for cubic graphs this window is closed. The origin of the lower bound 54 is never justified.
+  - *"just 3 sixteen-cycles shy of breaking Exoo's f_cubic(4) ≤ 78"* (Wave E): the C16 count is not a measure of distance to a solution, and the solution itself does not exist.
+  - "rock-solid empirical floor `C16 = 23`", "deep confirmation of the `C16 = 3` floor": these are local minima of a heuristic with no evidential value.
 
-Zastrzeżenie: Ripatti to abstrakt konferencyjny, a słowa „probabilistic checking of every node” wymagają sprawdzenia, czy końcowa weryfikacja była dokładna. Wynik powinien jednak zostać uwzględniony **przed** uruchomieniem kampanii. Wniosek pozytywny: `f_{δ≥3}(4) ≤ 73 < 78` oznacza, że (o ile Ripatti ma rację) **optimum dla δ≥3 jest ściśle mniejsze niż optimum kubiczne**. Ten fakt warto wyeksponować zamiast „rekordów C16”.
+Caveat: Ripatti is a conference abstract, and the phrase "probabilistic checking of every node" needs checking to see whether the final verification was exact. Still, the result should have been taken into account **before** launching the campaigns. A positive consequence: `f_{δ≥3}(4) ≤ 73 < 78` means that (if Ripatti is right) **the δ≥3 optimum is strictly smaller than the cubic optimum**. This fact is worth highlighting instead of "C16 records".
 
-**Rekomendacja**:
+**Recommendation**:
 
-- dopisać Ripattiego do `docs/00_RESEARCH_STATUS.md`;
-- przerwać i nie wznawiać kampanii kubicznych `n < 78` dla {4,8,16};
-- przenieść budżet na δ≥3 (`n ≤ 72`) oraz na f(5).
+- add Ripatti to `docs/00_RESEARCH_STATUS.md`;
+- stop and do not resume cubic `n < 78` campaigns for {4,8,16};
+- move the budget to δ≥3 (`n ≤ 72`) and to f(5).
 
-### 3.2 [WYSOKIE, odtwarzalność] Narzędzia i dane leżą poza repozytorium
+### 3.2 [HIGH, reproducibility] Tools and data live outside the repository
 
-Wszystkie poniższe istnieją wyłącznie w katalogu roboczym innego agenta, `~/.gemini/antigravity-cli/brain/560c9e05-…/scratch/` (nie są śledzone przez git):
+All of the following exist only in another agent's working directory, `~/.gemini/antigravity-cli/brain/560c9e05-…/scratch/` (not tracked by git):
 
-- poszukiwacze gadżetów `f5_gadget_hunter.cpp` i `f5_multideg4_gadgets.cpp`;
-- solver okien/CSP `f5_window_solver.cpp`;
+- gadget hunters `f5_gadget_hunter.cpp` and `f5_multideg4_gadgets.cpp`;
+- window/CSP solver `f5_window_solver.cpp`;
 - PAWS/WalkSAT `f5_paws_frontier.cpp`;
-- „niezależny weryfikator C++” `sglab_cyclecheck_large.cpp`;
-- skrypty budujące certyfikaty (`track2_*.py`, `test_h8star_petersen_f4.py`);
-- skrypty Wave E (`exp11_*.py`);
-- surowe JSON-y kampanii (`campaign_1h_lns_60_62_64.json` itd.).
+- the "independent C++ verifier" `sglab_cyclecheck_large.cpp`;
+- certificate-building scripts (`track2_*.py`, `test_h8star_petersen_f4.py`);
+- Wave E scripts (`exp11_*.py`);
+- raw campaign JSON files (`campaign_1h_lns_60_62_64.json` etc.).
 
-Konsekwencje:
+Consequences:
 
-- Raport Track 2 nazywa `sglab-cyclecheck-large` „Independent Verification Authority”, ale tego kodu nie da się przejrzeć z poziomu repo.
-- Świadek `f_{δ≥3}(4) ≤ 77` (Wave E) nie ma certyfikatu w `docs/reports/certificates/`, a raport odsyła do `/tmp/n77.g6`, który nie istnieje.
-- Narusza to misję projektu z AGENTS.md (*„reproducible”*, *„raw scientific history is preserved”*). Cała praca toczyła się poza runtime kampanii, Directorem i SQLite, więc nie ma trwałych rekordów kampanii.
+- The Track 2 report calls `sglab-cyclecheck-large` an "Independent Verification Authority", but its code cannot be reviewed from the repo.
+- The `f_{δ≥3}(4) ≤ 77` witness (Wave E) has no certificate in `docs/reports/certificates/`, and the report points to `/tmp/n77.g6`, which does not exist.
+- This violates the project mission in AGENTS.md (*"reproducible"*, *"raw scientific history is preserved"*). All of this work ran outside the campaign runtime, the Director and SQLite, so there are no durable campaign records.
 
-**Rekomendacja**: zaimportować źródła do `cpp/` lub `tools/` (z testem), dołączyć certyfikat `n=77` i `n=74`/`C16=3` (jeśli mają wartość dowodową) oraz surowe JSON-y (albo ich hashe i lokalizację archiwum).
+**Recommendation**: import the sources into `cpp/` or `tools/` (with a test), add the `n=77` certificate and `n=74`/`C16=3` (if they have evidential value), and the raw JSON files (or their hashes and archive location).
 
-### 3.3 [WYSOKIE, poprawność wniosków] „Unique” i „0 found” pochodzą z próbkowania losowego, a nie z wyczerpującego przeszukania
+### 3.3 [HIGH, correctness of conclusions] "Unique" and "0 found" come from random sampling, not exhaustive search
 
-`f5_gadget_hunter.cpp` i `f5_multideg4_gadgets.cpp` losują pary „stubów” (configuration model, `std::shuffle` + `mt19937_64`) i zliczają „trials”. Na tej podstawie raport twierdzi:
+`f5_gadget_hunter.cpp` and `f5_multideg4_gadgets.cpp` randomly pair "stubs" (configuration model, `std::shuffle` + `mt19937_64`) and count "trials". On that basis the report claims:
 
-- dla `n=7` są „exactly two” gadżety;
-- dla `n=9,11,13` istnieje „**0** {C4,C8,C16}-free gadgets”;
-- `H15` to „unique window type”;
-- w statusie: H8* to „**unique** … 8-vertex 3-port gadget”, podczas gdy raport Track 2 mówi „**TWO** sporadic types” (niespójność).
+- at `n=7` there are "exactly two" gadgets;
+- at `n=9,11,13` there exist "**0** {C4,C8,C16}-free gadgets";
+- `H15` is a "unique window type";
+- in the status ledger: H8* is the "**unique** … 8-vertex 3-port gadget", while the Track 2 report says "**TWO** sporadic types" (inconsistent).
 
-Próbkowanie konfiguracyjne jest niejednorodne względem klas izomorfizmu, a rzadkie grafy mogą nie wypaść nawet przy 10⁷ prób. Żadne z tych zdań nie jest twierdzeniem. Wariant non-cubic obejmował przy tym tylko wybrane sekwencje stopni (porty stopnia 2, 1–3 wewnętrzne wierzchołki stopnia 4).
+Configuration-model sampling is non-uniform over isomorphism classes, and rare graphs may not appear even in 10⁷ trials. None of these statements is a theorem. Moreover, the non-cubic variant covered only selected degree sequences (degree-2 ports, 1–3 internal degree-4 vertices).
 
-**Rekomendacja**: wyczerpująca generacja (`nauty geng` z ograniczeniami stopni lub dedykowany generator) dla `n ≤ 13` jest tania i zamieniłaby te zdania w fakty. Do tego czasu w raportach należy pisać „nie znaleziono w N próbach”.
+**Recommendation**: exhaustive generation (`nauty geng` with degree bounds or a dedicated generator) for `n ≤ 13` is cheap and would turn these statements into facts. Until then, reports should say "not found in N trials".
 
-### 3.4 [ŚREDNIE, błąd matematyczny] Fałszywy „pigeonhole floor” w Wave E
+### 3.4 [MEDIUM, mathematical error] False "pigeonhole floor" in Wave E
 
-Wave E: *„40/12 = 3.333 > 3, at least 4 five-cycles carry ≥ 4 port-0 incidences … proving C16 ≥ 4 is exact”*.
+Wave E: *"40/12 = 3.333 > 3, at least 4 five-cycles carry ≥ 4 port-0 incidences … proving C16 ≥ 4 is exact"*.
 
-- Z sumy 40 przy maksimum 5 na cykl wynika tylko `40 ≤ 3(12−B) + 5B`, czyli **B ≥ 2**, a nie B ≥ 4.
-- Wyczerpujące sprawdzenie (`pet.c`, r=0) daje **minimum 2 złe 5-cykle**, a nie 4. Teza „exact floor C16 ≥ 4” nie ma więc dowodu. Może być prawdziwa, jeśli każdy zły 5-cykl generuje ≥ 2 szesnastocykle, ale tego nie wykazano.
-- Kampania 2h powtarza ten argument („consistent with the exact `Petersen + 10·H7` pigeonhole floor”).
+- A total of 40 with a maximum of 5 per cycle only gives `40 ≤ 3(12−B) + 5B`, i.e. **B ≥ 2**, not B ≥ 4.
+- An exhaustive check (`pet.c`, r=0) gives a **minimum of 2 bad 5-cycles**, not 4. The "exact floor C16 ≥ 4" claim therefore has no proof. It may still be true if every bad 5-cycle yields ≥ 2 sixteen-cycles, but that was not shown.
+- The 2h campaign repeats this argument ("consistent with the exact `Petersen + 10·H7` pigeonhole floor").
 
-### 3.5 [ŚREDNIE, atrybucja] `f_cubic(6) ≤ 30 360`
+### 3.5 [MEDIUM, attribution] `f_cubic(6) ≤ 30 360`
 
-- Rozumowanie jest poprawne. Na cyklu bazowym długości L ≥ 17 leży ≤ ⌊L/5⌋ kopii H7, więc długość cyklu wynosi ≥ 4L − ⌊L/5⌋ ≥ 65. Cykle wewnętrzne gadżetów mają ≤ 15 i nie są potęgami 2. Pakowanie maksymalne spełnia |P| ≥ ⌈2048/46⌉ = 45.
-- Ale:
-  - **„Previous Published Best 30 720” nie jest wartością opublikowaną.** Abstrakt Garcíi podaje `f(6) ≤ 32 640` (= 15 · 2176). 30 720 to złożenie twierdzenia Garcíi z wynikiem `n(3,17) ≤ 2048`.
-  - Wynik `n(3,17) ≤ 2048` pochodzi z Exoo, Goedgebeur i in., arXiv:2511.07247 (listopad 2025, EJC v33i3p48), a nie z „July 2026”, jak twierdzi raport.
-  - Bound jest **warunkowy** (graf 2048 nie jest w repo), nie ma artefaktu i nie jest „certyfikowany”.
-  - Poprawa wynosi 1,2% i jest łatwa do pogłębienia: wiążą tylko cykle bazowe długości 17…21 (dla L ≥ 22 warunek 4L − h ≥ 65 zachodzi dla każdego h ≤ L). Maksymalne 4-pakowanie to bardzo zgrubna konstrukcja, a dla δ≥3 można też użyć H8*.
+- The reasoning is correct. A base cycle of length L ≥ 17 contains ≤ ⌊L/5⌋ copies of H7, so the cycle length is ≥ 4L − ⌊L/5⌋ ≥ 65. Internal gadget cycles have length ≤ 15 and are not powers of 2. A maximal packing satisfies |P| ≥ ⌈2048/46⌉ = 45.
+- But:
+  - **"Previous Published Best 30 720" is not a published value.** García's abstract gives `f(6) ≤ 32 640` (= 15 · 2176). 30 720 is García's theorem combined with `n(3,17) ≤ 2048`.
+  - The result `n(3,17) ≤ 2048` comes from Exoo, Goedgebeur et al., arXiv:2511.07247 (November 2025, EJC v33i3p48), not from "July 2026" as the report states.
+  - The bound is **conditional** (the 2048-vertex graph is not in the repo), has no artifact and is not "certified".
+  - The improvement is 1.2% and easy to deepen: only base cycles of length 17…21 are binding (for L ≥ 22 the condition 4L − h ≥ 65 holds for every h ≤ L). A maximal 4-packing is a very coarse construction, and for δ≥3 H8* could also be used.
 
-### 3.6 [ŚREDNIE, język i interpretacja] Przesadne sformułowania
+### 3.6 [MEDIUM, language and interpretation] Overstated wording
 
-- **„World records” i „-23.3%” dla `f_{δ≥3}(5)`.** Porównanie dotyczy bound'u kubicznego (450). Nie wiadomo, czy istnieje osobny opublikowany bound dla δ≥3. Statusu literatury nie zweryfikowano poza abstraktem Garcíi (np. czy biblioteka gadżetów Garcíi zawiera gadżety niekubiczne).
-- **„Exact Phase Boundaries”, „mathematically impossible (a ≤ 13)”.** To prawda tylko wewnątrz jednej rodziny: baza TC, gadżety {H15, H8*, H7} i model minimów okien. Nie wynika z tego żadne ograniczenie dolne na f(5).
-- **„`a = 19` (n=362): min_viol = 5”, „n=344: min_viol=3”** to wyniki WalkSAT/PAWS, czyli heurystyki. Instancja jest malutka (30 pozycji × typ × 3 orientacje, 162 cykle bazowe), więc **SAT/ILP rozstrzygnąłby ją dokładnie w sekundy**. Pozostawienie `n = 354…362` jako „nierozwiązane heurystycznie” to stracona okazja na kolejną poprawę albo na pełny dowód optymalności w rodzinie.
-- **„Triple-certified”**: jeden z trzech weryfikatorów (C++ large) jest poza repo, a M4 (`cpp/sglab_cyclecheck.cpp`) obsługuje tylko `n ≤ 128`. Dla `n=345/370` M4 w ogóle nie brał udziału. Niezmiennik 3 nie zostaje naruszony, bo to nie są kontrprzykłady, ale słowo „certified” bez M4 jest niekonsekwentne z resztą projektu.
-- **Daty**: plik nazywa się `…_2026_11_27.md`, a commit pochodzi z 2026-11-26 21:33Z.
+- **"World records" and "-23.3%" for `f_{δ≥3}(5)`.** The comparison is against the cubic bound (450). It is not known whether a separate published bound exists for δ≥3. The literature status was not verified beyond García's abstract (e.g. whether García's gadget library contains non-cubic gadgets).
+- **"Exact Phase Boundaries", "mathematically impossible (a ≤ 13)".** True only within one family: TC base, gadgets {H15, H8*, H7} and the window-minimum model. No lower bound on f(5) follows.
+- **"`a = 19` (n=362): min_viol = 5", "n=344: min_viol=3"** are WalkSAT/PAWS results, i.e. heuristics. The instance is tiny (30 positions × type × 3 orientations, 162 base cycles), so **SAT/ILP would decide it exactly in seconds**. Leaving `n = 354…362` as "heuristically unresolved" is a missed opportunity for either a further improvement or a full optimality proof within the family.
+- **"Triple-certified"**: one of the three verifiers (C++ large) is outside the repo, and M4 (`cpp/sglab_cyclecheck.cpp`) only supports `n ≤ 128`. For `n=345/370` M4 was not involved at all. Invariant 3 is not violated, since these are not counterexamples, but the word "certified" without M4 is inconsistent with the rest of the project.
+- **Dates**: the file is named `…_2026_11_27.md`, while the commit is from 2026-11-26 21:33Z.
 
-### 3.7 [ŚREDNIE, kod] `rust/sglab-engine/src/large_verify.rs` (`verify-large`)
+### 3.7 [MEDIUM, code] `rust/sglab-engine/src/large_verify.rs` (`verify-large`)
 
-Algorytm jest **poprawny**. Kanoniczny start s = min, wszystkie ścieżki długości h do t przez wierzchołki > s, pary o rozłącznym wnętrzu w kubełku t to bijekcja z 2h-cyklami (h ≥ 2). Brak obcięcia nie psuje dokładności. Uwagi:
+The algorithm is **correct**. Canonical start s = min, all paths of length h to t through vertices > s, and pairs with disjoint interiors in bucket t form a bijection with 2h-cycles (h ≥ 2). The lack of pruning does not affect exactness. Remarks:
 
-1. **Martwy kod i mylący komentarz.** Odległości BFS (`dist`) są liczone, ale `dfs_half` ich nie używa. Komentarz twierdzi, że stosowane jest obcięcie `dist_gt_s[v] <= h`. Dokładność to zachowuje, ale dokumentacja kłamie, a liczba wyliczanych ścieżek jest pełna (dla C32 rzędu 3·2¹⁵ na start).
-2. **Świadek sprawdzany tylko przez `debug_assert`.** W buildzie release cykl FOUND nie jest weryfikowany krawędź po krawędzi.
-3. **`--lengths` po cichu pomija niepoprawne tokeny** (`filter_map(...ok())`). Literówka typu `4,8,16,3 2` zweryfikuje mniej długości bez błędu. Nieparzysta długość kończy się `assert!` (panic) zamiast błędu CLI. `from_graph6` nie odrzuca nadmiarowych bajtów.
-4. **Testy**: jeden test na Markström-24 (`n=24`) obejmuje tylko pierwsze słowo maski `[u64; 8]`. Nie ma testu dla `n > 64` (słowa 1–7), ani dla grafu z obecnym C32, ani porównania z referencyjnym DFS dla `n ∈ (128, 512]`, czyli dokładnie zakresu, dla którego narzędzie powstało. Dla obu certyfikatów lukę zamyka mój niezależny `cyc.c`, ale regresje w przyszłości pozostaną niewykryte.
+1. **Dead code and a misleading comment.** BFS distances (`dist`) are computed but `dfs_half` does not use them. The comment claims `dist_gt_s[v] <= h` pruning is applied. Exactness is preserved, but the documentation is false, and the number of enumerated paths is the full one (for C32 on the order of 3·2¹⁵ per start).
+2. **Witness checked only by `debug_assert`.** In a release build, a FOUND cycle is not verified edge by edge.
+3. **`--lengths` silently drops invalid tokens** (`filter_map(...ok())`). A typo such as `4,8,16,3 2` verifies fewer lengths without an error. An odd length ends in `assert!` (panic) instead of a CLI error. `from_graph6` does not reject surplus bytes.
+4. **Tests**: one test on Markström-24 (`n=24`) covers only the first word of the `[u64; 8]` mask. There is no test for `n > 64` (words 1–7), none for a graph with C32 present, and no comparison with a reference DFS for `n ∈ (128, 512]`, which is exactly the range the tool was built for. For both certificates the gap is closed by my independent `cyc.c`, but future regressions would go unnoticed.
 
-### 3.8 [NISKIE] Wave D2
+### 3.8 [LOW] Wave D2
 
-- **Niespójna tabela.** Sito Björklunda C32 miało być wołane tylko dla kandydatów `C4=C8=C16=0`, a wiersze `k33 × A4` itd. mają 0 takich kandydatów i jednocześnie wynik sita „FOUND”. Najwyraźniej sito szło po kandydatach `C4=C8=0`. Opis albo tabelę trzeba poprawić.
-- Sito jest **Monte Carlo** (fałszywe negatywy ≤ 5,2·10⁻⁷). Nadaje się do FOUND, ale nie wolno go używać do orzekania ABSENT. Obecnie tak nie jest używane, ale warto to zapisać jako regułę.
-- Cytowania „Burkhart Nov 2026” i „Zhuge n ≤ 68” nie zostały zweryfikowane. Należy podać identyfikatory arXiv.
+- **Inconsistent table.** The C32 Björklund sieve was supposed to be called only for `C4=C8=C16=0` candidates, yet rows `k33 × A4` etc. have 0 such candidates and a sieve result of "FOUND" at the same time. Apparently the sieve ran on `C4=C8=0` candidates. Either the description or the table needs fixing.
+- The sieve is **Monte Carlo** (false negatives ≤ 5.2·10⁻⁷). It is fine for FOUND, but must not be used to declare ABSENT. It is not currently used that way, but this should be written down as a rule.
+- The citations "Burkhart Nov 2026" and "Zhuge n ≤ 68" were not verified. arXiv identifiers should be given.
 
-### 3.9 [NISKIE, proces] Obowiązki dokumentacyjne z AGENTS.md
+### 3.9 [LOW, process] Documentation obligations from AGENTS.md
 
-- Nowe podkomendy CLI (`verify-large`, `lns-polish --rrt-slack/--bipartite`, `voltage-search`, `bjorklund-c32`) są opisane wyłącznie w `IMPLEMENTATION_STATUS.md`. Brakuje dokumentacji referencyjnej i architektonicznej oraz ADR dla nowej, trwałej ścieżki weryfikacji `n ≤ 512`.
-- Na ~5 000 nowych linii Rusta (D1–F) przypada 9 testów jednostkowych (`large_verify` 1, `lns` 1, `voltage_bipartite` 2, `cycles` 5).
-
----
-
-## 4. Wątpliwości decyzyjne
-
-1. **Kolejność „najpierw moc obliczeniowa, potem literatura”.** Kilka godzin 16-rdzeniowych kampanii poszło na problem rozstrzygnięty w 2017. Tani krok, przegląd literatury, powinien poprzedzać każdą kampanię „record hunt”.
-2. **Minimalizacja liczby C16 jako funkcja celu.** Ten sygnał nie przekłada się na wykonalność. Bardziej obiecujące są metody dokładne na małych przestrzeniach strukturalnych (gadżety × orientacje × baza), co Track 2 pokazał w praktyce: rekordy padły w milisekundach dzięki CSP, a nie dzięki dziesiątkom miliardów liści LNS.
-3. **Heurystyki (WalkSAT/PAWS) tam, gdzie wystarczy solver dokładny.** Dotyczy to `n=362`, `n=354`, `n=344`, `n=338` w rodzinie TC. Jeden przebieg SAT/ILP w każdym z tych przypadków albo poprawi rekord, albo da twierdzenie „optymalne w rodzinie”.
-4. **Wybór bazy.** Rozważano tylko TC (f5) i Petersena (f4). Inne bazy o talii 8/10 (Heawood × lift, grafy klatkowe, lify napięciowe) oraz mieszanki gadżetów (w tym H8* w kubicznej wersji, jeśli istnieje) nie zostały przeszukane w sposób dokładny.
-5. **Praca poza runtime projektu.** Wyniki nie przeszły przez kampanie, Directora ani SQLite, więc nie mają audytowalnej historii, której projekt wymaga w swoich niezmiennikach.
+- The new CLI subcommands (`verify-large`, `lns-polish --rrt-slack/--bipartite`, `voltage-search`, `bjorklund-c32`) are described only in `IMPLEMENTATION_STATUS.md`. Reference and architecture documentation is missing, as is an ADR for the new, durable `n ≤ 512` verification path.
+- ~5,000 new lines of Rust (D1–F) come with 9 unit tests (`large_verify` 1, `lns` 1, `voltage_bipartite` 2, `cycles` 5).
 
 ---
 
-## 5. Zalecane następne kroki (w kolejności)
+## 4. Decision concerns
 
-1. Zaimportować do repo źródła Track 2 i Wave E oraz brakujące certyfikaty (`n=77`, ewentualnie `n=74`/`n=76` jako „near-miss”) i surowe JSON-y.
-2. Dodać do `docs/00_RESEARCH_STATUS.md` Ripattiego 2017, Garcíę 2609.04686 (f(6) ≤ 32 640) i Exoo et al. 2511.07247 (n(3,17) ≤ 2048). Opisać status `f_cubic(4) = 78` (computationally).
-3. Erratum (nowym plikiem, bez przepisywania starych raportów): pigeonhole z Wave E, „unique/0 found” jako wyniki próbkowania, atrybucja 30 720, niespójność H8* „unique” vs „two types”, niespójność tabeli D2.
+1. **"Compute first, literature later" ordering.** Several hours of 16-core campaigns went into a problem settled in 2017. The cheap step, a literature review, should precede every "record hunt" campaign.
+2. **Minimizing the C16 count as the objective.** This signal does not translate into feasibility. Exact methods on small structural spaces (gadgets × orientations × base) are more promising, as Track 2 demonstrated in practice: the records fell in milliseconds thanks to CSP, not thanks to tens of billions of LNS leaves.
+3. **Heuristics (WalkSAT/PAWS) where an exact solver suffices.** This applies to `n=362`, `n=354`, `n=344`, `n=338` in the TC family. One SAT/ILP run per case would either improve the record or yield an "optimal within the family" theorem.
+4. **Choice of base.** Only TC (f5) and Petersen (f4) were considered. Other girth-8/10 bases (Heawood × lift, cage graphs, voltage lifts) and gadget mixes (including a cubic version of H8*, if one exists) were not searched exactly.
+5. **Work outside the project runtime.** The results did not pass through campaigns, the Director or SQLite, so they lack the auditable history the project's invariants require.
+
+---
+
+## 5. Recommended next steps (in order)
+
+1. Import the Track 2 and Wave E sources into the repo, plus the missing certificates (`n=77`, optionally `n=74`/`n=76` as "near-miss") and the raw JSON files.
+2. Add to `docs/00_RESEARCH_STATUS.md`: Ripatti 2017, García 2609.04686 (f(6) ≤ 32 640) and Exoo et al. 2511.07247 (n(3,17) ≤ 2048). Describe the status of `f_cubic(4) = 78` (computationally).
+3. Erratum (as a new file, without rewriting old reports): the Wave E pigeonhole, "unique/0 found" as sampling results, the 30 720 attribution, the H8* "unique" vs "two types" inconsistency, the D2 table inconsistency.
 4. `large_verify.rs`:
-   - użyć `dist` do obcięcia albo usunąć BFS i poprawić komentarz;
-   - weryfikować świadka w release;
-   - twardy błąd dla złych `--lengths`;
-   - testy dla `n ∈ {100, 300, 512}` z porównaniem do referencyjnego DFS (np. `cyc.c`) i z grafem, w którym C32 występuje.
-5. Gdy maszyna będzie wolna: dokładny SAT/ILP dla rodziny TC (`a = 18, 19` kubicznie; `n = 338…344` dla δ≥3) oraz wyczerpująca generacja gadżetów `n ≤ 13` (`geng`).
+   - use `dist` for pruning or remove the BFS and fix the comment;
+   - verify the witness in release builds;
+   - hard error for invalid `--lengths`;
+   - tests for `n ∈ {100, 300, 512}` against a reference DFS (e.g. `cyc.c`) and with a graph in which C32 occurs.
+5. When the machine is free: exact SAT/ILP for the TC family (`a = 18, 19` cubic; `n = 338…344` for δ≥3) and exhaustive gadget generation for `n ≤ 13` (`geng`).
 
 ---
 
-## 6. Odtworzenie weryfikacji z tego przeglądu
+## 6. Reproducing the verification from this review
 
 ```bash
 D=docs/reports/assets/review-2026-11-26; W=$(mktemp -d); cp $D/* $W; cd $W
-python3 g6.py ~/DEV/heg/docs/reports/certificates/*.g6     # stopnie, spójność, punkty artykulacji; zapisuje *.el
-gcc -O2 -o cyc cyc.c && ./cyc f5_cubic_n370_TC_20H15_10H7.g6.el 34   # ~5 s, 1 wątek
-python3 h8.py && gcc -O2 -o pet pet.c && ./pet                       # okna H8*, rodzina Petersena r=0..3
+python3 g6.py ~/DEV/heg/docs/reports/certificates/*.g6     # degrees, connectivity, articulation points; writes *.el
+gcc -O2 -o cyc cyc.c && ./cyc f5_cubic_n370_TC_20H15_10H7.g6.el 34   # ~5 s, 1 thread
+python3 h8.py && gcc -O2 -o pet pet.c && ./pet                       # H8* windows, Petersen family r=0..3
 ```
 
-## Źródła zewnętrzne (sprawdzone tylko na poziomie abstraktu)
+## External sources (checked at abstract level only)
 
 - A. V. Ripatti, *Faster approach for exhaustive search over graphs with certain properties*, BAIKAL 2017: https://isem.irk.ru/conferences/mopt2017/Abstracts/BAIKAL_2017_paper_138.pdf
 - D. Garcia, *Small graphs without power-of-two cycles…*, arXiv:2609.04686: https://arxiv.org/abs/2609.04686

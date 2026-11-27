@@ -1,65 +1,67 @@
-# Przegląd uzupełniający: weryfikacja poprawek po recenzji i raportu Phase R2 (2026-11-27)
+# Follow-Up Review: Verification of Post-Review Fixes and the Phase R2 Report (2026-11-27)
 
-- **Dotyczy**: `REVIEW_M6_WAVES_D_F_TRACK2_2026_11_26.md` → commity `6f67c6c` (remediation + erratum) i `ebddd39` (Phase R2).
-- **Ograniczenia**: maszyna nadal była zajęta, więc nie uruchamiano `cargo test`, `make test` ani 16-wątkowych solverów z `tools/extremal/`. Wykonano tylko lekkie, jednowątkowe sprawdzenia (`nice`).
-- **Nowe skrypty**: `docs/reports/assets/review-2026-11-26/hc.c` (niezależne lokalne przeszukiwanie gadżetów) i `enum_n7_gadgets.py` (wyczerpująca enumeracja n=7).
+> Polish original: [`REVIEW_FOLLOWUP_2026_11_27_pl.md`](REVIEW_FOLLOWUP_2026_11_27_pl.md). This English version is a translation with identical content.
 
-## 1. Status uwag z recenzji
+- **Concerns**: `REVIEW_M6_WAVES_D_F_TRACK2_2026_11_26.md` → commits `6f67c6c` (remediation + erratum) and `ebddd39` (Phase R2).
+- **Limitations**: the machine was still busy, so `cargo test`, `make test` and the 16-thread solvers in `tools/extremal/` were not run. Only light single-threaded checks were performed (`nice`).
+- **New scripts**: `docs/reports/assets/review-2026-11-26/hc.c` (independent local gadget search) and `enum_n7_gadgets.py` (exhaustive n=7 enumeration).
 
-| § | Uwaga | Status |
+## 1. Status of the review findings
+
+| § | Finding | Status |
 |---|---|---|
-| 3.1 | Ripatti 2017: kubiczne `n < 78` | ✅ Naprawione: `00_RESEARCH_STATUS.md` (zakaz takich kampanii), erratum §2.1 |
-| 3.2 | Narzędzia poza repo | 🟡 Częściowo. Źródła są w `tools/extremal/`, certyfikat `n=77` dodany i niezależnie potwierdzony (`cyc.c`: brak C4/C8/C16). **Ale**: `f5_h8star_solver.cpp:366`, `f5_girth8_bipartite_assault.cpp:350`, `test_h8star_petersen_f4.py:22` i `track2_certify_all_f5.py:25` mają na sztywno wpisane ścieżki do `~/.gemini/.../scratch`. Surowe JSON-y kampanii 1h/2h/Wave E nadal nie są w repo. |
-| 3.3 | „Unique/0 found” z próbkowania | ✅ Naprawione w erratum §2.3. Phase R2 dodał enumerację wyczerpującą (uwagi w §2) |
-| 3.4 | Błędny pigeonhole w Wave E | ✅ Wycofane w erratum §2.2 |
-| 3.5 | Atrybucja `f(6)` | ✅ Naprawione w erratum §2.4 i w statusie (32 640, arXiv:2511.07247 z XI 2025, bound warunkowy) |
-| 3.6 | Przesadne sformułowania, heurystyki zamiast solvera dokładnego | ✅ Erratum §2.5. Phase R2 rozstrzyga `n=338` i `n=354` solverem dokładnym |
-| 3.7.1 | Martwy BFS i mylący komentarz | ✅ Usunięte i poprawione |
-| 3.7.2 | Świadek tylko w `debug_assert` | ✅ `verify_witness_runtime` działa także w release |
-| 3.7.3 | `--lengths` i graph6 | ✅ Sprawdzone na zbudowanym binarium: `--lengths 4,8,1x` daje komunikat błędu i exit 2. Długość graph6 jest walidowana |
-| 3.7.4 | Testy `n > 64` | 🟡 Testy pokrywają słowa maski 1–7 i bit 511. Komentarze w teście są jednak nieprawdziwe („cubic graph”, „chords every 10th vertex”, „n = 100”): grafy to cykl `C_300`/`C_512` z 1–2 cięciwami, a `n=100` nie jest testowane. Brak testu ABSENT na gęstym grafie `n > 128` (np. na samym certyfikacie `n=370`) |
-| 3.8 | Tabela D2, sito Monte Carlo | ✅ Erratum §2.6 |
-| 3.9 | Dokumentacja referencyjna/architektoniczna, ADR | ❌ **Nie zrobione**: nowe podkomendy (`verify-large`, `lns-polish`, `voltage-search`, `bjorklund-c32`) nadal są opisane tylko w ledgerze i raportach |
+| 3.1 | Ripatti 2017: cubic `n < 78` | ✅ Fixed: `00_RESEARCH_STATUS.md` (such campaigns are now prohibited), erratum §2.1 |
+| 3.2 | Tools outside the repo | 🟡 Partially. Sources are in `tools/extremal/`, the `n=77` certificate was added and independently confirmed (`cyc.c`: no C4/C8/C16). **However**: `f5_h8star_solver.cpp:366`, `f5_girth8_bipartite_assault.cpp:350`, `test_h8star_petersen_f4.py:22` and `track2_certify_all_f5.py:25` hardcode paths into `~/.gemini/.../scratch`. Raw JSON files of the 1h/2h/Wave E campaigns are still not in the repo. |
+| 3.3 | "Unique/0 found" from sampling | ✅ Fixed in erratum §2.3. Phase R2 added exhaustive enumeration (remarks in §2) |
+| 3.4 | Wrong pigeonhole in Wave E | ✅ Retracted in erratum §2.2 |
+| 3.5 | `f(6)` attribution | ✅ Fixed in erratum §2.4 and in the status (32 640, arXiv:2511.07247 from Nov 2025, conditional bound) |
+| 3.6 | Overstated wording, heuristics instead of an exact solver | ✅ Erratum §2.5. Phase R2 decides `n=338` and `n=354` with an exact solver |
+| 3.7.1 | Dead BFS and misleading comment | ✅ Removed and fixed |
+| 3.7.2 | Witness only in `debug_assert` | ✅ `verify_witness_runtime` also runs in release |
+| 3.7.3 | `--lengths` and graph6 | ✅ Checked on the built binary: `--lengths 4,8,1x` gives an error message and exit 2. graph6 length is validated |
+| 3.7.4 | Tests for `n > 64` | 🟡 Tests cover mask words 1–7 and bit 511. However, the test comments are inaccurate ("cubic graph", "chords every 10th vertex", "n = 100"): the graphs are the cycle `C_300`/`C_512` with 1–2 chords, and `n=100` is not tested. There is no ABSENT test on a dense graph with `n > 128` (e.g. on the `n=370` certificate itself) |
+| 3.8 | D2 table, Monte Carlo sieve | ✅ Erratum §2.6 |
+| 3.9 | Reference/architecture documentation, ADR | ❌ **Not done**: the new subcommands (`verify-large`, `lns-polish`, `voltage-search`, `bjorklund-c32`) are still described only in the ledger and reports |
 
-## 2. Phase R2: co potwierdzono, a co budzi wątpliwości
+## 2. Phase R2: what was confirmed and what raises doubts
 
-### 2.1 Potwierdzone niezależnie
+### 2.1 Independently confirmed
 
-- **Drugi świadek `n=73`** (`Petersen_1U_9H8star`): `m=114`, `{3:64, 4:9}`, brak punktów artykulacji, brak C4/C8/C16 (`cyc.c`) ✅
-- **n=7: dokładnie dwa typy okien** (moja enumeracja wszystkich etykietowanych grafów, `enum_n7_gadgets.py`): `(2,2,2)` i `(2,2,3)`. **Wszystkie okna H7 są ciągłe**: `[2..6], [2..6], [3..6]`. Ma to znaczenie dla §2.3: model minimów okien jest dla rodziny `{H15, H8*, H7}` modelem dokładnym, a nie tylko relaksacją.
-- **„0 gadżetów {C4,C8}-free dla n=11–14”**: niezależne lokalne przeszukiwanie (`hc.c`, 400 restartów × 4000 zamian) nie znalazło żadnego gadżetu dla `(2,2,2,3⁸)`, `(2,2,2,3⁸,4)`, `(2,2,2,3¹⁰)` ani `(2,2,2,3¹⁰,4)` noPE. Kontrola pozytywna: ten sam program znajduje gadżet `n=7` i gadżet `n=15` typu H15 (okna 3/3/5) w ułamku sekundy. Wynik jest zgodny z R2, choć to tylko dowód empiryczny.
-- **Twierdzenie analityczne** `8a₁₅ − 4b₈ − 8c₇ ≥ 45` i wnioski z niego (`a ≥ 18` kubicznie, `a ≥ 14` dla δ≥3, `c ≤ 3` przy `a = 15`, co daje `n ≥ 342`) przeliczono ręcznie. Są poprawne.
+- **Second `n=73` witness** (`Petersen_1U_9H8star`): `m=114`, `{3:64, 4:9}`, no articulation points, no C4/C8/C16 (`cyc.c`) ✅
+- **n=7: exactly two window types** (my enumeration of all labeled graphs, `enum_n7_gadgets.py`): `(2,2,2)` and `(2,2,3)`. **All H7 windows are contiguous**: `[2..6], [2..6], [3..6]`. This matters for §2.3: for the `{H15, H8*, H7}` family the window-minimum model is an exact model, not merely a relaxation.
+- **"0 {C4,C8}-free gadgets for n=11–14"**: independent local search (`hc.c`, 400 restarts × 4000 switches) found no gadget for `(2,2,2,3⁸)`, `(2,2,2,3⁸,4)`, `(2,2,2,3¹⁰)` or `(2,2,2,3¹⁰,4)` noPE. Positive control: the same program finds an `n=7` gadget and an `n=15` gadget of type H15 (windows 3/3/5) in a fraction of a second. The result agrees with R2, though it is only empirical evidence.
+- **The analytic theorem** `8a₁₅ − 4b₈ − 8c₇ ≥ 45` and its consequences (`a ≥ 18` cubic, `a ≥ 14` for δ≥3, `c ≤ 3` at `a = 15`, giving `n ≥ 342`) were recomputed by hand. They are correct.
 
-### 2.2 Uwagi do `exhaustive_gadget_enum_deep.cpp` (klasyfikacja „100% exhaustive”)
+### 2.2 Remarks on `exhaustive_gadget_enum_deep.cpp` (the "100% exhaustive" classification)
 
-1. **Przycinanie C8 jest wyłączone dla krawędzi z portów** (`if (u >= np && creates_c8(...))`), a liść **nie ma końcowego testu C8** (testowane są tylko C16 i tylko dla `n ≥ 16`). Dla 3 portów to nieszkodliwe: 6 krawędzi portowych nie zamknie C8. **Dla 4 portów** cykl `p0–i–p1–j–p2–k–p3–l` składa się wyłącznie z 8 krawędzi portowych, a zamyka go krawędź dodana przy `u = 3 < np`, której nikt nie sprawdza. Klasyfikacja 4-portowa (`Q₁₁…Q₁₄`) może więc zawierać fałszywe „{C4,C8}-free” gadżety. Wystarczy dodać `has_cycle_len(n, rows, 8)` w liściu.
-2. **Pusta sygnatura**: `"3p n=14 2xdeg4 (2,2,2 + 9x3 + 4,4)"` ma sumę stopni 6+27+8 = **41 (nieparzystą)**, więc wynik „0” nic nie dowodzi.
-3. **Brakujące sygnatury** wobec tezy „among all cubic, 1×deg4, and 2×deg4 … up to n = 17, ONLY THREE ORDERS EXIST”: nie uruchomiono `n=13, 2×deg4` (`2,2,2,3⁸,4,4`, suma 38) ani `n=17, 2×deg4` (`2,2,2,3¹²,4,4`, suma 50). Wierzchołki stopnia ≥ 5 pojawiają się tylko dla `n ≤ 9`. Teza jest za szeroka.
-4. **Kolumna „{C4,C8}-free Leaves”** w tabeli R2 miesza dwie metryki. Dla `n ≤ 11` (część A, `exhaustive_gadget_enum.cpp`) to liście jedynie C4-free (np. 1170 dla `n=11`), a dla `n ≥ 12` (deep) to liście {C4,C8}-free. Stąd pozorna anomalia 1170 → 0 → 96.
-5. **Weryfikacja „against brute-force NO_SB at n = 7, 8, 9”** nie ma kodu w repo, więc nie da się jej odtworzyć. Moja enumeracja potwierdza tylko `n=7`. Argument za bezstratnością łamania symetrii (izolowane wierzchołki tej samej klasy są wymienne, wybiera się „prefiks”) uważam za poprawny.
+1. **C8 pruning is disabled for edges added from ports** (`if (u >= np && creates_c8(...))`), and the leaf has **no final C8 test** (only C16 is tested, and only for `n ≥ 16`). For 3 ports this is harmless: 6 port edges cannot close a C8. **For 4 ports**, the cycle `p0–i–p1–j–p2–k–p3–l` consists solely of 8 port edges and is closed by an edge added at `u = 3 < np`, which nobody checks. The 4-port classification (`Q₁₁…Q₁₄`) may therefore contain false "{C4,C8}-free" gadgets. Adding `has_cycle_len(n, rows, 8)` at the leaf is enough.
+2. **Vacuous signature**: `"3p n=14 2xdeg4 (2,2,2 + 9x3 + 4,4)"` has degree sum 6+27+8 = **41 (odd)**, so its "0" proves nothing.
+3. **Missing signatures** relative to the claim "among all cubic, 1×deg4, and 2×deg4 … up to n = 17, ONLY THREE ORDERS EXIST": `n=13, 2×deg4` (`2,2,2,3⁸,4,4`, sum 38) and `n=17, 2×deg4` (`2,2,2,3¹²,4,4`, sum 50) were not run. Vertices of degree ≥ 5 appear only for `n ≤ 9`. The claim is too broad.
+4. **The "{C4,C8}-free Leaves" column** in the R2 table mixes two metrics. For `n ≤ 11` (part A, `exhaustive_gadget_enum.cpp`) these are merely C4-free leaves (e.g. 1170 for `n=11`), while for `n ≥ 12` (deep) they are {C4,C8}-free leaves. Hence the apparent anomaly 1170 → 0 → 96.
+5. **The "against brute-force NO_SB at n = 7, 8, 9" check** has no code in the repo, so it cannot be reproduced. My enumeration confirms only `n=7`. I consider the losslessness argument for the symmetry breaking (isolated vertices of the same class are interchangeable; a "prefix" is chosen) to be correct.
 
-### 2.3 Uwagi do `tc_exact_optimality.cpp` (`PROVEN_UNSAT` dla `n=338` i `n=354`)
+### 2.3 Remarks on `tc_exact_optimality.cpp` (`PROVEN_UNSAT` for `n=338` and `n=354`)
 
-Logika jest poprawna:
-- ograniczenie przez slack: suma niezależnych dolnych ograniczeń nieujemnych składników tożsamości `Σ_C(sum_C − 25) = 16a − 8b − 16c − 90`;
-- `cycle_max_sum` jako górne ograniczenie;
-- łamanie symetrii (`v=0`, `p0=0`) jest bezstratne, bo TC jest 5-łukowo-przechodni, a stabilizator wierzchołka działa na sąsiadach jak S₃;
-- uwzględniono wszystkie 162 cykle (8 i 10), a dla `L ≥ 12` warunek zachodzi zawsze.
+The logic is correct:
+- slack bounding: the sum of independent lower bounds on non-negative terms of the identity `Σ_C(sum_C − 25) = 16a − 8b − 16c − 90`;
+- `cycle_max_sum` as an upper bound;
+- symmetry breaking (`v=0`, `p0=0`) is lossless because TC is 5-arc-transitive and the vertex stabilizer acts on the neighbors as S₃;
+- all 162 cycles (lengths 8 and 10) are included, and for `L ≥ 12` the condition always holds.
 
-Zastrzeżenia:
-1. **Utajona kruchość**: `assign_v` przerywa aktualizację w połowie listy cykli, a `unassign_to` cofa wszystkie cykle wierzchołka. Przy nieudanym przypisaniu w `dfs` stan zostałby uszkodzony (możliwe fałszywe UNSAT). Obecnie ta ścieżka się nie wykonuje, bo domena jest filtrowana tym samym testem, a w generowaniu zadań stany są kopiowane. To jednak pułapka przy każdej modyfikacji. Należy aktualizować wszystkie cykle przed zwróceniem `false` albo zapamiętywać liczbę zaktualizowanych.
-2. **Brak niezależnego potwierdzenia**: UNSAT pochodzi z jednego, autorskiego solvera, bez certyfikatu dowodu. Status „Complete & Independently Verified” w nagłówku R2 dotyczy certyfikatów grafów, a nie dowodów UNSAT. Rekomendacja: zakodować instancję jako SAT/ILP i rozstrzygnąć ją niezależnie (np. CaDiCaL z DRAT) — instancja ma 30 × 9 zmiennych i 162 ograniczenia.
-3. **Zakres**: „exact TC minimum [342, 345]” i „{362, 370}” obowiązują wyłącznie dla bazy TC i gadżetów `{H15, H8*, H7}`. Nie obejmują wierzchołków nierozwiniętych (`U`, jak w `Pet_1U`), gadżetów 4-portowych ani innych baz. Raport mówi to w jednym zdaniu, ale tytuł („Exact Optimality Theorems”) jest szerszy.
+Caveats:
+1. **Latent fragility**: `assign_v` aborts the update halfway through the cycle list, while `unassign_to` reverts all cycles of the vertex. A failed assignment inside `dfs` would corrupt the state (possible false UNSAT). This path is not currently executed, because the domain is filtered by the same test and states are copied during task generation. It is still a trap for any modification. Either update all cycles before returning `false`, or record how many were updated.
+2. **No independent confirmation**: UNSAT comes from a single in-house solver without a proof certificate. The "Complete & Independently Verified" status in the R2 header applies to the graph certificates, not to the UNSAT proofs. Recommendation: encode the instance as SAT/ILP and decide it independently (e.g. CaDiCaL with DRAT); the instance has 30 × 9 variables and 162 constraints.
+3. **Scope**: "exact TC minimum [342, 345]" and "{362, 370}" hold only for the TC base and gadgets `{H15, H8*, H7}`. They do not cover unexpanded vertices (`U`, as in `Pet_1U`), 4-port gadgets or other bases. The report says so in one sentence, but the title ("Exact Optimality Theorems") is broader.
 
-### 2.4 Pozostałe sformułowania R2
+### 2.4 Other R2 wording
 
-- §4 „larger bases cannot compensate” (bazy B₃₄…B₄₈) opiera się na minimalnych liczbach naruszeń z solvera heurystycznego, a nie na dowodzie. Należy pisać „nie znaleziono”.
-- W ledgerze (`IMPLEMENTATION_STATUS.md`, wpis Track 2) nadal stoi „unique … H8*”. Erratum to prostuje, a ledger jest chronologiczny, więc jest to akceptowalne.
+- §4 "larger bases cannot compensate" (bases B₃₄…B₄₈) rests on minimum violation counts from a heuristic solver, not on a proof. It should say "not found".
+- The ledger (`IMPLEMENTATION_STATUS.md`, Track 2 entry) still says "unique … H8*". The erratum corrects this, and the ledger is chronological, so this is acceptable.
 
-## 3. Zalecenia (krótko)
+## 3. Recommendations (short)
 
-1. Dodać końcowy test C8 w liściu `exhaustive_gadget_enum_deep.cpp`, uruchomić ponownie część 4-portową i brakujące sygnatury 3-portowe (`n=13`/`n=17` z 2×deg4), a pustą sygnaturę `n=14 2×deg4` usunąć.
-2. Zastąpić na sztywno wpisane ścieżki `~/.gemini/...` argumentami CLI lub ścieżkami względnymi w repo. Zaimportować surowe JSON-y kampanii albo podać ich hashe i lokalizację.
-3. Niezależnie zweryfikować UNSAT dla `n=338`/`n=354` (SAT + DRAT) i usunąć kruchość `assign_v`.
-4. Dodać dokumentację referencyjną nowych podkomend CLI. Rozważyć ADR dla ścieżki weryfikacji `n ≤ 512`.
-5. Poprawić komentarze w teście `large_verify.rs` i dodać test ABSENT na certyfikacie `n=370`.
+1. Add a final C8 test at the leaf in `exhaustive_gadget_enum_deep.cpp`, rerun the 4-port part and the missing 3-port signatures (`n=13`/`n=17` with 2×deg4), and remove the vacuous `n=14 2×deg4` signature.
+2. Replace the hardcoded `~/.gemini/...` paths with CLI arguments or repo-relative paths. Import the raw campaign JSON files or give their hashes and location.
+3. Independently verify UNSAT for `n=338`/`n=354` (SAT + DRAT) and remove the `assign_v` fragility.
+4. Add reference documentation for the new CLI subcommands. Consider an ADR for the `n ≤ 512` verification path.
+5. Fix the comments in the `large_verify.rs` test and add an ABSENT test on the `n=370` certificate.
