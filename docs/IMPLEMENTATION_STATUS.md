@@ -2,6 +2,12 @@
 
 Last implementation audit: **2026-11-27**.
 
+## Stage 2C: Certified 80-Vertex Lower Bound for Cubic Bipartite Counterexamples ($n \le 78$)
+
+- **Complete Two-Branch Zero-Oracle Certified Proof (`docs/reports/M6_STAGE2C_CUBIC_BIPARTITE_80_LOWER_BOUND_2026_11_27.md`, `docs/reports/data/stage2c_cubic_bipartite_n78_summary.json`)**: Proved that **every finite simple cubic bipartite graph on $n \le 78$ vertices contains a simple cycle of length $4$, $8$, or $16$**, advancing the cubic bipartite lower bound to **$n \ge 80$** (`+10` vertices over Zhuge `zenodo.21981786`, `+20` over Tranquilli `arXiv:2608.02675`) and establishing the strict three-way separation $f_{\delta \ge 3}(4) \le 73 < 78 = f_{\mathrm{cubic}}(4) < 80 \le f_{\mathrm{cubic,bip}}(4)$:
+  - **$C_6$ branch (`SIDE = 35..39`, `tools/extremal/cubic_bipartite_cert_gen.cpp`, `cubic_bipartite_cert_verify.cpp`)**: Byte-identical reproduction of immutable upstream Tranquilli commit `67adc92d` at `SIDE = 29, 34` and exact new runs through `SIDE = 39` ($n \le 78$: `6,292,996` states, `1,213,994,934` proposals, `completions = 0`), with 64-bit-safe zero-oracle static certificates verified `VERIFIED_OK` (`8.28 s` Orbit 1 + `43.18 s` Orbit 2).
+  - **Girth-$\ge 10$ branch (`V = 35..40`, `tools/extremal/cubic_bipartite_girth10_cert_gen.cpp`, `cubic_bipartite_girth10_cert_verify.cpp`, `cubic_bipartite_girth10_search.cpp`)**: Lossless 15-block / 31-point Moore-tree normalization (positive cage discovery verified at `V = 35` and exact embedding verified for all 3 $(3,10)$-cages) with zero-oracle static certificates `G10_VERIFIED_OK` through `V = 40` ($n \le 80$; `V = 39`: `83,749` states, `16,916,906` proposals, `0.464 s` verify).
+
 ## Stage 1 Certified Censuses, Unconditional $f_{\mathrm{cubic}}(6) \le 10{,}498$, and Exact Tutte–Coxeter DRAT Closure
 
 - **Batch Census Scanner (`rust/sglab-engine/src/batch_scan.rs`, `scan-batch` CLI) & Independent Python Witness Verifier (`tools/extremal/verify_witness_stream.py`)**: Zero-dependency Rust parallel scanner supporting `graph6`, `sparse6`, `psv-tsv` (quoted `|` CSV), and `conder-edges` up to `n <= 16,384` in `general` and `vertex-transitive` modes with mandatory release-mode cycle witness verification (`21/21` Rust release tests passing in `0.82 s`).

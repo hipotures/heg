@@ -1,0 +1,57 @@
+{
+  "date": "2026-11-27",
+  "theorem": "Every finite simple cubic bipartite graph on n <= 78 vertices contains a simple cycle of length 4, 8, or 16 (80-vertex lower bound for cubic bipartite Erdős–Gyárfás counterexamples).",
+  "separation_corollary": "f_{delta>=3}(4) <= 73 < 78 = f_cubic(4) < 80 <= f_{cubic,bip}(4)",
+  "hardware": "16-core AMD Ryzen 9 7950X3D, 121 GiB RAM",
+  "upstream_provenance": {
+    "repository": "https://github.com/floor-licker/erdos-gyarfas-cubic-bipartite",
+    "commit": "67adc92d31d5d1edfbd0a7b845dc232e31c412cd",
+    "triangle_root_universal_search_cpp_sha256": "e778648bc3d5b0a19c860bec1371a542c464652693c2cbc4c2cd5ef05f314f41",
+    "transcript_sha256_hpp_sha256": "bd04b4ac76d0e77733ff0badabcf5a89d3c20f0ad9977bbfb9733770349934a1"
+  },
+  "c6_branch_triangle_root": {
+    "SIDE_29_reproduction": {
+      "n_max": 58,
+      "orbit1": {"states": 1405, "attempted": 106964, "structural": 7184, "c8": 63526, "c16": 34850, "completions": 0, "transcript_sha256": "db17d0d30503871404b0027c13b05d31560bc2cea808959db4bb4d43c78117aa", "cert_sha256": "93487eeb8b8a292eaea8ccfadf9e881eee45301aca6cfaa59b11868fc2661f88", "verify_s": 0.004},
+      "orbit2": {"states": 20088, "attempted": 1655404, "structural": 113012, "c8": 1208473, "c16": 313832, "completions": 0, "transcript_sha256": "74747832e0d49f0a477037c74be2b95d4ef5568c0994d42babec85ec49710a39", "cert_sha256": "11c96946e18d0458662f1eafcbf1855fc06ffb865a57dffdadf374771f852b94", "verify_s": 0.056}
+    },
+    "SIDE_34_reproduction": {
+      "n_max": 68,
+      "orbit1": {"states": 23143, "attempted": 2972750, "structural": 180011, "c8": 1424785, "c16": 1344812, "completions": 0, "transcript_sha256": "db548be2919a7f8a8b28c5ded67aa622779dd3e22192ee8a2a1e065f8c07b4c5", "cert_sha256": "58e0c4478f295bf31e8fd974302521d87de2f6663e6490bea8eb39fe011837bf", "verify_s": 0.123},
+      "orbit2": {"states": 202602, "attempted": 25227209, "structural": 1432521, "c8": 15207779, "c16": 8384308, "completions": 0, "transcript_sha256": "c2e03a0f97ea3c649a5feaf4d4145b229da6f56aa31b8ebbdb8b769b18848607", "cert_sha256": "fc1ece955f6ff56e67bc8b280a1e2b807e0dd160c5b5364e96dfd4815531b401", "verify_s": 0.861}
+    },
+    "SIDE_35_n70": {
+      "n_max": 70,
+      "orbit1": {"states": 51974, "attempted": 7282166, "structural": 441386, "c8": 3199099, "c16": 3589708, "completions": 0, "transcript_sha256": "0edb1fc4152ac64df243f319ae0792dd498a8ad87764509d2b05a32abec020cf", "cert_sha256": "1c2f11dee29dfaad7c21d1712bb11a82de98323cab4af506f5ec1ed89dabd8f2", "verify_s": 0.318},
+      "orbit2": {"states": 353357, "attempted": 47941559, "structural": 2696312, "c8": 27114667, "c16": 17777224, "completions": 0, "transcript_sha256": "b372e68f14270eb26f1d3e08b8dc458bfeab4c5ae71bfd48f276ec1c3bb1ec59", "cert_sha256": "5f819f63bdd2d5b06c4ebffc71f1cca410b91e5231f3cb33fd2438eec55b66fb", "verify_s": 1.784}
+    },
+    "SIDE_36_n72": {
+      "n_max": 72,
+      "orbit1": {"states": 124156, "attempted": 19226880, "structural": 1143635, "c8": 7842578, "c16": 10116512, "completions": 0, "transcript_sha256": "390cb47cd8b36c8576c8aa0d6f5bbf3ac0686783c2a1c977fb80a33d2d87a20b", "cert_sha256": "55431bd07c533fad955cfd62c8c43d6c216a2917acfe58fef88fcc8f832b8978", "verify_s": 0.862},
+      "orbit2": {"states": 668892, "attempted": 101861979, "structural": 5645803, "c8": 53406071, "c16": 42141214, "completions": 0, "transcript_sha256": "e36e29b4c37c61e7c170528ba5690b64ae6825a34450f4e7e6924b3e7c4937c5", "cert_sha256": "589a35da5a8587479580a4cc77a89222a57d90742223518688e13fc3a704a0fc", "verify_s": 4.154}
+    },
+    "SIDE_37_n74": {
+      "n_max": 74,
+      "orbit1": {"states": 285211, "attempted": 49266630, "structural": 2807828, "c8": 19206519, "c16": 26967073, "completions": 0, "transcript_sha256": "7d2aea16f7e9ec45ccd7ab0ff1d004bca228d179ad4bb6848a6e61da869071c0", "cert_sha256": "1440496f5e85d2ceadb0472661e93d6f946fa7199950a6adafcd8fa821a8fbc9", "verify_s": 1.966},
+      "orbit2": {"states": 1309468, "attempted": 218961499, "structural": 11843561, "c8": 106438067, "c16": 99370404, "completions": 0, "transcript_sha256": "567634dd511521bd12e5b12c1cfd925968ebc7e5d0cc2227ae453dc21dafb50a", "cert_sha256": "a982aac56e5dceb6f06cfa9e8a73064e51461f5e53100cf59ce94b7b0bd29e6d", "verify_s": 8.176}
+    },
+    "SIDE_38_n76": {
+      "n_max": 76,
+      "orbit1": {"states": 559708, "attempted": 105850795, "structural": 5747022, "c8": 41003929, "c16": 58540137, "completions": 0, "transcript_sha256": "6b0c6c92434202fa68368971f1b617aed73502acccb7a0e426c1e21fb515b3ef", "cert_sha256": "487bc72d3c33a815d3eef3df41bf3a3868f5f59c2504eedee97318fc7ad727e0", "verify_s": 4.416},
+      "orbit2": {"states": 2548113, "attempted": 455592775, "structural": 24066426, "c8": 205201845, "c16": 223776392, "completions": 0, "transcript_sha256": "4ae017d1934927cd93374fea47a90688a8958da5cde31feefd1f63b1972a33c0", "cert_sha256": "7ef257cc344d6962272f2e337fa451400e25f3cfeb1dc26b9a9ced45d2368f9b", "verify_s": 17.286}
+    },
+    "SIDE_39_n78": {
+      "n_max": 78,
+      "orbit1": {"states": 1008841, "attempted": 202037309, "structural": 10544551, "c8": 80084898, "c16": 110399020, "completions": 0, "transcript_sha256": "a458091dd80b3c8da08d453d7677a0b98022c8beb8f206ce7484aea4d3f50323", "cert_sha256": "4fac39c4cb08c224643ec31477a90b1d7738afe1ba080f62dd81c82da0c67e18", "verify_s": 8.281},
+      "orbit2": {"states": 5284155, "attempted": 1011957625, "structural": 52747292, "c8": 423668139, "c16": 530258040, "completions": 0, "transcript_sha256": "45240fe226591053d65747212c6dc73e018ec8fc7421236152b544c372fd5cb3", "cert_sha256": "778b9d0acaf4f6f6351399d13607f11ae802c7c5ecd13b5d397c5f3429f7221e", "verify_s": 43.182}
+    }
+  },
+  "girth10_branch_moore_root": {
+    "V_35_n70": {"states": 28995, "attempted": 6416316, "structural": 334752, "c6": 1013910, "c8": 4217540, "c16": 821120, "completions": 0, "cert_sha256": "5304e520d5416113622f214841a59c042ffb2286df0983361bb0d3b2bfbefe54", "verify_s": 0.174},
+    "V_36_n72": {"states": 41571, "attempted": 8044454, "structural": 395768, "c6": 1150772, "c8": 5301400, "c16": 1154944, "completions": 0, "cert_sha256": "9c89a5f9d7ebfab51a5788a8e1c8accb86147cb62708d4c0a891ed986e1ac8ec", "verify_s": 0.225},
+    "V_37_n74": {"states": 55684, "attempted": 8406847, "structural": 407992, "c6": 1181052, "c8": 5521416, "c16": 1240704, "completions": 0, "cert_sha256": "667e05df523f3627f171f73f3ab2e097a4bd5c640c7655e04aa33856cb9d1b84", "verify_s": 0.247},
+    "V_38_n76": {"states": 69092, "attempted": 11408831, "structural": 544920, "c6": 2255036, "c8": 7044104, "c16": 1495680, "completions": 0, "cert_sha256": "55c9815f08af9b9784f12f06a87c247a944b7e1b5bff76f7a47a86c6cddaaf65", "verify_s": 0.314},
+    "V_39_n78": {"states": 83749, "attempted": 16916906, "structural": 768230, "c6": 4114728, "c8": 9884728, "c16": 2065472, "completions": 0, "cert_sha256": "aec3305b271e91decce4d2a84f513bb96b1e74b26ce3b3acfbabfafd34dc3a35", "verify_s": 0.464},
+    "V_40_n80": {"states": 99477, "attempted": 19929254, "structural": 875102, "c6": 5053904, "c8": 11441060, "c16": 2459712, "completions": 0, "cert_sha256": "ca3c50a428b1950e42fe14d84bab0e0fb86b1b02e83c06eb7a88cd1513166c48", "verify_s": 0.544}
+  }
+}

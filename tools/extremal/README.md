@@ -16,6 +16,8 @@ Self-contained C++17 and Python tools imported into the repository for full repr
 - `build_solvers.sh`: Local no-`sudo` build and DRAT self-test script for CaDiCaL `2.1.3`, official `drat-trim`, `check-drat`, and `sglab-cyclecheck-large` under `_build/solvers/`.
 - `verify_witness_stream.py`: Independent Python 1-to-1 witness-stream verifier for `sglab-rust-engine scan-batch` (`g6`, `s6`, `psv-tsv`, `conder-edges`).
 - `verify_high_girth_f6.py`: Exact all-pairs BFS girth verifier and verified 4-packing builder for high-girth cubic base graphs (`k3_g17_n2048.g6`, `k3_g16_n702.g6`).
+- `cubic_bipartite_cert_gen.cpp`, `cubic_bipartite_cert_verify.cpp`: 64-bit-safe (`SIDE <= 63`) zero-oracle static rejection-certificate generator and verifier for the $C_6$ (Berge-triangle) cubic bipartite branch (`EGCBTRI1`), independently certifying `SIDE = 35..39` ($n \le 70..78$, matching immutable upstream Tranquilli commit `67adc92d`).
+- `cubic_bipartite_girth10_search.cpp`, `cubic_bipartite_girth10_cert_gen.cpp`, `cubic_bipartite_girth10_cert_verify.cpp`: Exact 15-block Moore-tree enumerator and zero-oracle static certificate generator/verifier (`EGCBG101`) for the girth-$\ge 10$ cubic bipartite branch (`V = 35..40`, $n \le 70..80$).
 - `verify_symmetry_breaking.cpp`: Reproducible brute-force `NO_SB` vs `SB` cross-check at `n = 7, 8, 9` and 5,000-trial `creates_c8` validation.
 - `f5_girth8_bipartite_assault.cpp`: 16-core heuristic solver over bipartite girth-8 cubic bases `B_{34}..B_{48}`.
 - `petersen_4port_f4_solver.cpp`: Exact bitmask-convolution solver over 1-edge/2-edge Petersen contractions with 4-port gadgets (`Q_9..Q_{14}`) and 1-unexpanded Petersen (`Pet_1U_9H8`, 2nd certified `n = 73` witness).
